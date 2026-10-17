@@ -1,19 +1,22 @@
 'use client';
 
 import React, { useState } from 'react';
-import { X, Server, Link, Shield, CheckCircle2, AlertCircle } from 'lucide-react';
+import { X, Server, Link, Shield, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
 
 interface XtreamModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSavePlaylist: (data: {
-    type: 'xtream' | 'm3u';
-    name: string;
-    server_url: string;
-    username?: string;
-    password?: string;
-    m3u_url?: string;
-  }) => Promise<void>;
+  onSavePlaylist: (
+    data: {
+      type: 'xtream' | 'm3u';
+      name: string;
+      server_url: string;
+      username?: string;
+      password?: string;
+      m3u_url?: string;
+    },
+    onProgress: (step: string) => void
+  ) => Promise<void>;
 }
 
 export const XtreamModal: React.FC<XtreamModalProps> = ({ isOpen, onClose, onSavePlaylist }) => {
@@ -24,6 +27,7 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({ isOpen, onClose, onSav
   const [password, setPassword] = useState('');
   const [m3uUrl, setM3uUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [progressMessage, setProgressMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -32,35 +36,43 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({ isOpen, onClose, onSav
     e.preventDefault();
     setError(null);
     setIsLoading(true);
+    setProgressMessage('Initialisation de la connexion...');
 
     try {
       if (tab === 'xtream') {
         if (!serverUrl || !username || !password) {
-          throw new Error('Veuillez renseigner tous les champs Xtream.');
+          throw new Error('Veuillez renseigner tous les champs Xtream (Serveur, Identifiant, Mot de passe).');
         }
-        await onSavePlaylist({
-          type: 'xtream',
-          name: name.trim() || 'Mon Abonnement Xtream',
-          server_url: serverUrl.trim(),
-          username: username.trim(),
-          password: password.trim(),
-        });
+        await onSavePlaylist(
+          {
+            type: 'xtream',
+            name: name.trim() || 'Mon Abonnement Xtream',
+            server_url: serverUrl.trim(),
+            username: username.trim(),
+            password: password.trim(),
+          },
+          (step) => setProgressMessage(step)
+        );
       } else {
         if (!m3uUrl) {
-          throw new Error('Veuillez renseigner le lien M3U.');
+          throw new Error('Veuillez renseigner le lien URL M3U.');
         }
-        await onSavePlaylist({
-          type: 'm3u',
-          name: name.trim() || 'Ma Playlist M3U',
-          server_url: m3uUrl.trim(),
-          m3u_url: m3uUrl.trim(),
-        });
+        await onSavePlaylist(
+          {
+            type: 'm3u',
+            name: name.trim() || 'Ma Playlist M3U',
+            server_url: m3uUrl.trim(),
+            m3u_url: m3uUrl.trim(),
+          },
+          (step) => setProgressMessage(step)
+        );
       }
       onClose();
     } catch (err: any) {
       setError(err.message || 'Erreur lors de la configuration');
     } finally {
       setIsLoading(false);
+      setProgressMessage('');
     }
   };
 
@@ -188,21 +200,34 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({ isOpen, onClose, onSav
             </div>
           )}
 
+          {isLoading && (
+            <div className="p-3.5 bg-tv-focus/10 border border-tv-accent/30 rounded-xl flex items-center space-x-3 text-xs text-sky-200 animate-pulse">
+              <Loader2 className="w-5 h-5 text-tv-accent animate-spin flex-shrink-0" />
+              <div className="min-w-0 flex-1 font-medium">
+                {progressMessage}
+              </div>
+            </div>
+          )}
+
           <div className="pt-2 flex items-center justify-end space-x-3">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-white/5 transition"
+              disabled={isLoading}
+              className="px-4 py-2 rounded-xl text-sm font-medium text-slate-400 hover:text-white hover:bg-white/5 transition disabled:opacity-30"
             >
               Annuler
             </button>
             <button
               type="submit"
               disabled={isLoading}
-              className="px-5 py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-sm font-bold shadow-lg transition flex items-center space-x-2 disabled:opacity-50"
+              className="px-5 py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-sm font-bold shadow-lg transition flex items-center space-x-2 disabled:opacity-50"
             >
               {isLoading ? (
-                <span>Connexion en cours...</span>
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Importation...</span>
+                </>
               ) : (
                 <>
                   <CheckCircle2 className="w-4 h-4" />

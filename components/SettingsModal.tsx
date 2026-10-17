@@ -42,7 +42,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenSyncModal,
   onDeletePlaylist,
   onRestoreDemoPlaylist,
-  currentBuildNumber = 5,
+  currentBuildNumber = 6,
 }) => {
   const [activeTab, setActiveTab] = useState<'playlists' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
   const [checkingUpdate, setCheckingUpdate] = useState(false);

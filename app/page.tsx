@@ -14,6 +14,7 @@ import { SyncModal } from '@/components/SyncModal';
 import { CategoryDrawerModal } from '@/components/CategoryDrawerModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
+import { syncXtreamPlaylist, parseM3UPlaylist } from '@/lib/iptv-service';
 import { Star, Tv, Film, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square } from 'lucide-react';
 
 export default function KeoTVHome() {
@@ -231,57 +232,80 @@ export default function KeoTVHome() {
     onJumpToChannelNumber: handleJumpToChannelNumber,
   });
 
-  // Save new playlist (Xtream / M3U)
-  const handleSavePlaylist = async (data: any) => {
-    const newPlaylist: PlaylistConfig = {
-      id: 'pl_' + Date.now(),
-      name: data.name,
-      type: data.type,
-      server_url: data.server_url,
-      username: data.username,
-      password: data.password,
-      m3u_url: data.m3u_url,
-      status: 'active' as const,
-      channel_count: 1,
-      last_sync_at: new Date().toISOString(),
-    };
-    await db.playlists.add(newPlaylist);
-    setPlaylists((prev) => [...prev, newPlaylist]);
+  // Save & Synchronize new playlist (Xtream / M3U)
+  const handleSavePlaylist = async (
+    data: any,
+    onProgress: (step: string) => void
+  ) => {
+    let result: { playlist: PlaylistConfig; categories: Category[]; channels: Channel[] };
 
-    const newCat: Category = {
-      id: 'grp_xtream_' + Date.now(),
-      name: '🌐 ' + data.name,
-      type: 'live',
-      count: 1,
-      is_hidden: false,
-      custom_order: categories.length + 1,
-      icon: 'Tv',
-    };
-    await db.categories.add(newCat);
+    if (data.type === 'xtream') {
+      result = await syncXtreamPlaylist({
+        serverUrl: data.server_url,
+        username: data.username,
+        password: data.password,
+        name: data.name,
+        onProgress,
+      });
+    } else {
+      result = await parseM3UPlaylist({
+        m3uUrl: data.m3u_url || data.server_url,
+        name: data.name,
+        onProgress,
+      });
+    }
 
-    const newChannel: Channel = {
-      id: 'ch_xtream_' + Date.now(),
-      num: channels.length + 1,
-      name: data.name + ' Flux Test',
-      logo: '',
-      stream_url: data.server_url.includes('.m3u8')
-        ? data.server_url
-        : 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
-      stream_type: 'live',
-      group_id: newCat.id,
-      group_name: newCat.name,
-      is_favorite: false,
-      is_hidden: false,
-      custom_order: 1,
-      resolution: 'FHD',
-    };
-    await db.channels.add(newChannel);
+    onProgress(`Enregistrement de ${result.channels.length} chaînes dans la mémoire locale...`);
 
-    setCategories((prev) => [...prev, newCat]);
-    setChannels((prev) => [...prev, newChannel]);
-    setSelectedCategory(newCat);
-    setActiveChannel(newChannel);
-    setIsStopped(false);
+    // If only demo playlist existed, clear it to start clean with the user's real channels
+    const currentPlaylists = await db.playlists.toArray();
+    const hasOnlyDemo = currentPlaylists.length === 1 && currentPlaylists[0].id === 'pl_demo_default';
+    if (hasOnlyDemo) {
+      await db.playlists.delete('pl_demo_default');
+      await db.categories.clear();
+      await db.channels.clear();
+    }
+
+    // Save playlist config
+    await db.playlists.put(result.playlist);
+
+    // Save real categories and channels in Dexie
+    await db.categories.bulkPut(result.categories);
+    await db.channels.bulkPut(result.channels);
+
+    // Reload from Dexie
+    const loadedCats = await db.categories.orderBy('custom_order').toArray();
+    const loadedChannels = await db.channels.orderBy('num').toArray();
+    const loadedPlaylists = await db.playlists.toArray();
+
+    setCategories(loadedCats);
+    setChannels(loadedChannels);
+    setPlaylists(loadedPlaylists);
+
+    // Select first non-fav category
+    const firstCat = loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
+    if (firstCat) {
+      setSelectedCategory(firstCat);
+      setFocusedCategoryIndex(0);
+      setFocusedChannelIndex(0);
+    }
+
+    // Select first real channel
+    const firstChannel = result.channels[0];
+    if (firstChannel) {
+      setActiveChannel(firstChannel);
+      setCurrentEpg({
+        id: 'epg_' + firstChannel.id,
+        channel_id: firstChannel.id,
+        title: firstChannel.name + ' (En Direct)',
+        description: 'Flux en direct de ' + firstChannel.name,
+        start: new Date().toISOString(),
+        end: new Date(Date.now() + 7200000).toISOString(),
+        duration_min: 120,
+      });
+      setNextEpg(null);
+      setIsStopped(false);
+    }
   };
 
   // Delete playlist handler
@@ -690,7 +714,7 @@ export default function KeoTVHome() {
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
         onDeletePlaylist={handleDeletePlaylist}
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
-        currentBuildNumber={5}
+        currentBuildNumber={6}
       />
 
       <CategoryDrawerModal

@@ -65,7 +65,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       hlsRef.current = null;
     }
 
-    if (Hls.isSupported() && (streamUrl.includes('.m3u8') || streamUrl.includes('live-apple'))) {
+    const isDirectMp4 = streamUrl.endsWith('.mp4') || streamUrl.includes('.mp4?');
+
+    if (Hls.isSupported() && !isDirectMp4) {
       const hls = new Hls({
         enableWorker: true,
         lowLatencyMode: true,
@@ -95,13 +97,20 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
               hls.recoverMediaError();
               break;
             default:
-              setStreamError('Flux temporairement indisponible.');
+              console.warn('HLS fatal, fallbacking to native HTML5 video element:', data);
               hls.destroy();
+              hlsRef.current = null;
+              if (video) {
+                video.src = streamUrl;
+                video.play().catch(() => {
+                  setStreamError('Flux temporairement indisponible.');
+                });
+              }
               break;
           }
         }
       });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl') || streamUrl.includes('.mp4')) {
+    } else if (video.canPlayType('application/vnd.apple.mpegurl') || isDirectMp4) {
       video.src = streamUrl;
       video.play().catch(() => {
         video.muted = true;
