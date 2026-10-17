@@ -15,13 +15,18 @@ import { CategoryDrawerModal } from '@/components/CategoryDrawerModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
 import { syncXtreamPlaylist, parseM3UPlaylist } from '@/lib/iptv-service';
-import { Star, Tv, Film, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square } from 'lucide-react';
+import { Star, Tv, Film, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square, ArrowUpDown } from 'lucide-react';
 
 export default function KeoTVHome() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
   const [playlists, setPlaylists] = useState<PlaylistConfig[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
+  const [favCount, setFavCount] = useState<number>(0);
+
+  // Sorting preferences
+  const [categorySort, setCategorySort] = useState<'playlist' | 'alpha' | 'count'>('playlist');
+  const [channelSort, setChannelSort] = useState<'playlist' | 'alpha' | 'num'>('playlist');
 
   const [activePane, setActivePane] = useState<NavigationPane>('channels');
   const [focusedCategoryIndex, setFocusedCategoryIndex] = useState<number>(0);
@@ -42,10 +47,62 @@ export default function KeoTVHome() {
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
+  // Channel loader for the selected category from IndexedDB with sorting
+  const loadCategoryChannels = useCallback(
+    async (cat: Category | null, sortMode: 'playlist' | 'alpha' | 'num' = channelSort) => {
+      if (!cat) {
+        setChannels([]);
+        return;
+      }
+
+      try {
+        let rawList: Channel[] = [];
+        if (cat.id === 'fav') {
+          rawList = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
+        } else {
+          rawList = await db.channels.where('group_id').equals(cat.id).toArray();
+          // Fallback if ID was stored without 'grp_' prefix
+          if (rawList.length === 0) {
+            const altId = cat.id.startsWith('grp_') ? cat.id.replace('grp_', '') : `grp_${cat.id}`;
+            rawList = await db.channels.where('group_id').equals(altId).toArray();
+          }
+          // Secondary fallback: group_name match
+          if (rawList.length === 0 && cat.name) {
+            rawList = await db.channels.filter((c) => c.group_name === cat.name).toArray();
+          }
+        }
+
+        // Apply channel sort
+        let sorted = [...rawList];
+        if (sortMode === 'alpha') {
+          sorted.sort((a, b) =>
+            a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+          );
+        } else if (sortMode === 'num') {
+          sorted.sort((a, b) => (a.num || 0) - (b.num || 0));
+        } else {
+          // 'playlist' (strict default original order)
+          sorted.sort((a, b) => (a.custom_order || a.num || 0) - (b.custom_order || b.num || 0));
+        }
+
+        setChannels(sorted);
+      } catch (err) {
+        console.error('Error loading channels for category:', cat.id, err);
+        setChannels([]);
+      }
+    },
+    [channelSort]
+  );
+
   // 1. Initialize IndexedDB & Seed initial channels
   useEffect(() => {
     async function initDB() {
       try {
+        const savedCatSort = await getSetting<'playlist' | 'alpha' | 'count'>('category_sort', 'playlist');
+        const savedChSort = await getSetting<'playlist' | 'alpha' | 'num'>('channel_sort', 'playlist');
+        setCategorySort(savedCatSort);
+        setChannelSort(savedChSort);
+
         const chCount = await db.channels.count();
         const plCount = await db.playlists.count();
 
@@ -67,7 +124,6 @@ export default function KeoTVHome() {
           };
           await db.playlists.put(demoPlaylist);
         } else if (plCount === 0 && chCount >= 25) {
-          // If channels exist from previous build but playlist wasn't registered
           const demoPlaylist: PlaylistConfig = {
             id: 'pl_demo_default',
             name: 'Chaînes Démo Gratuites',
@@ -81,22 +137,30 @@ export default function KeoTVHome() {
         }
 
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
-        const loadedChannels = await db.channels.orderBy('num').toArray();
         const loadedPlaylists = await db.playlists.toArray();
+        const initialFavCount = await db.channels.filter((c) => Boolean(c.is_favorite)).count();
 
         setCategories(loadedCats);
-        setChannels(loadedChannels);
         setPlaylists(loadedPlaylists);
+        setFavCount(initialFavCount);
 
-        // Pick initial category (TNT by default)
-        const initialCat = loadedCats.find((c) => c.id === 'tnt') || loadedCats[0];
+        // Pick initial category: first non-fav category with count > 0 (or TNT if demo)
+        let initialCat = loadedCats.find((c) => c.id === 'tnt');
+        if (!initialCat) {
+          initialCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
+        }
+
         setSelectedCategory(initialCat || null);
 
+        if (initialCat) {
+          await loadCategoryChannels(initialCat, savedChSort);
+        }
+
         // Pick initial channel
-        const initialChannel = loadedChannels.find((ch) => ch.id === 'ch_tf1') || loadedChannels[0];
-        if (initialChannel) {
-          setActiveChannel(initialChannel);
-          const epg = getMockEpgForChannel(initialChannel.id);
+        const firstCh = (await db.channels.orderBy('num').first()) || null;
+        if (firstCh) {
+          setActiveChannel(firstCh);
+          const epg = getMockEpgForChannel(firstCh.id);
           setCurrentEpg(epg.current);
           setNextEpg(epg.next);
         }
@@ -113,29 +177,51 @@ export default function KeoTVHome() {
       }
     }
     initDB();
-  }, []);
+  }, [loadCategoryChannels]);
 
-  // Compute exact live counts for each category
-  const categoriesWithCounts = useMemo(() => {
-    return categories.map((cat) => {
-      let count = 0;
-      if (cat.id === 'fav') {
-        count = channels.filter((c) => c.is_favorite).length;
-      } else {
-        count = channels.filter((c) => c.group_id === cat.id).length;
-      }
-      return { ...cat, count };
-    });
-  }, [categories, channels]);
+  // Compute sorted categories based on user's preference (Playlist default, Alpha, or Count)
+  const sortedCategories = useMemo(() => {
+    const list = [...categories];
+    const favCat = list.find((c) => c.id === 'fav');
+    const otherCats = list.filter((c) => c.id !== 'fav');
 
-  // Filter channels according to the selected category
-  const filteredChannels = useMemo(() => {
-    if (!selectedCategory) return channels;
-    if (selectedCategory.id === 'fav') {
-      return channels.filter((ch) => ch.is_favorite);
+    if (categorySort === 'alpha') {
+      otherCats.sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
+      );
+    } else if (categorySort === 'count') {
+      otherCats.sort((a, b) => (b.count || 0) - (a.count || 0));
+    } else {
+      // 'playlist' (strict default order)
+      otherCats.sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0));
     }
-    return channels.filter((ch) => ch.group_id === selectedCategory.id);
-  }, [channels, selectedCategory]);
+
+    const result = favCat ? [favCat, ...otherCats] : otherCats;
+    return result.map((c) => {
+      if (c.id === 'fav') {
+        return { ...c, count: favCount };
+      }
+      return c;
+    });
+  }, [categories, categorySort, favCount]);
+
+  // Handle category sort change
+  const handleCategorySortChange = async (newSort: 'playlist' | 'alpha' | 'count') => {
+    setCategorySort(newSort);
+    await setSetting('category_sort', newSort);
+  };
+
+  // Handle channel sort change
+  const handleChannelSortChange = async (newSort: 'playlist' | 'alpha' | 'num') => {
+    setChannelSort(newSort);
+    await setSetting('channel_sort', newSort);
+    if (selectedCategory) {
+      loadCategoryChannels(selectedCategory, newSort);
+    }
+  };
+
+  // Filtered channels for currently active category
+  const filteredChannels = channels;
 
   // Update EPG info whenever focused channel changes
   useEffect(() => {
@@ -198,13 +284,22 @@ export default function KeoTVHome() {
         prev.map((c) => (c.id === ch.id ? { ...c, is_favorite: newFavoriteState } : c))
       );
 
+      // Recalculate favCount
+      const count = await db.channels.filter((c) => Boolean(c.is_favorite)).count();
+      setFavCount(count);
+
+      // If viewing favorites, reload to update the view
+      if (selectedCategory?.id === 'fav') {
+        loadCategoryChannels(selectedCategory, channelSort);
+      }
+
       // Auto-sync favorite to cloud if syncCode exists
       if (syncCode) {
-        const favIds = (await db.channels.where('is_favorite').equals(1).toArray()).map((c) => c.id);
+        const favIds = (await db.channels.filter((c) => Boolean(c.is_favorite)).toArray()).map((c) => c.id);
         pushSyncToCloud(syncCode, { favorites: favIds });
       }
     },
-    [filteredChannels, syncCode]
+    [filteredChannels, syncCode, selectedCategory, channelSort, loadCategoryChannels]
   );
 
   // Category selection
@@ -213,6 +308,7 @@ export default function KeoTVHome() {
     setFocusedCategoryIndex(index);
     setFocusedChannelIndex(0);
     setActivePane('channels');
+    loadCategoryChannels(cat, channelSort);
   };
 
   // Register remote control D-Pad keyboard events
@@ -220,7 +316,7 @@ export default function KeoTVHome() {
     activePane,
     setActivePane,
     channelCount: filteredChannels.length,
-    categoryCount: categoriesWithCounts.length,
+    categoryCount: sortedCategories.length,
     focusedCategoryIndex,
     setFocusedCategoryIndex,
     focusedChannelIndex,
@@ -232,7 +328,7 @@ export default function KeoTVHome() {
     onJumpToChannelNumber: handleJumpToChannelNumber,
   });
 
-  // Save & Synchronize new playlist (Xtream / M3U)
+  // Save & Synchronize new playlist (Xtream / M3U) with chunked bulkPut to support 50k+ channels
   const handleSavePlaylist = async (
     data: any,
     onProgress: (step: string) => void
@@ -257,37 +353,47 @@ export default function KeoTVHome() {
 
     onProgress(`Enregistrement de ${result.channels.length} chaînes dans la mémoire locale...`);
 
-    // If only demo playlist existed, clear it to start clean with the user's real channels
-    const currentPlaylists = await db.playlists.toArray();
-    const hasOnlyDemo = currentPlaylists.length === 1 && currentPlaylists[0].id === 'pl_demo_default';
-    if (hasOnlyDemo) {
-      await db.playlists.delete('pl_demo_default');
-      await db.categories.clear();
-      await db.channels.clear();
-    }
+    // Clean previous data to avoid duplicate or mixed playlists
+    await db.playlists.clear();
+    await db.categories.clear();
+    await db.channels.clear();
 
     // Save playlist config
     await db.playlists.put(result.playlist);
 
-    // Save real categories and channels in Dexie
+    // Save real categories in Dexie
     await db.categories.bulkPut(result.categories);
-    await db.channels.bulkPut(result.channels);
 
-    // Reload from Dexie
+    // Chunked channels save to prevent SQLite / IndexedDB transaction limits & memory errors
+    const CHUNK_SIZE = 1000;
+    for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
+      const chunk = result.channels.slice(i, i + CHUNK_SIZE);
+      await db.channels.bulkPut(chunk);
+      if (result.channels.length > 2000) {
+        const percent = Math.min(100, Math.round(((i + chunk.length) / result.channels.length) * 100));
+        onProgress(`Enregistrement local : ${percent}% (${i + chunk.length}/${result.channels.length} chaînes)...`);
+      }
+    }
+
+    // Reload categories from Dexie
     const loadedCats = await db.categories.orderBy('custom_order').toArray();
-    const loadedChannels = await db.channels.orderBy('num').toArray();
     const loadedPlaylists = await db.playlists.toArray();
 
     setCategories(loadedCats);
-    setChannels(loadedChannels);
     setPlaylists(loadedPlaylists);
+    setFavCount(0);
 
-    // Select first non-fav category
-    const firstCat = loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
+    // Pick first non-fav category with channels (count > 0)
+    let firstCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0);
+    if (!firstCat) {
+      firstCat = loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
+    }
+
     if (firstCat) {
       setSelectedCategory(firstCat);
       setFocusedCategoryIndex(0);
       setFocusedChannelIndex(0);
+      await loadCategoryChannels(firstCat, channelSort);
     }
 
     // Select first real channel
@@ -321,14 +427,18 @@ export default function KeoTVHome() {
       setChannels([]);
       setActiveChannel(null);
       setSelectedCategory(null);
+      setFavCount(0);
       setIsStopped(true);
     } else {
-      const remainingCats = await db.categories.toArray();
-      const remainingChannels = await db.channels.toArray();
+      const remainingCats = await db.categories.orderBy('custom_order').toArray();
       setCategories(remainingCats);
-      setChannels(remainingChannels);
-      if (remainingCats.length > 0 && (!selectedCategory || !remainingCats.some((c) => c.id === selectedCategory.id))) {
-        setSelectedCategory(remainingCats[0]);
+      const targetCat = remainingCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || remainingCats[0] || null;
+      setSelectedCategory(targetCat);
+      if (targetCat) {
+        await loadCategoryChannels(targetCat, channelSort);
+      } else {
+        setChannels([]);
+        setActiveChannel(null);
       }
     }
   };
@@ -352,17 +462,19 @@ export default function KeoTVHome() {
     await db.playlists.put(demoPlaylist);
 
     const loadedCats = await db.categories.orderBy('custom_order').toArray();
-    const loadedChannels = await db.channels.orderBy('num').toArray();
     const loadedPlaylists = await db.playlists.toArray();
 
     setCategories(loadedCats);
-    setChannels(loadedChannels);
     setPlaylists(loadedPlaylists);
+    setFavCount(0);
 
     const initialCat = loadedCats.find((c) => c.id === 'tnt') || loadedCats[0];
     setSelectedCategory(initialCat || null);
+    if (initialCat) {
+      await loadCategoryChannels(initialCat, channelSort);
+    }
 
-    const initialChannel = loadedChannels.find((ch) => ch.id === 'ch_tf1') || loadedChannels[0];
+    const initialChannel = INITIAL_CHANNELS.find((ch) => ch.id === 'ch_tf1') || INITIAL_CHANNELS[0];
     if (initialChannel) {
       setActiveChannel(initialChannel);
       const epg = getMockEpgForChannel(initialChannel.id);
@@ -382,8 +494,11 @@ export default function KeoTVHome() {
       for (const favId of data.favorites) {
         await db.channels.update(favId, { is_favorite: true });
       }
-      const updatedChannels = await db.channels.orderBy('num').toArray();
-      setChannels(updatedChannels);
+      if (selectedCategory) {
+        await loadCategoryChannels(selectedCategory, channelSort);
+      }
+      const count = await db.channels.filter((c) => Boolean(c.is_favorite)).count();
+      setFavCount(count);
     }
     await setSetting('sync_code', code);
     setSyncCode(code);
@@ -392,11 +507,11 @@ export default function KeoTVHome() {
 
   const handleForceSync = async () => {
     if (!syncCode) return;
-    const favs = (await db.channels.where('is_favorite').equals(1).toArray()).map((c) => c.id);
-    const playlists = await db.playlists.toArray();
+    const favs = (await db.channels.filter((c) => Boolean(c.is_favorite)).toArray()).map((c) => c.id);
+    const plList = await db.playlists.toArray();
     await pushSyncToCloud(syncCode, {
       favorites: favs,
-      playlists: playlists,
+      playlists: plList,
     });
   };
 
@@ -489,30 +604,57 @@ export default function KeoTVHome() {
           </div>
         </div>
 
-        {/* Category Header & Drawer Opener */}
+        {/* Category Header & Quick Channel Sort Bar */}
         <div className="px-3 py-1.5 bg-tv-surface/90 border-b border-tv-border flex items-center justify-between flex-shrink-0">
           <button
             onClick={() => setIsCategoryModalOpen(true)}
-            className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-left transition"
+            className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-left transition min-w-0 mr-2"
           >
             <Layers className="w-4 h-4 text-tv-accent flex-shrink-0" />
-            <span className="text-xs font-bold text-white truncate max-w-[190px]">
+            <span className="text-xs font-bold text-white truncate max-w-[130px]">
               {selectedCategory?.name || 'Groupes'}
             </span>
-            <span className="text-[10px] text-slate-400 font-mono">
+            <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">
               ({filteredChannels.length})
             </span>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-1" />
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-0.5 flex-shrink-0" />
           </button>
 
-          <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
-            {filteredChannels.length} chaînes
-          </span>
+          {/* Quick channel sort buttons */}
+          <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-lg border border-white/5 text-[10px] flex-shrink-0">
+            <button
+              onClick={() => handleChannelSortChange('playlist')}
+              className={`px-2 py-0.5 rounded font-semibold transition ${
+                channelSort === 'playlist' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+              }`}
+              title="Ordre Playlist (défaut)"
+            >
+              Playlist
+            </button>
+            <button
+              onClick={() => handleChannelSortChange('alpha')}
+              className={`px-2 py-0.5 rounded font-semibold transition ${
+                channelSort === 'alpha' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+              }`}
+              title="Alphabétique A à Z"
+            >
+              A-Z
+            </button>
+            <button
+              onClick={() => handleChannelSortChange('num')}
+              className={`px-2 py-0.5 rounded font-semibold transition ${
+                channelSort === 'num' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+              }`}
+              title="Numéro de chaîne"
+            >
+              N°
+            </button>
+          </div>
         </div>
 
         {/* Horizontal Category Pills */}
         <div className="flex items-center space-x-2 px-3 py-2 bg-tv-surface/40 border-b border-tv-border overflow-x-auto scrollbar-none flex-shrink-0">
-          {categoriesWithCounts.map((cat, idx) => {
+          {sortedCategories.map((cat, idx) => {
             const isSelected = selectedCategory?.id === cat.id;
             return (
               <button
@@ -560,10 +702,21 @@ export default function KeoTVHome() {
                     <span className={`text-xs font-mono font-bold w-6 text-right ${isActive ? 'text-tv-accent' : 'text-slate-500'}`}>
                       {ch.num}
                     </span>
-                    <div className="w-9 h-9 rounded-lg bg-black/40 border border-white/5 flex items-center justify-center flex-shrink-0">
-                      <span className="text-[11px] font-bold text-slate-200">
-                        {ch.name.slice(0, 3)}
-                      </span>
+                    <div className="w-10 h-10 rounded-lg bg-black/40 border border-white/5 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                      {ch.logo ? (
+                        <img
+                          src={ch.logo}
+                          alt={ch.name}
+                          className="w-full h-full object-contain p-1"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      ) : (
+                        <span className="text-xs font-bold text-slate-400">
+                          {ch.name.slice(0, 3)}
+                        </span>
+                      )}
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center space-x-2">
@@ -601,8 +754,13 @@ export default function KeoTVHome() {
           <button
             onClick={() => {
               setActiveSection('live');
-              const tntCat = categoriesWithCounts.find((c) => c.id === 'tnt');
-              if (tntCat) handleSelectCategory(tntCat, 1);
+              const targetCat = (selectedCategory && selectedCategory.id !== 'fav')
+                ? selectedCategory
+                : (sortedCategories.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || sortedCategories[0]);
+              if (targetCat) {
+                const targetIdx = sortedCategories.findIndex((c) => c.id === targetCat.id);
+                handleSelectCategory(targetCat, targetIdx !== -1 ? targetIdx : 0);
+              }
             }}
             className={`flex flex-col items-center justify-center flex-1 py-1 ${activeSection === 'live' ? 'text-tv-accent' : 'text-slate-400'}`}
           >
@@ -620,7 +778,7 @@ export default function KeoTVHome() {
 
           <button
             onClick={() => {
-              const favCat = categoriesWithCounts.find((c) => c.id === 'fav');
+              const favCat = sortedCategories.find((c) => c.id === 'fav');
               if (favCat) handleSelectCategory(favCat, 0);
             }}
             className={`flex flex-col items-center justify-center flex-1 py-1 ${selectedCategory?.id === 'fav' ? 'text-amber-400' : 'text-slate-400'}`}
@@ -631,16 +789,22 @@ export default function KeoTVHome() {
 
           <button
             onClick={() => {
-              const cinemaCat = categoriesWithCounts.find((c) => c.id === 'cinema');
-              if (cinemaCat) handleSelectCategory(cinemaCat, 3);
+              const cinemaCat = sortedCategories.find((c) =>
+                c.id.includes('cinema') || c.id.includes('film') || c.id.includes('movie') ||
+                c.name.toLowerCase().includes('cinema') || c.name.toLowerCase().includes('film')
+              ) || sortedCategories[1];
+              if (cinemaCat) {
+                const idx = sortedCategories.findIndex((c) => c.id === cinemaCat.id);
+                handleSelectCategory(cinemaCat, idx !== -1 ? idx : 0);
+              }
             }}
-            className={`flex flex-col items-center justify-center flex-1 py-1 ${selectedCategory?.id === 'cinema' ? 'text-purple-400' : 'text-slate-400'}`}
+            className={`flex flex-col items-center justify-center flex-1 py-1 ${selectedCategory?.name?.toLowerCase().includes('film') || selectedCategory?.name?.toLowerCase().includes('cinema') ? 'text-purple-400' : 'text-slate-400'}`}
           >
             <Film className="w-4 h-4" />
             <span className="text-[10px] mt-0.5">Films</span>
           </button>
 
-          {/* PARAMETRES BUTTON (replaces the '+' button) */}
+          {/* PARAMETRES BUTTON */}
           <button
             onClick={() => setIsSettingsModalOpen(true)}
             className="flex flex-col items-center justify-center flex-1 py-1 text-slate-400 hover:text-tv-accent"
@@ -678,7 +842,7 @@ export default function KeoTVHome() {
           />
 
           <TVGuide
-            categories={categoriesWithCounts}
+            categories={sortedCategories}
             channels={filteredChannels}
             selectedCategory={selectedCategory}
             focusedCategoryIndex={focusedCategoryIndex}
@@ -698,6 +862,10 @@ export default function KeoTVHome() {
             onToggleFullscreen={() => setIsFullscreen(true)}
             isStopped={isStopped}
             onTogglePlayStop={() => setIsStopped(!isStopped)}
+            categorySort={categorySort}
+            onCategorySortChange={handleCategorySortChange}
+            channelSort={channelSort}
+            onChannelSortChange={handleChannelSortChange}
           />
         </div>
       </div>
@@ -714,15 +882,21 @@ export default function KeoTVHome() {
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
         onDeletePlaylist={handleDeletePlaylist}
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
-        currentBuildNumber={6}
+        currentBuildNumber={7}
+        categorySort={categorySort}
+        onCategorySortChange={handleCategorySortChange}
+        channelSort={channelSort}
+        onChannelSortChange={handleChannelSortChange}
       />
 
       <CategoryDrawerModal
         isOpen={isCategoryModalOpen}
         onClose={() => setIsCategoryModalOpen(false)}
-        categories={categoriesWithCounts}
+        categories={sortedCategories}
         selectedCategory={selectedCategory}
         onSelectCategory={handleSelectCategory}
+        categorySort={categorySort}
+        onCategorySortChange={handleCategorySortChange}
       />
 
       <XtreamModal

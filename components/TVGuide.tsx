@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { Channel, Category, EpgProgram, NavigationPane } from '@/types/iptv';
-import { Star, Tv, Trophy, Film, Globe, Compass, Sparkles, Clock, Radio, Info } from 'lucide-react';
+import { Star, Tv, Trophy, Film, Globe, Compass, Sparkles, Clock, Radio, Info, ArrowUpDown } from 'lucide-react';
 import { LiveVideoPlayer } from './LiveVideoPlayer';
 
 interface TVGuideProps {
@@ -23,6 +23,10 @@ interface TVGuideProps {
   onToggleFullscreen: () => void;
   isStopped?: boolean;
   onTogglePlayStop?: () => void;
+  categorySort?: 'playlist' | 'alpha' | 'count';
+  onCategorySortChange?: (sort: 'playlist' | 'alpha' | 'count') => void;
+  channelSort?: 'playlist' | 'alpha' | 'num';
+  onChannelSortChange?: (sort: 'playlist' | 'alpha' | 'num') => void;
 }
 
 export const TVGuide: React.FC<TVGuideProps> = ({
@@ -41,6 +45,10 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   onToggleFullscreen,
   isStopped,
   onTogglePlayStop,
+  categorySort = 'playlist',
+  onCategorySortChange,
+  channelSort = 'playlist',
+  onChannelSortChange,
 }) => {
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
@@ -93,15 +101,48 @@ export const TVGuide: React.FC<TVGuideProps> = ({
       {/* 1. CATEGORIES COLUMN */}
       <div
         ref={categoryListRef}
-        className={`w-52 xl:w-60 border-r border-tv-border flex flex-col py-3 overflow-y-auto overflow-x-hidden flex-shrink-0 transition-colors ${
+        className={`w-56 xl:w-64 border-r border-tv-border flex flex-col py-2.5 overflow-y-auto overflow-x-hidden flex-shrink-0 transition-colors ${
           activePane === 'categories' ? 'bg-tv-surface/90' : 'bg-tv-surface/40'
         }`}
       >
-        <div className="px-4 pb-2 mb-1 flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider">
-          <span>Groupes</span>
-          <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400">
-            {categories.length}
-          </span>
+        <div className="px-3 pb-2 mb-1 flex flex-col space-y-1.5 border-b border-tv-border/50">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider">
+            <span>Groupes</span>
+            <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">
+              {categories.length}
+            </span>
+          </div>
+          {onCategorySortChange && (
+            <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-md border border-white/5 text-[10px]">
+              <button
+                onClick={() => onCategorySortChange('playlist')}
+                className={`flex-1 py-0.5 rounded font-semibold transition text-center ${
+                  categorySort === 'playlist' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Ordre Playlist par défaut"
+              >
+                Playlist
+              </button>
+              <button
+                onClick={() => onCategorySortChange('alpha')}
+                className={`flex-1 py-0.5 rounded font-semibold transition text-center ${
+                  categorySort === 'alpha' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Ordre alphabétique"
+              >
+                A-Z
+              </button>
+              <button
+                onClick={() => onCategorySortChange('count')}
+                className={`flex-1 py-0.5 rounded font-semibold transition text-center ${
+                  categorySort === 'count' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Trier par nombre de chaînes"
+              >
+                Nbr
+              </button>
+            </div>
+          )}
         </div>
 
         {categories.map((cat, idx) => {
@@ -139,15 +180,50 @@ export const TVGuide: React.FC<TVGuideProps> = ({
       {/* 2. CHANNELS LIST COLUMN */}
       <div
         ref={channelListRef}
-        className={`flex-1 min-w-[280px] border-r border-tv-border flex flex-col py-3 overflow-y-auto overflow-x-hidden transition-colors ${
+        className={`flex-1 min-w-[280px] border-r border-tv-border flex flex-col py-2.5 overflow-y-auto overflow-x-hidden transition-colors ${
           activePane === 'channels' ? 'bg-tv-bg' : 'bg-tv-bg/80'
         }`}
       >
-        <div className="px-4 pb-2 mb-1 flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider">
-          <span className="truncate">{selectedCategory?.name || 'Chaînes en direct'}</span>
-          <span className="text-[11px] text-slate-500 font-mono ml-2 flex-shrink-0">
-            {channels.length} chaînes
-          </span>
+        <div className="px-3 pb-2 mb-1 flex items-center justify-between border-b border-tv-border/50">
+          <div className="min-w-0 flex-1 mr-2">
+            <span className="truncate block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+              {selectedCategory?.name || 'Chaînes en direct'}
+            </span>
+            <span className="text-[10px] text-slate-500 font-mono">
+              {channels.length} chaînes
+            </span>
+          </div>
+          {onChannelSortChange && (
+            <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-md border border-white/5 text-[10px] flex-shrink-0">
+              <button
+                onClick={() => onChannelSortChange('playlist')}
+                className={`px-2 py-0.5 rounded font-semibold transition ${
+                  channelSort === 'playlist' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Ordre de la playlist par défaut"
+              >
+                Playlist
+              </button>
+              <button
+                onClick={() => onChannelSortChange('alpha')}
+                className={`px-2 py-0.5 rounded font-semibold transition ${
+                  channelSort === 'alpha' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Alphabétique A à Z"
+              >
+                A-Z
+              </button>
+              <button
+                onClick={() => onChannelSortChange('num')}
+                className={`px-2 py-0.5 rounded font-semibold transition ${
+                  channelSort === 'num' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                }`}
+                title="Numéro de chaîne"
+              >
+                N°
+              </button>
+            </div>
+          )}
         </div>
 
         {channels.length === 0 ? (
@@ -181,20 +257,29 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                   >
                     {ch.num}
                   </span>
-
-                  <div className="w-8 h-8 rounded-lg bg-black/40 border border-white/5 flex items-center justify-center flex-shrink-0">
-                    <span className="text-[10px] font-bold text-slate-300">
-                      {ch.name.slice(0, 3)}
-                    </span>
+                  <div className="w-10 h-10 rounded-lg bg-black/40 border border-white/5 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    {ch.logo ? (
+                      <img
+                        src={ch.logo}
+                        alt={ch.name}
+                        className="w-full h-full object-contain p-1"
+                        onError={(e) => {
+                          (e.target as HTMLElement).style.display = 'none';
+                        }}
+                      />
+                    ) : (
+                      <span className="text-xs font-bold text-slate-400">
+                        {ch.name.slice(0, 3)}
+                      </span>
+                    )}
                   </div>
-
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center space-x-2">
-                      <h4 className="text-sm font-semibold truncate leading-tight">
+                      <h4 className="text-sm font-semibold truncate text-white">
                         {ch.name}
                       </h4>
                       {ch.resolution && (
-                        <span className="text-[10px] bg-sky-500/10 text-tv-accent border border-sky-500/20 px-1 rounded font-mono font-bold flex-shrink-0">
+                        <span className="text-[9px] bg-sky-500/10 text-tv-accent border border-sky-500/20 px-1 rounded font-bold font-mono">
                           {ch.resolution}
                         </span>
                       )}

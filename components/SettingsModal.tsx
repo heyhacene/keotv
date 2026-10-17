@@ -31,6 +31,10 @@ interface SettingsModalProps {
   onDeletePlaylist: (id: string) => Promise<void>;
   onRestoreDemoPlaylist: () => Promise<void>;
   currentBuildNumber?: number;
+  categorySort?: 'playlist' | 'alpha' | 'count';
+  onCategorySortChange?: (sort: 'playlist' | 'alpha' | 'count') => void;
+  channelSort?: 'playlist' | 'alpha' | 'num';
+  onChannelSortChange?: (sort: 'playlist' | 'alpha' | 'num') => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -42,7 +46,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenSyncModal,
   onDeletePlaylist,
   onRestoreDemoPlaylist,
-  currentBuildNumber = 6,
+  currentBuildNumber = 7,
+  categorySort = 'playlist',
+  onCategorySortChange,
+  channelSort = 'playlist',
+  onChannelSortChange,
 }) => {
   const [activeTab, setActiveTab] = useState<'playlists' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -172,7 +180,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             }`}
           >
             <Sliders className="w-4 h-4" />
-            <span>Lecteur</span>
+            <span>Affichage & Tri</span>
           </button>
 
           <button
@@ -376,7 +384,104 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {activeTab === 'player' && (
             <div className="space-y-4">
               <div>
-                <h3 className="text-sm font-bold text-white">Paramètres du Lecteur Vidéo</h3>
+                <h3 className="text-sm font-bold text-white">Ordre d&apos;affichage & Tri des listes</h3>
+                <p className="text-xs text-slate-400">
+                  Configurez le classement par défaut de vos groupes et de vos chaînes.
+                </p>
+              </div>
+
+              {/* Category Sort Preference */}
+              <div className="p-3.5 bg-tv-card/60 rounded-xl border border-tv-border space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-white block">Tri des Groupes / Catégories</span>
+                    <span className="text-[11px] text-slate-400 block">Ordre d&apos;apparition dans le guide et le tiroir</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => onCategorySortChange?.('playlist')}
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center ${
+                      categorySort === 'playlist'
+                        ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                        : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                    }`}
+                  >
+                    Ordre Playlist (Défaut)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onCategorySortChange?.('alpha')}
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center ${
+                      categorySort === 'alpha'
+                        ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                        : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                    }`}
+                  >
+                    Alphabétique (A-Z)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onCategorySortChange?.('count')}
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center ${
+                      categorySort === 'count'
+                        ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                        : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                    }`}
+                  >
+                    Par Nb Chaînes
+                  </button>
+                </div>
+              </div>
+
+              {/* Channel Sort Preference */}
+              <div className="p-3.5 bg-tv-card/60 rounded-xl border border-tv-border space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-white block">Tri des Chaînes dans chaque groupe</span>
+                    <span className="text-[11px] text-slate-400 block">Ordre d&apos;apparition des chaînes</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => onChannelSortChange?.('playlist')}
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center ${
+                      channelSort === 'playlist'
+                        ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                        : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                    }`}
+                  >
+                    Ordre Playlist (Défaut)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChannelSortChange?.('alpha')}
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center ${
+                      channelSort === 'alpha'
+                        ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                        : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                    }`}
+                  >
+                    Alphabétique (A-Z)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChannelSortChange?.('num')}
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center ${
+                      channelSort === 'num'
+                        ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                        : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                    }`}
+                  >
+                    Par N° de Chaîne
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-bold text-white mt-4">Paramètres du Lecteur Vidéo</h3>
                 <p className="text-xs text-slate-400">Optimisez la fluidité et le zapping selon votre connexion.</p>
               </div>
 

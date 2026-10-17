@@ -1,6 +1,25 @@
 import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { Channel, Category, PlaylistConfig } from '@/types/iptv';
 
+// Safe helper to convert any response (array, stringified JSON, or PHP associative object) into an array
+export function toArray<T = any>(data: any): T[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (typeof data === 'string') {
+    try {
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) return parsed;
+      if (typeof parsed === 'object' && parsed !== null) return Object.values(parsed);
+    } catch {
+      return [];
+    }
+  }
+  if (typeof data === 'object') {
+    return Object.values(data);
+  }
+  return [];
+}
+
 // Universal HTTP fetcher that bypasses CORS on Android TV / Mobile using Capacitor Native HTTP
 export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'json'): Promise<any> {
   const cleanUrl = url.trim();
@@ -72,6 +91,21 @@ export function detectResolution(name: string): '4K' | 'FHD' | 'HD' | 'SD' {
   return 'HD';
 }
 
+// Extract attributes from M3U #EXTINF tags (handles double quotes, single quotes, or unquoted values)
+export function extractAttribute(line: string, attrName: string): string {
+  const doubleQuote = new RegExp(`${attrName}="([^"]*)"`, 'i');
+  const singleQuote = new RegExp(`${attrName}='([^']*)'`, 'i');
+  const noQuote = new RegExp(`${attrName}=([^\\s,]+)`, 'i');
+
+  const m1 = line.match(doubleQuote);
+  if (m1) return m1[1].trim();
+  const m2 = line.match(singleQuote);
+  if (m2) return m2[1].trim();
+  const m3 = line.match(noQuote);
+  if (m3) return m3[1].trim();
+  return '';
+}
+
 export interface XtreamSyncParams {
   serverUrl: string;
   username: string;
@@ -125,7 +159,7 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
   let rawCategories: any[] = [];
   try {
     const res = await fetchHttp(catUrl, 'json');
-    rawCategories = Array.isArray(res) ? res : (typeof res === 'string' ? JSON.parse(res) : []);
+    rawCategories = toArray(res);
   } catch (err) {
     console.warn('Could not fetch categories directly, will generate from stream groups:', err);
   }
@@ -136,7 +170,7 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
   let rawStreams: any[] = [];
   try {
     const res = await fetchHttp(streamsUrl, 'json');
-    rawStreams = Array.isArray(res) ? res : (typeof res === 'string' ? JSON.parse(res) : []);
+    rawStreams = toArray(res);
   } catch (err: any) {
     throw new Error(`Erreur lors du téléchargement des chaînes : ${err.message}`);
   }
@@ -145,55 +179,65 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     throw new Error('Le serveur Xtream n’a renvoyé aucune chaîne en direct pour cet abonnement.');
   }
 
-  onProgress?.(`Étape 3/3 : Formatage et enregistrement local de ${rawStreams.length} chaînes...`);
+  onProgress?.(`Étape 3/3 : Traitement de ${rawStreams.length} chaînes...`);
 
   // Build category dictionary
   const categoryMap = new Map<string, string>();
   for (const c of rawCategories) {
-    if (c.category_id && c.category_name) {
-      categoryMap.set(String(c.category_id), String(c.category_name).trim());
+    if (c && c.category_id !== undefined && c.category_id !== null) {
+      const idStr = String(c.category_id).trim();
+      const nameStr = c.category_name ? String(c.category_name).trim() : `Bouquet ${idStr}`;
+      categoryMap.set(idStr, nameStr);
     }
   }
 
-  // Count channels per category
+  // Count channels per category and format channel objects
   const categoryCounts = new Map<string, number>();
   const channels: Channel[] = [];
-
   const playlistId = 'pl_xtream_' + Date.now();
 
   for (let i = 0; i < rawStreams.length; i++) {
     const item = rawStreams[i];
-    const catId = item.category_id ? String(item.category_id) : 'other';
-    const catName = categoryMap.get(catId) || 'Autres Chaînes';
+    if (!item) continue;
 
-    categoryCounts.set(catId, (categoryCounts.get(catId) || 0) + 1);
+    let rawCatId = item.category_id;
+    if ((rawCatId === undefined || rawCatId === null || rawCatId === '') && Array.isArray(item.category_ids) && item.category_ids.length > 0) {
+      rawCatId = item.category_ids[0];
+    }
+    const catIdStr = rawCatId !== undefined && rawCatId !== null && String(rawCatId).trim() !== ''
+      ? String(rawCatId).trim()
+      : 'other';
 
-    const streamId = item.stream_id || item.id || i + 1;
+    const catName = categoryMap.get(catIdStr) || (catIdStr === 'other' ? 'Autres Chaînes' : `Bouquet ${catIdStr}`);
+    categoryCounts.set(catIdStr, (categoryCounts.get(catIdStr) || 0) + 1);
+
+    const streamId = item.stream_id || item.id || (i + 1);
     // Standard Xtream live stream URL (HLS / m3u8)
     const streamUrl = `${server}/live/${username}/${password}/${streamId}.m3u8`;
+    const chNum = typeof item.num === 'number' && item.num > 0 ? item.num : (i + 1);
 
     channels.push({
       id: `ch_xtream_${streamId}`,
-      num: i + 1,
+      num: chNum,
       name: item.name ? String(item.name).trim() : `Chaîne ${i + 1}`,
       logo: item.stream_icon ? String(item.stream_icon).trim() : '',
       stream_url: streamUrl,
       stream_type: 'live',
-      group_id: `grp_${catId}`,
+      group_id: `grp_${catIdStr}`,
       group_name: catName,
-      epg_id: item.epg_channel_id ? String(item.epg_channel_id) : undefined,
+      epg_id: item.epg_channel_id ? String(item.epg_channel_id).trim() : undefined,
       is_favorite: false,
       is_hidden: false,
-      custom_order: i + 1,
+      custom_order: i + 1, // Strict playlist stream order
       resolution: detectResolution(item.name || ''),
     });
   }
 
-  // Build Category list
+  // Build Categories preserving the exact bouquet order from Xtream
   const categories: Category[] = [];
   let orderIndex = 0;
 
-  // Add favorite category if not already present
+  // Add favorite category at the top
   categories.push({
     id: 'fav',
     name: '★ Mes Favoris',
@@ -204,10 +248,20 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     icon: 'Star',
   });
 
-  categoryCounts.forEach((count, catId) => {
-    const catName = categoryMap.get(catId) || (catId === 'other' ? 'Autres Chaînes' : `Bouquet ${catId}`);
+  const seenCatIds = new Set<string>();
+
+  // 1. Maintain STRICT original order of rawCategories
+  for (const rawCat of rawCategories) {
+    if (!rawCat || rawCat.category_id === undefined || rawCat.category_id === null) continue;
+    const catIdStr = String(rawCat.category_id).trim();
+    if (seenCatIds.has(catIdStr)) continue;
+    seenCatIds.add(catIdStr);
+
+    const catName = rawCat.category_name ? String(rawCat.category_name).trim() : `Bouquet ${catIdStr}`;
+    const count = categoryCounts.get(catIdStr) || 0;
+
     categories.push({
-      id: `grp_${catId}`,
+      id: `grp_${catIdStr}`,
       name: catName,
       type: 'live',
       count: count,
@@ -215,6 +269,23 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
       custom_order: orderIndex++,
       icon: detectCategoryIcon(catName),
     });
+  }
+
+  // 2. Add any groups from streams that were not present in rawCategories (e.g. 'other')
+  categoryCounts.forEach((count, catIdStr) => {
+    if (!seenCatIds.has(catIdStr)) {
+      seenCatIds.add(catIdStr);
+      const catName = catIdStr === 'other' ? 'Autres Chaînes' : `Groupe ${catIdStr}`;
+      categories.push({
+        id: `grp_${catIdStr}`,
+        name: catName,
+        type: 'live',
+        count: count,
+        is_hidden: false,
+        custom_order: orderIndex++,
+        icon: detectCategoryIcon(catName),
+      });
+    }
   });
 
   const playlist: PlaylistConfig = {
@@ -265,6 +336,8 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
   const lines = content.split(/\r?\n/);
   const channels: Channel[] = [];
   const categoryCounts = new Map<string, number>();
+  const groupOrder: { id: string; name: string }[] = [];
+  const seenGroupIds = new Set<string>();
 
   let currentExtInf: {
     name: string;
@@ -278,21 +351,14 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
     if (!line) continue;
 
     if (line.startsWith('#EXTINF:')) {
-      // Extract tvg-logo
-      const logoMatch = line.match(/tvg-logo="([^"]*)"/i);
-      const logo = logoMatch ? logoMatch[1] : '';
+      const logo = extractAttribute(line, 'tvg-logo');
+      const group = extractAttribute(line, 'group-title') || 'Général';
+      const epgId = extractAttribute(line, 'tvg-id') || undefined;
 
-      // Extract group-title
-      const groupMatch = line.match(/group-title="([^"]*)"/i);
-      const group = groupMatch && groupMatch[1].trim() ? groupMatch[1].trim() : 'Général';
-
-      // Extract tvg-id
-      const idMatch = line.match(/tvg-id="([^"]*)"/i);
-      const epgId = idMatch ? idMatch[1] : undefined;
-
-      // Extract channel name (after last comma)
-      const commaIdx = line.lastIndexOf(',');
-      const chName = commaIdx !== -1 ? line.slice(commaIdx + 1).trim() : 'Chaîne ' + (channels.length + 1);
+      const commaIdx = line.indexOf(',');
+      const chName = commaIdx !== -1 && commaIdx < line.length - 1
+        ? line.slice(commaIdx + 1).trim()
+        : (extractAttribute(line, 'tvg-name') || `Chaîne ${channels.length + 1}`);
 
       currentExtInf = {
         name: chName,
@@ -305,6 +371,11 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
       const streamUrl = line;
       const groupName = currentExtInf.group;
       const groupId = 'grp_' + groupName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+
+      if (!seenGroupIds.has(groupId)) {
+        seenGroupIds.add(groupId);
+        groupOrder.push({ id: groupId, name: groupName });
+      }
 
       categoryCounts.set(groupId, (categoryCounts.get(groupId) || 0) + 1);
 
@@ -320,7 +391,7 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
         epg_id: currentExtInf.epgId,
         is_favorite: false,
         is_hidden: false,
-        custom_order: channels.length + 1,
+        custom_order: channels.length + 1, // Strict appearance order
         resolution: detectResolution(currentExtInf.name),
       });
 
@@ -332,9 +403,9 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
     throw new Error('Aucun flux vidéo exploitable n’a pu être extrait de ce lien M3U.');
   }
 
-  onProgress?.(`Étape 3/3 : Enregistrement local de ${channels.length} chaînes...`);
+  onProgress?.(`Étape 3/3 : Préparation de ${channels.length} chaînes...`);
 
-  // Build Categories
+  // Build Categories in exact order of appearance in M3U file
   const categories: Category[] = [];
   let orderIndex = 0;
 
@@ -348,20 +419,16 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
     icon: 'Star',
   });
 
-  const processedGroups = new Set<string>();
-  for (const ch of channels) {
-    if (!processedGroups.has(ch.group_id)) {
-      processedGroups.add(ch.group_id);
-      categories.push({
-        id: ch.group_id,
-        name: ch.group_name,
-        type: 'live',
-        count: categoryCounts.get(ch.group_id) || 1,
-        is_hidden: false,
-        custom_order: orderIndex++,
-        icon: detectCategoryIcon(ch.group_name),
-      });
-    }
+  for (const grp of groupOrder) {
+    categories.push({
+      id: grp.id,
+      name: grp.name,
+      type: 'live',
+      count: categoryCounts.get(grp.id) || 0,
+      is_hidden: false,
+      custom_order: orderIndex++,
+      icon: detectCategoryIcon(grp.name),
+    });
   }
 
   const playlist: PlaylistConfig = {
