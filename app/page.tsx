@@ -12,6 +12,7 @@ import { LiveVideoPlayer } from '@/components/LiveVideoPlayer';
 import { XtreamModal } from '@/components/XtreamModal';
 import { SyncModal } from '@/components/SyncModal';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
+import { Star, Tv, Film, Clapperboard, PlusCircle, RefreshCw, Trophy, Globe, Compass, Sparkles, Maximize2 } from 'lucide-react';
 
 export default function KeoTVHome() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -192,7 +193,6 @@ export default function KeoTVHome() {
     };
     await db.playlists.add(newPlaylist);
 
-    // If Xtream Codes: Add placeholder / demo group and simulate sync
     const newCat: Category = {
       id: 'grp_xtream_' + Date.now(),
       name: '🌐 ' + data.name,
@@ -232,7 +232,6 @@ export default function KeoTVHome() {
     const data = await pullSyncFromCloud(code);
     if (!data) return false;
 
-    // Apply favorites
     if (data.favorites && data.favorites.length > 0) {
       await db.channels.toCollection().modify({ is_favorite: false });
       for (const favId of data.favorites) {
@@ -256,82 +255,262 @@ export default function KeoTVHome() {
     });
   };
 
+  const getCategoryIcon = (iconName?: string) => {
+    switch (iconName) {
+      case 'Star':
+        return <Star className="w-3.5 h-3.5 text-amber-400" />;
+      case 'Trophy':
+        return <Trophy className="w-3.5 h-3.5 text-rose-400" />;
+      case 'Film':
+        return <Film className="w-3.5 h-3.5 text-purple-400" />;
+      case 'Globe':
+        return <Globe className="w-3.5 h-3.5 text-emerald-400" />;
+      case 'Compass':
+        return <Compass className="w-3.5 h-3.5 text-indigo-400" />;
+      default:
+        return <Tv className="w-3.5 h-3.5 text-sky-400" />;
+    }
+  };
+
   return (
-    <main className="h-screen w-screen flex flex-col bg-tv-bg overflow-hidden font-tv select-none">
-      {/* Top Bar Header */}
-      <TopBar
-        currentCategoryName={selectedCategory?.name}
-        onToggleFullscreen={() => setIsFullscreen(true)}
-      />
+    <main className="h-screen w-screen flex flex-col bg-tv-bg overflow-hidden font-tv select-none text-slate-100">
+      {/* ============================================================== */}
+      {/* 1. MOBILE VIEW (Visible on Portrait / Small Screens < 1024px)  */}
+      {/* ============================================================== */}
+      <div className="flex lg:hidden flex-col h-full w-full bg-tv-bg overflow-hidden">
+        {/* Top Video Player */}
+        <div className="w-full aspect-video bg-black flex-shrink-0 relative">
+          <LiveVideoPlayer
+            channel={activeChannel}
+            currentEpg={currentEpg}
+            nextEpg={nextEpg}
+            isFullscreen={false}
+            onToggleFullscreen={() => setIsFullscreen(true)}
+          />
+        </div>
 
-      {/* Main TV Layout (Sidebar + Guide + Preview Player) */}
-      <div className="flex-1 flex overflow-hidden">
-        {/* Leftmost Sidebar */}
-        <NavigationSidebar
-          activeSection={activeSection}
-          onSelectSection={setActiveSection}
-          activePane={activePane}
-          onOpenSyncModal={() => setIsSyncModalOpen(true)}
-          onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
-        />
-
-        {/* Center: TV Guide (Categories + Channels + EPG description) */}
-        <TVGuide
-          categories={categories}
-          channels={filteredChannels}
-          selectedCategory={selectedCategory}
-          focusedCategoryIndex={focusedCategoryIndex}
-          focusedChannelIndex={focusedChannelIndex}
-          activeChannel={activeChannel}
-          currentEpg={currentEpg}
-          nextEpg={nextEpg}
-          activePane={activePane}
-          onSelectCategory={handleSelectCategory}
-          onSelectChannel={(ch, idx) => {
-            setFocusedChannelIndex(idx);
-            handleSelectChannel(idx, false);
-          }}
-          onToggleFavorite={handleToggleFavorite}
-          onOpenSyncModal={() => setIsSyncModalOpen(true)}
-          onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
-        />
-
-        {/* Embedded Preview Player (Top-Right / Right Pane) */}
-        <div className="hidden xl:flex w-80 2xl:w-96 border-l border-tv-border bg-black/40 p-4 flex-col justify-between">
-          <div className="w-full aspect-video rounded-xl overflow-hidden shadow-2xl border border-tv-border bg-black">
-            <LiveVideoPlayer
-              channel={activeChannel}
-              currentEpg={currentEpg}
-              nextEpg={nextEpg}
-              isFullscreen={false}
-              onToggleFullscreen={() => setIsFullscreen(true)}
-            />
-          </div>
-
-          <div className="bg-tv-card/40 p-4 rounded-xl border border-tv-border/40 mt-4 flex-1 flex flex-col justify-between">
-            <div>
-              <div className="text-xs uppercase font-bold text-tv-accent tracking-wider mb-1">
-                Aperçu en direct
-              </div>
-              <p className="text-sm font-bold text-white truncate">
-                {activeChannel?.name || 'Aucune chaîne active'}
-              </p>
-              <p className="text-xs text-slate-400 mt-1 line-clamp-3">
-                {currentEpg?.description || 'Sélectionnez une chaîne dans la liste pour démarrer la lecture instantanée.'}
-              </p>
+        {/* Channel quick info bar under video */}
+        <div className="px-4 py-2 bg-tv-surface border-b border-tv-border flex items-center justify-between flex-shrink-0">
+          <div className="min-w-0 flex-1 mr-2">
+            <div className="flex items-center space-x-2">
+              <span className="text-xs font-mono font-bold text-tv-accent">
+                #{activeChannel?.num}
+              </span>
+              <h3 className="text-sm font-bold text-white truncate">
+                {activeChannel?.name}
+              </h3>
+              {activeChannel?.resolution && (
+                <span className="text-[9px] bg-sky-500/10 text-tv-accent border border-sky-500/20 px-1 rounded font-bold font-mono flex-shrink-0">
+                  {activeChannel.resolution}
+                </span>
+              )}
             </div>
-
+            <p className="text-xs text-slate-300 truncate mt-0.5">
+              {currentEpg?.title || 'Programme en direct'}
+            </p>
+          </div>
+          <div className="flex items-center space-x-1">
+            <button
+              onClick={() => activeChannel && handleToggleFavorite(activeChannel)}
+              className="p-1.5 text-slate-400 hover:text-amber-400 transition"
+              title="Favori"
+            >
+              <Star className={`w-5 h-5 ${activeChannel?.is_favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
+            </button>
             <button
               onClick={() => setIsFullscreen(true)}
-              className="w-full py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition shadow-lg mt-4"
+              className="p-1.5 text-slate-300 hover:text-white transition"
+              title="Plein écran"
             >
-              Passer en plein écran (Entrée)
+              <Maximize2 className="w-5 h-5 text-tv-accent" />
             </button>
           </div>
         </div>
+
+        {/* Horizontal Category Pills */}
+        <div className="flex items-center space-x-2 px-3 py-2 bg-tv-surface/60 border-b border-tv-border overflow-x-auto scrollbar-none flex-shrink-0">
+          {categories.map((cat, idx) => {
+            const isSelected = selectedCategory?.id === cat.id;
+            return (
+              <button
+                key={cat.id}
+                onClick={() => handleSelectCategory(cat, idx)}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                  isSelected
+                    ? 'bg-tv-focus text-white shadow-md'
+                    : 'bg-tv-card text-slate-400 hover:text-white border border-tv-border/60'
+                }`}
+              >
+                {getCategoryIcon(cat.icon)}
+                <span>{cat.name}</span>
+                <span className="text-[10px] opacity-75">({cat.count})</span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Full-width Channel List */}
+        <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
+          {filteredChannels.length === 0 ? (
+            <div className="py-12 text-center text-slate-500 text-xs">
+              Aucune chaîne dans cette catégorie.
+            </div>
+          ) : (
+            filteredChannels.map((ch, idx) => {
+              const isActive = activeChannel?.id === ch.id;
+              const chEpg = getMockEpgForChannel(ch.id);
+
+              return (
+                <div
+                  key={ch.id}
+                  onClick={() => {
+                    setFocusedChannelIndex(idx);
+                    handleSelectChannel(idx, false);
+                  }}
+                  className={`flex items-center justify-between p-3 rounded-xl border transition ${
+                    isActive
+                      ? 'bg-tv-card border-tv-accent shadow-md'
+                      : 'bg-tv-card/50 border-tv-border/50 text-slate-300 hover:bg-tv-cardHover'
+                  }`}
+                >
+                  <div className="flex items-center space-x-3 min-w-0 flex-1">
+                    <span className={`text-xs font-mono font-bold w-6 text-right ${isActive ? 'text-tv-accent' : 'text-slate-500'}`}>
+                      {ch.num}
+                    </span>
+                    <div className="w-9 h-9 rounded-lg bg-black/40 border border-white/5 flex items-center justify-center flex-shrink-0">
+                      <span className="text-[11px] font-bold text-slate-200">
+                        {ch.name.slice(0, 3)}
+                      </span>
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center space-x-2">
+                        <h4 className="text-sm font-semibold truncate text-white">
+                          {ch.name}
+                        </h4>
+                        {ch.resolution && (
+                          <span className="text-[9px] bg-sky-500/10 text-tv-accent border border-sky-500/20 px-1 rounded font-bold font-mono">
+                            {ch.resolution}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-400 truncate mt-0.5">
+                        {chEpg.current.title}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleToggleFavorite(ch);
+                    }}
+                    className="p-2 text-slate-400 hover:text-amber-400 flex-shrink-0 ml-1"
+                  >
+                    <Star className={`w-4 h-4 ${ch.is_favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Mobile Bottom Navigation Bar */}
+        <div className="h-14 bg-tv-surface border-t border-tv-border flex items-center justify-around px-2 flex-shrink-0">
+          <button
+            onClick={() => setActiveSection('live')}
+            className={`flex flex-col items-center justify-center flex-1 py-1 ${activeSection === 'live' ? 'text-tv-accent' : 'text-slate-400'}`}
+          >
+            <Tv className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Direct</span>
+          </button>
+          <button
+            onClick={() => setActiveSection('movies')}
+            className={`flex flex-col items-center justify-center flex-1 py-1 ${activeSection === 'movies' ? 'text-tv-accent' : 'text-slate-400'}`}
+          >
+            <Film className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Films</span>
+          </button>
+          <button
+            onClick={() => setActiveSection('series')}
+            className={`flex flex-col items-center justify-center flex-1 py-1 ${activeSection === 'series' ? 'text-tv-accent' : 'text-slate-400'}`}
+          >
+            <Clapperboard className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Séries</span>
+          </button>
+          <button
+            onClick={() => {
+              const favCat = categories.find((c) => c.id === 'fav');
+              if (favCat) handleSelectCategory(favCat, 0);
+            }}
+            className="flex flex-col items-center justify-center flex-1 py-1 text-slate-400 hover:text-amber-400"
+          >
+            <Star className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Favoris</span>
+          </button>
+          <button
+            onClick={() => setIsXtreamModalOpen(true)}
+            className="flex flex-col items-center justify-center flex-1 py-1 text-tv-accent"
+          >
+            <PlusCircle className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Ajouter</span>
+          </button>
+          <button
+            onClick={() => setIsSyncModalOpen(true)}
+            className="flex flex-col items-center justify-center flex-1 py-1 text-emerald-400"
+          >
+            <RefreshCw className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Synchro</span>
+          </button>
+        </div>
       </div>
 
-      {/* FULLSCREEN PLAYER OVERLAY */}
+      {/* ============================================================== */}
+      {/* 2. TV / LANDSCAPE VIEW (Screens >= 1024px or Android TV 16:9)  */}
+      {/* ============================================================== */}
+      <div className="hidden lg:flex flex-col h-full w-full">
+        {/* Top Bar Header */}
+        <TopBar
+          currentCategoryName={selectedCategory?.name}
+          onToggleFullscreen={() => setIsFullscreen(true)}
+        />
+
+        {/* Main TV Layout */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Leftmost Sidebar */}
+          <NavigationSidebar
+            activeSection={activeSection}
+            onSelectSection={setActiveSection}
+            activePane={activePane}
+            onOpenSyncModal={() => setIsSyncModalOpen(true)}
+            onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
+          />
+
+          {/* Center & Right: Complete TV Guide with integrated Preview Player */}
+          <TVGuide
+            categories={categories}
+            channels={filteredChannels}
+            selectedCategory={selectedCategory}
+            focusedCategoryIndex={focusedCategoryIndex}
+            focusedChannelIndex={focusedChannelIndex}
+            activeChannel={activeChannel}
+            currentEpg={currentEpg}
+            nextEpg={nextEpg}
+            activePane={activePane}
+            onSelectCategory={handleSelectCategory}
+            onSelectChannel={(ch, idx) => {
+              setFocusedChannelIndex(idx);
+              handleSelectChannel(idx, false);
+            }}
+            onToggleFavorite={handleToggleFavorite}
+            onOpenSyncModal={() => setIsSyncModalOpen(true)}
+            onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
+            onToggleFullscreen={() => setIsFullscreen(true)}
+          />
+        </div>
+      </div>
+
+      {/* ============================================================== */}
+      {/* 3. FULLSCREEN PLAYER OVERLAY                                  */}
+      {/* ============================================================== */}
       {isFullscreen && (
         <LiveVideoPlayer
           channel={activeChannel}
@@ -342,7 +521,9 @@ export default function KeoTVHome() {
         />
       )}
 
-      {/* MODALS */}
+      {/* ============================================================== */}
+      {/* 4. MODALS (Xtream & Cloud Sync)                               */}
+      {/* ============================================================== */}
       <XtreamModal
         isOpen={isXtreamModalOpen}
         onClose={() => setIsXtreamModalOpen(false)}

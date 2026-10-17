@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Channel, Category, EpgProgram, NavigationPane } from '@/types/iptv';
 import { Star, Tv, Trophy, Film, Globe, Compass, Sparkles, Clock, Radio, Info } from 'lucide-react';
+import { LiveVideoPlayer } from './LiveVideoPlayer';
 
 interface TVGuideProps {
   categories: Category[];
@@ -19,6 +20,7 @@ interface TVGuideProps {
   onToggleFavorite: (channel: Channel) => void;
   onOpenSyncModal: () => void;
   onOpenXtreamModal: () => void;
+  onToggleFullscreen: () => void;
 }
 
 export const TVGuide: React.FC<TVGuideProps> = ({
@@ -34,8 +36,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   onSelectCategory,
   onSelectChannel,
   onToggleFavorite,
-  onOpenSyncModal,
-  onOpenXtreamModal,
+  onToggleFullscreen,
 }) => {
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
@@ -88,7 +89,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
       {/* 1. CATEGORIES COLUMN */}
       <div
         ref={categoryListRef}
-        className={`w-56 md:w-64 border-r border-tv-border flex flex-col py-3 overflow-y-auto overflow-x-hidden transition-colors ${
+        className={`w-52 xl:w-60 border-r border-tv-border flex flex-col py-3 overflow-y-auto overflow-x-hidden flex-shrink-0 transition-colors ${
           activePane === 'categories' ? 'bg-tv-surface/90' : 'bg-tv-surface/40'
         }`}
       >
@@ -107,7 +108,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             <button
               key={cat.id}
               onClick={() => onSelectCategory(cat, idx)}
-              className={`flex items-center justify-between px-3.5 py-2.5 mx-2 my-0.5 rounded-lg text-left text-sm transition-all duration-150 ${
+              className={`flex items-center justify-between px-3 py-2.5 mx-2 my-0.5 rounded-lg text-left text-sm transition-all duration-150 ${
                 isFocused
                   ? 'bg-tv-focus text-white font-semibold shadow-tv-focus scale-[1.02]'
                   : isSelected
@@ -131,17 +132,17 @@ export const TVGuide: React.FC<TVGuideProps> = ({
         })}
       </div>
 
-      {/* 2. CHANNELS LIST COLUMN (Virtualized style, high density) */}
+      {/* 2. CHANNELS LIST COLUMN */}
       <div
         ref={channelListRef}
-        className={`flex-1 border-r border-tv-border flex flex-col py-3 overflow-y-auto overflow-x-hidden transition-colors ${
+        className={`flex-1 min-w-[280px] border-r border-tv-border flex flex-col py-3 overflow-y-auto overflow-x-hidden transition-colors ${
           activePane === 'channels' ? 'bg-tv-bg' : 'bg-tv-bg/80'
         }`}
       >
-        <div className="px-5 pb-2 mb-1 flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider">
-          <span>{selectedCategory?.name || 'Chaînes en direct'}</span>
-          <span className="text-[11px] text-slate-500 font-mono">
-            {channels.length} chaînes disponibles
+        <div className="px-4 pb-2 mb-1 flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider">
+          <span className="truncate">{selectedCategory?.name || 'Chaînes en direct'}</span>
+          <span className="text-[11px] text-slate-500 font-mono ml-2 flex-shrink-0">
+            {channels.length} chaînes
           </span>
         </div>
 
@@ -159,7 +160,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               <div
                 key={ch.id}
                 onClick={() => onSelectChannel(ch, idx)}
-                className={`group flex items-center justify-between px-4 py-2.5 mx-3 my-0.5 rounded-xl cursor-pointer transition-all duration-150 border ${
+                className={`group flex items-center justify-between px-3.5 py-2.5 mx-2.5 my-0.5 rounded-xl cursor-pointer transition-all duration-150 border ${
                   isFocused
                     ? 'bg-tv-cardHover border-tv-accent text-white shadow-tv-focus scale-[1.01]'
                     : isActive
@@ -167,10 +168,10 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                     : 'bg-tv-card/40 border-transparent hover:bg-tv-cardHover/50 text-slate-300'
                 }`}
               >
-                {/* Left: Number and Channel Identity */}
-                <div className="flex items-center space-x-3.5 min-w-0 flex-1">
+                {/* Number & Logo & Info */}
+                <div className="flex items-center space-x-3 min-w-0 flex-1">
                   <span
-                    className={`text-xs font-mono font-bold w-6 text-right ${
+                    className={`text-xs font-mono font-bold w-6 text-right flex-shrink-0 ${
                       isFocused ? 'text-tv-accent' : 'text-slate-500'
                     }`}
                   >
@@ -189,12 +190,11 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                         {ch.name}
                       </h4>
                       {ch.resolution && (
-                        <span className="text-[10px] bg-sky-500/10 text-tv-accent border border-sky-500/20 px-1 rounded font-mono font-bold">
+                        <span className="text-[10px] bg-sky-500/10 text-tv-accent border border-sky-500/20 px-1 rounded font-mono font-bold flex-shrink-0">
                           {ch.resolution}
                         </span>
                       )}
                     </div>
-                    {/* Simulated live EPG short preview */}
                     <p className="text-xs text-slate-400 truncate mt-0.5">
                       {ch.id === 'ch_tf1'
                         ? 'Le Journal de 20h & Météo'
@@ -207,13 +207,13 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                   </div>
                 </div>
 
-                {/* Right: Favorite Star toggle */}
+                {/* Favorite Star */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     onToggleFavorite(ch);
                   }}
-                  className={`p-1.5 rounded-lg transition-colors ${
+                  className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
                     ch.is_favorite
                       ? 'text-amber-400 hover:text-amber-300'
                       : 'text-slate-600 hover:text-slate-400 opacity-0 group-hover:opacity-100'
@@ -228,15 +228,27 @@ export const TVGuide: React.FC<TVGuideProps> = ({
         )}
       </div>
 
-      {/* 3. RIGHT COLUMN: DETAILED EPG & PROGRAM SYNOPSIS */}
-      <div className="hidden lg:flex w-80 xl:w-96 flex-col p-4 bg-tv-surface/60 overflow-y-auto">
-        <div className="flex items-center space-x-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-3">
+      {/* 3. RIGHT COLUMN: PREVIEW PLAYER & DETAILED EPG */}
+      <div className="w-80 xl:w-96 flex flex-col p-4 bg-tv-surface/60 overflow-y-auto flex-shrink-0">
+        {/* Live Preview Video Player */}
+        <div className="w-full aspect-video rounded-xl overflow-hidden shadow-2xl border border-tv-border bg-black mb-3 flex-shrink-0">
+          <LiveVideoPlayer
+            channel={activeChannel}
+            currentEpg={currentEpg}
+            nextEpg={nextEpg}
+            isFullscreen={false}
+            onToggleFullscreen={onToggleFullscreen}
+          />
+        </div>
+
+        {/* EPG Program details */}
+        <div className="flex items-center space-x-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
           <Info className="w-4 h-4 text-tv-accent" />
           <span>Guide du Programme</span>
         </div>
 
         {currentEpg ? (
-          <div className="space-y-4">
+          <div className="space-y-3 flex-1 flex flex-col">
             <div>
               <div className="flex items-center space-x-2 text-xs text-tv-accent font-semibold mb-1">
                 <span>{currentEpg.category || 'En direct'}</span>
@@ -263,48 +275,39 @@ export const TVGuide: React.FC<TVGuideProps> = ({
 
             {/* Synopsis */}
             <div className="bg-tv-card/60 p-3 rounded-xl border border-tv-border/60">
-              <p className="text-xs leading-relaxed text-slate-300">
+              <p className="text-xs leading-relaxed text-slate-300 line-clamp-4">
                 {currentEpg.description}
               </p>
             </div>
 
-            {/* Next program card */}
+            {/* Next program */}
             {nextEpg && (
-              <div className="p-3 bg-tv-card/30 rounded-xl border border-tv-border/40">
-                <div className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-1">
+              <div className="p-2.5 bg-tv-card/30 rounded-xl border border-tv-border/40">
+                <div className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-0.5">
                   À suivre
                 </div>
                 <div className="text-xs font-semibold text-slate-200 truncate">
                   {nextEpg.title}
                 </div>
-                <div className="text-[11px] text-slate-400 font-mono mt-0.5">
+                <div className="text-[11px] text-slate-400 font-mono">
                   {new Date(nextEpg.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
                 </div>
               </div>
             )}
+
+            <button
+              onClick={onToggleFullscreen}
+              className="w-full py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition shadow-lg mt-auto"
+            >
+              Passer en plein écran (Entrée)
+            </button>
           </div>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-center p-4">
             <Clock className="w-8 h-8 mb-2 opacity-50" />
-            <p className="text-xs">Sélectionnez une chaîne pour afficher son résumé détaillé.</p>
+            <p className="text-xs">Sélectionnez une chaîne pour afficher les détails.</p>
           </div>
         )}
-
-        {/* Remote Shortcuts legend */}
-        <div className="mt-auto pt-4 border-t border-tv-border/60 flex flex-col space-y-1.5 text-[11px] text-slate-400">
-          <div className="flex justify-between">
-            <span className="text-slate-500">Entrée / OK</span>
-            <span className="font-medium text-slate-300">Lire / Plein écran</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-slate-500">Touche F</span>
-            <span className="font-medium text-slate-300">Favori ON/OFF</span>
-          </div>
-          <div className="flex justify-between">
-            <span className="text-slate-500">Chiffres 0-9</span>
-            <span className="font-medium text-slate-300">Sauter au canal</span>
-          </div>
-        </div>
       </div>
     </div>
   );
