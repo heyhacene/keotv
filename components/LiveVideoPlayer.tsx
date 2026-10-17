@@ -91,7 +91,20 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              hls.startLoad();
+              if (streamUrl.endsWith('.m3u8')) {
+                const tsUrl = streamUrl.replace(/\.m3u8$/, '.ts');
+                console.warn('HLS network error, attempting MPEG-TS fallback:', tsUrl);
+                hls.destroy();
+                hlsRef.current = null;
+                if (video) {
+                  video.src = tsUrl;
+                  video.play().catch(() => {
+                    setStreamError('Flux temporairement indisponible.');
+                  });
+                }
+              } else {
+                hls.startLoad();
+              }
               break;
             case Hls.ErrorTypes.MEDIA_ERROR:
               hls.recoverMediaError();

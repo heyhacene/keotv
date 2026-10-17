@@ -72,31 +72,33 @@ export default function KeoTVHome() {
         if (cat.id === 'fav') {
           rawList = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
         } else {
-          // Tier 1: exact group_id indexed match
+          // Tier 1: exact group_id indexed match (e.g. grp_live_123, grp_vod_456, grp_series_789)
           rawList = await db.channels.where('group_id').equals(cat.id).toArray();
 
-          // Tier 2: alternate group_id prefix (with or without 'grp_')
+          // Tier 2: alternate group_id prefix (strip or match numeric id)
           if (rawList.length === 0) {
-            const altId = cat.id.startsWith('grp_') ? cat.id.replace('grp_', '') : `grp_${cat.id}`;
-            rawList = await db.channels.where('group_id').equals(altId).toArray();
+            const rawCatNum = cat.id.replace(/^grp_(?:live_|vod_|series_)?/, '').trim().toLowerCase();
+            rawList = await db.channels.filter((c) => {
+              const cGrpNum = (c.group_id || '').replace(/^grp_(?:live_|vod_|series_)?/, '').trim().toLowerCase();
+              return Boolean(cGrpNum && cGrpNum === rawCatNum);
+            }).toArray();
           }
 
           // Tier 3: exact group_name match
           if (rawList.length === 0 && cat.name) {
+            const cleanName = cat.name.trim().toLowerCase();
             rawList = await db.channels.filter((c) => 
-              Boolean(c.group_name && c.group_name.trim().toLowerCase() === cat.name.trim().toLowerCase())
+              Boolean(c.group_name && c.group_name.trim().toLowerCase() === cleanName)
             ).toArray();
           }
 
-          // Tier 4: universal memory fallback across all channels in Dexie
-          if (rawList.length === 0) {
+          // Tier 4: universal memory fallback across all channels in Dexie with category type safety
+          if (rawList.length === 0 && cat.name) {
             const all = await db.channels.toArray();
-            const cleanCatId = cat.id.replace('grp_', '').trim().toLowerCase();
             const cleanCatName = cat.name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
 
             rawList = all.filter((c) => {
-              const cGrpId = (c.group_id || '').replace('grp_', '').trim().toLowerCase();
-              if (cGrpId && cGrpId === cleanCatId) return true;
+              if (cat.type && c.stream_type && cat.type !== c.stream_type) return false;
               const cGrpName = (c.group_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
               if (cGrpName && cleanCatName && (cGrpName === cleanCatName || cGrpName.includes(cleanCatName) || cleanCatName.includes(cGrpName))) {
                 return true;
@@ -110,7 +112,7 @@ export default function KeoTVHome() {
             const currentPlaylists = await db.playlists.toArray();
             const activePl = currentPlaylists[0];
             if (activePl && activePl.type === 'xtream' && activePl.server_url && activePl.username && activePl.password) {
-              const cleanRawCatId = cat.id.replace('grp_', '').trim();
+              const cleanRawCatId = cat.id.replace(/^grp_(?:live_|vod_|series_)?/, '').trim();
               const catType = cat.type || 'live';
               try {
                 const onDemandStreams = await fetchCategoryStreamsOnDemand({
@@ -123,7 +125,6 @@ export default function KeoTVHome() {
                 });
 
                 if (onDemandStreams.length > 0) {
-                  // Save into Dexie in background for offline & instant future queries
                   try {
                     await db.channels.bulkPut(onDemandStreams);
                   } catch (putErr) {
@@ -131,7 +132,6 @@ export default function KeoTVHome() {
                       try { await db.channels.put(s); } catch {}
                     }
                   }
-                  // Update category count
                   await db.categories.update(cat.id, { count: onDemandStreams.length });
                   setCategories((prev) =>
                     prev.map((c) => (c.id === cat.id ? { ...c, count: onDemandStreams.length } : c))
@@ -169,6 +169,100 @@ export default function KeoTVHome() {
     [channelSort]
   );
 
+  // Re-synchronize existing playlist and reload all channels safely into Dexie
+  const handleResyncPlaylist = useCallback(async (pl?: PlaylistConfig) => {
+    const targetPl = pl || playlists[0];
+    if (!targetPl) return;
+
+    setIsResyncing(true);
+    setSyncStatusBanner(`Re-synchronisation de "${targetPl.name}"...`);
+
+    try {
+      let result: { playlist: PlaylistConfig; categories: Category[]; channels: Channel[] };
+      if (targetPl.type === 'xtream') {
+        result = await syncXtreamPlaylist({
+          serverUrl: targetPl.server_url,
+          username: targetPl.username || '',
+          password: targetPl.password || '',
+          name: targetPl.name,
+          onProgress: (p) => setSyncStatusBanner(p),
+        });
+      } else {
+        result = await parseM3UPlaylist({
+          m3uUrl: targetPl.m3u_url || targetPl.server_url,
+          name: targetPl.name,
+          onProgress: (p) => setSyncStatusBanner(p),
+        });
+      }
+
+      setSyncStatusBanner(`Enregistrement de ${result.channels.length} chaînes...`);
+
+      await db.playlists.clear();
+      await db.categories.clear();
+      await db.channels.clear();
+
+      await db.playlists.put(result.playlist);
+      await db.categories.bulkPut(result.categories);
+
+      const CHUNK_SIZE = 500;
+      for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
+        const chunk = result.channels.slice(i, i + CHUNK_SIZE);
+        try {
+          await db.channels.bulkPut(chunk);
+        } catch (chunkErr) {
+          console.warn('bulkPut chunk error, fallback to individual put:', chunkErr);
+          for (const item of chunk) {
+            try {
+              await db.channels.put(item);
+            } catch (putErr) {
+              console.error('Failed to put channel', item.id, putErr);
+            }
+          }
+        }
+        if (result.channels.length > 1000) {
+          const percent = Math.min(100, Math.round(((i + chunk.length) / result.channels.length) * 100));
+          setSyncStatusBanner(`Enregistrement local : ${percent}% (${Math.min(i + chunk.length, result.channels.length)}/${result.channels.length} chaînes)...`);
+        }
+      }
+
+      const loadedCats = await db.categories.orderBy('custom_order').toArray();
+      const loadedPlaylists = await db.playlists.toArray();
+      setCategories(loadedCats);
+      setPlaylists(loadedPlaylists);
+      setFavCount(0);
+
+      let firstCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
+      if (firstCat) {
+        setSelectedCategory(firstCat);
+        setFocusedCategoryIndex(0);
+        setFocusedChannelIndex(0);
+        await loadCategoryChannels(firstCat, channelSort);
+      }
+
+      const firstChannel = result.channels[0];
+      if (firstChannel) {
+        setActiveChannel(firstChannel);
+        setCurrentEpg({
+          id: 'epg_' + firstChannel.id,
+          channel_id: firstChannel.id,
+          title: firstChannel.name + ' (En Direct)',
+          description: 'Flux en direct de ' + firstChannel.name,
+          start: new Date().toISOString(),
+          end: new Date(Date.now() + 7200000).toISOString(),
+          duration_min: 120,
+        });
+        setNextEpg(null);
+        setIsStopped(false);
+      }
+    } catch (err: any) {
+      console.error('Failed to resync playlist:', err);
+      alert(`Erreur lors de la synchronisation : ${err.message}`);
+    } finally {
+      setIsResyncing(false);
+      setSyncStatusBanner(null);
+    }
+  }, [playlists, channelSort, loadCategoryChannels]);
+
   // 1. Initialize IndexedDB & Seed initial channels
   useEffect(() => {
     async function initDB() {
@@ -177,6 +271,27 @@ export default function KeoTVHome() {
         const savedChSort = await getSetting<'playlist' | 'alpha' | 'num'>('channel_sort', 'playlist');
         setCategorySort(savedCatSort);
         setChannelSort(savedChSort);
+
+        // Build 10 Auto-Clean Migration: clean legacy corrupted cache (overwritten categories or 0 channels)
+        const build10Migrated = await getSetting<boolean>('build10_clean_migrated', false);
+        if (!build10Migrated) {
+          await setSetting('build10_clean_migrated', true);
+          const currentPlaylists = await db.playlists.toArray();
+          const userPl = currentPlaylists.find((p) => p.id !== 'pl_demo_default');
+          if (userPl) {
+            console.log('Build 10 migration: Auto-resyncing user playlist with fixed categories and channel lineup...');
+            await db.categories.clear();
+            await db.channels.clear();
+            setTimeout(() => {
+              handleResyncPlaylist(userPl);
+            }, 300);
+            return;
+          } else if (currentPlaylists.length > 0) {
+            await db.categories.clear();
+            await db.channels.clear();
+            await db.playlists.clear();
+          }
+        }
 
         const chCount = await db.channels.count();
         const plCount = await db.playlists.count();
@@ -219,7 +334,7 @@ export default function KeoTVHome() {
         setPlaylists(loadedPlaylists);
         setFavCount(initialFavCount);
 
-        // Auto-recovery if a playlist was saved but 0 channels exist (e.g. from Build 7 boolean index issue)
+        // Auto-recovery if a playlist was saved but 0 channels exist
         if (plCount > 0 && chCount === 0 && loadedPlaylists.length > 0) {
           console.warn('Playlist exists but 0 channels in Dexie. Triggering auto-recovery...');
           const activePl = loadedPlaylists[0];
@@ -261,7 +376,7 @@ export default function KeoTVHome() {
       }
     }
     initDB();
-  }, [loadCategoryChannels]);
+  }, [loadCategoryChannels, handleResyncPlaylist]);
 
   // Compute sorted categories based on user's preference and activeSection (Direct / Films / Séries / Favoris)
   const sortedCategories = useMemo(() => {
@@ -282,13 +397,9 @@ export default function KeoTVHome() {
       return true;
     });
 
-    // Graceful fallback if no categories exist for this section in the playlist
-    if (sectionCats.length === 0 && categories.length > 0) {
-      if (activeSection === 'fav') {
-        sectionCats = categories.filter((c) => c.id === 'fav');
-      } else {
-        sectionCats = categories.filter((c) => c.id !== 'fav');
-      }
+    // Graceful fallback ONLY if live section is active but categories had no explicit type tag
+    if (activeSection === 'live' && sectionCats.length === 0 && categories.length > 0) {
+      sectionCats = categories.filter((c) => c.id !== 'fav' && (!c.type || c.type === 'live'));
     }
 
     const favCat = sectionCats.find((c) => c.id === 'fav');
@@ -568,99 +679,7 @@ export default function KeoTVHome() {
     onBack: handleAndroidBack,
   });
 
-  // Re-synchronize existing playlist and reload all channels safely into Dexie
-  const handleResyncPlaylist = useCallback(async (pl?: PlaylistConfig) => {
-    const targetPl = pl || playlists[0];
-    if (!targetPl) return;
 
-    setIsResyncing(true);
-    setSyncStatusBanner(`Re-synchronisation de "${targetPl.name}"...`);
-
-    try {
-      let result: { playlist: PlaylistConfig; categories: Category[]; channels: Channel[] };
-      if (targetPl.type === 'xtream') {
-        result = await syncXtreamPlaylist({
-          serverUrl: targetPl.server_url,
-          username: targetPl.username || '',
-          password: targetPl.password || '',
-          name: targetPl.name,
-          onProgress: (p) => setSyncStatusBanner(p),
-        });
-      } else {
-        result = await parseM3UPlaylist({
-          m3uUrl: targetPl.m3u_url || targetPl.server_url,
-          name: targetPl.name,
-          onProgress: (p) => setSyncStatusBanner(p),
-        });
-      }
-
-      setSyncStatusBanner(`Enregistrement de ${result.channels.length} chaînes...`);
-
-      await db.playlists.clear();
-      await db.categories.clear();
-      await db.channels.clear();
-
-      await db.playlists.put(result.playlist);
-      await db.categories.bulkPut(result.categories);
-
-      const CHUNK_SIZE = 500;
-      for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
-        const chunk = result.channels.slice(i, i + CHUNK_SIZE);
-        try {
-          await db.channels.bulkPut(chunk);
-        } catch (chunkErr) {
-          console.warn('bulkPut chunk error, fallback to individual put:', chunkErr);
-          for (const item of chunk) {
-            try {
-              await db.channels.put(item);
-            } catch (putErr) {
-              console.error('Failed to put channel', item.id, putErr);
-            }
-          }
-        }
-        if (result.channels.length > 1000) {
-          const percent = Math.min(100, Math.round(((i + chunk.length) / result.channels.length) * 100));
-          setSyncStatusBanner(`Enregistrement local : ${percent}% (${Math.min(i + chunk.length, result.channels.length)}/${result.channels.length} chaînes)...`);
-        }
-      }
-
-      const loadedCats = await db.categories.orderBy('custom_order').toArray();
-      const loadedPlaylists = await db.playlists.toArray();
-      setCategories(loadedCats);
-      setPlaylists(loadedPlaylists);
-      setFavCount(0);
-
-      let firstCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
-      if (firstCat) {
-        setSelectedCategory(firstCat);
-        setFocusedCategoryIndex(0);
-        setFocusedChannelIndex(0);
-        await loadCategoryChannels(firstCat, channelSort);
-      }
-
-      const firstChannel = result.channels[0];
-      if (firstChannel) {
-        setActiveChannel(firstChannel);
-        setCurrentEpg({
-          id: 'epg_' + firstChannel.id,
-          channel_id: firstChannel.id,
-          title: firstChannel.name + ' (En Direct)',
-          description: 'Flux en direct de ' + firstChannel.name,
-          start: new Date().toISOString(),
-          end: new Date(Date.now() + 7200000).toISOString(),
-          duration_min: 120,
-        });
-        setNextEpg(null);
-        setIsStopped(false);
-      }
-    } catch (err: any) {
-      console.error('Failed to resync playlist:', err);
-      alert(`Erreur lors de la synchronisation : ${err.message}`);
-    } finally {
-      setIsResyncing(false);
-      setSyncStatusBanner(null);
-    }
-  }, [playlists, channelSort, loadCategoryChannels]);
 
   // Save & Synchronize new playlist (Xtream / M3U) with chunked bulkPut to support 50k+ channels
   const handleSavePlaylist = async (
@@ -1031,14 +1050,22 @@ export default function KeoTVHome() {
             <div className="py-12 flex flex-col items-center justify-center text-center space-y-3 px-4">
               <AlertCircle className="w-8 h-8 text-sky-400" />
               <p className="text-sm font-bold text-white">
-                {activeSection === 'vod'
+                {sortedCategories.length === 0
+                  ? activeSection === 'vod'
+                    ? 'Aucune catégorie de films dans cet abonnement'
+                    : activeSection === 'series'
+                    ? 'Aucune catégorie de séries dans cet abonnement'
+                    : 'Aucun bouquet disponible'
+                  : activeSection === 'vod'
                   ? 'Aucun film dans ce bouquet'
                   : activeSection === 'series'
                   ? 'Aucune série dans ce bouquet'
                   : 'Aucune chaîne dans ce bouquet'}
               </p>
               <p className="text-xs text-slate-400 max-w-xs">
-                Si vos flux ne sont pas encore apparus en mémoire, vous pouvez les recharger en un clic.
+                {sortedCategories.length === 0
+                  ? 'Vous pouvez recharger votre playlist pour récupérer tous vos bouquets TV, Films et Séries.'
+                  : 'Si vos flux ne sont pas encore apparus en mémoire, vous pouvez les recharger en un clic.'}
               </p>
               <button
                 onClick={() => handleResyncPlaylist()}
@@ -1241,7 +1268,7 @@ export default function KeoTVHome() {
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
         onResyncPlaylist={handleResyncPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={9}
+        currentBuildNumber={10}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
