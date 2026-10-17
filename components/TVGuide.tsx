@@ -257,12 +257,12 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                   >
                     {ch.num}
                   </span>
-                  <div className="w-10 h-10 rounded-lg bg-black/40 border border-white/5 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                  <div className={`${ch.stream_type === 'vod' || ch.stream_type === 'series' ? 'w-10 h-14' : 'w-10 h-10'} rounded-lg bg-black/40 border border-white/5 flex items-center justify-center flex-shrink-0 overflow-hidden`}>
                     {ch.logo ? (
                       <img
                         src={ch.logo}
                         alt={ch.name}
-                        className="w-full h-full object-contain p-1"
+                        className={`w-full h-full ${ch.stream_type === 'vod' || ch.stream_type === 'series' ? 'object-cover' : 'object-contain p-1'}`}
                         onError={(e) => {
                           (e.target as HTMLElement).style.display = 'none';
                         }}

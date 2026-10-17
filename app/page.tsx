@@ -14,10 +14,10 @@ import { SyncModal } from '@/components/SyncModal';
 import { CategoryDrawerModal } from '@/components/CategoryDrawerModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
-import { syncXtreamPlaylist, parseM3UPlaylist } from '@/lib/iptv-service';
+import { syncXtreamPlaylist, parseM3UPlaylist, fetchCategoryStreamsOnDemand } from '@/lib/iptv-service';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
-import { Star, Tv, Film, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square, ArrowUpDown, AlertCircle } from 'lucide-react';
+import { Star, Tv, Film, Clapperboard, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square, ArrowUpDown, AlertCircle, Loader2 } from 'lucide-react';
 
 export default function KeoTVHome() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -49,15 +49,16 @@ export default function KeoTVHome() {
   const [currentEpg, setCurrentEpg] = useState<EpgProgram | null>(null);
   const [nextEpg, setNextEpg] = useState<EpgProgram | null>(null);
 
-  const [activeSection, setActiveSection] = useState<string>('live');
+  const [activeSection, setActiveSection] = useState<'live' | 'vod' | 'series' | 'fav'>('live');
   const [syncCode, setSyncCode] = useState<string>('');
+  const [isLoadingCategory, setIsLoadingCategory] = useState<boolean>(false);
 
   const [isXtreamModalOpen, setIsXtreamModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  // Channel loader for the selected category from IndexedDB with multi-tier lookup & sorting
+  // Channel loader for the selected category from IndexedDB with multi-tier lookup & on-demand fetch
   const loadCategoryChannels = useCallback(
     async (cat: Category | null, sortMode: 'playlist' | 'alpha' | 'num' = channelSort) => {
       if (!cat) {
@@ -65,6 +66,7 @@ export default function KeoTVHome() {
         return;
       }
 
+      setIsLoadingCategory(true);
       try {
         let rawList: Channel[] = [];
         if (cat.id === 'fav') {
@@ -102,6 +104,45 @@ export default function KeoTVHome() {
               return false;
             });
           }
+
+          // Tier 5: ON-DEMAND FETCH FROM XTREAM SERVER (if local database has 0 items for this category)
+          if (rawList.length === 0 && cat.id !== 'fav') {
+            const currentPlaylists = await db.playlists.toArray();
+            const activePl = currentPlaylists[0];
+            if (activePl && activePl.type === 'xtream' && activePl.server_url && activePl.username && activePl.password) {
+              const cleanRawCatId = cat.id.replace('grp_', '').trim();
+              const catType = cat.type || 'live';
+              try {
+                const onDemandStreams = await fetchCategoryStreamsOnDemand({
+                  serverUrl: activePl.server_url,
+                  username: activePl.username,
+                  password: activePl.password,
+                  categoryId: cleanRawCatId,
+                  categoryName: cat.name,
+                  streamType: catType,
+                });
+
+                if (onDemandStreams.length > 0) {
+                  // Save into Dexie in background for offline & instant future queries
+                  try {
+                    await db.channels.bulkPut(onDemandStreams);
+                  } catch (putErr) {
+                    for (const s of onDemandStreams) {
+                      try { await db.channels.put(s); } catch {}
+                    }
+                  }
+                  // Update category count
+                  await db.categories.update(cat.id, { count: onDemandStreams.length });
+                  setCategories((prev) =>
+                    prev.map((c) => (c.id === cat.id ? { ...c, count: onDemandStreams.length } : c))
+                  );
+                  rawList = onDemandStreams;
+                }
+              } catch (onDemandErr) {
+                console.warn('On-demand stream fetch error for category', cat.id, onDemandErr);
+              }
+            }
+          }
         }
 
         // Apply channel sort
@@ -113,7 +154,7 @@ export default function KeoTVHome() {
         } else if (sortMode === 'num') {
           sorted.sort((a, b) => (a.num || 0) - (b.num || 0));
         } else {
-          // 'playlist' (strict default original order)
+          // 'playlist' (strict default original lineup order)
           sorted.sort((a, b) => (a.custom_order || a.num || 0) - (b.custom_order || b.num || 0));
         }
 
@@ -121,6 +162,8 @@ export default function KeoTVHome() {
       } catch (err) {
         console.error('Error loading channels for category:', cat.id, err);
         setChannels([]);
+      } finally {
+        setIsLoadingCategory(false);
       }
     },
     [channelSort]
@@ -220,11 +263,36 @@ export default function KeoTVHome() {
     initDB();
   }, [loadCategoryChannels]);
 
-  // Compute sorted categories based on user's preference (Playlist default, Alpha, or Count)
+  // Compute sorted categories based on user's preference and activeSection (Direct / Films / Séries / Favoris)
   const sortedCategories = useMemo(() => {
-    const list = [...categories];
-    const favCat = list.find((c) => c.id === 'fav');
-    const otherCats = list.filter((c) => c.id !== 'fav');
+    // 1. Filter categories by activeSection
+    let sectionCats = categories.filter((c) => {
+      if (activeSection === 'live') {
+        return c.type === 'live' || !c.type || c.id === 'fav';
+      }
+      if (activeSection === 'vod') {
+        return c.type === 'vod';
+      }
+      if (activeSection === 'series') {
+        return c.type === 'series';
+      }
+      if (activeSection === 'fav') {
+        return c.id === 'fav';
+      }
+      return true;
+    });
+
+    // Graceful fallback if no categories exist for this section in the playlist
+    if (sectionCats.length === 0 && categories.length > 0) {
+      if (activeSection === 'fav') {
+        sectionCats = categories.filter((c) => c.id === 'fav');
+      } else {
+        sectionCats = categories.filter((c) => c.id !== 'fav');
+      }
+    }
+
+    const favCat = sectionCats.find((c) => c.id === 'fav');
+    const otherCats = sectionCats.filter((c) => c.id !== 'fav');
 
     if (categorySort === 'alpha') {
       otherCats.sort((a, b) =>
@@ -233,18 +301,54 @@ export default function KeoTVHome() {
     } else if (categorySort === 'count') {
       otherCats.sort((a, b) => (b.count || 0) - (a.count || 0));
     } else {
-      // 'playlist' (strict default order)
+      // 'playlist' (strict default lineup order)
       otherCats.sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0));
     }
 
-    const result = favCat ? [favCat, ...otherCats] : otherCats;
+    const result = (activeSection === 'live' || activeSection === 'fav') && favCat ? [favCat, ...otherCats] : otherCats;
     return result.map((c) => {
       if (c.id === 'fav') {
         return { ...c, count: favCount };
       }
       return c;
     });
-  }, [categories, categorySort, favCount]);
+  }, [categories, categorySort, favCount, activeSection]);
+
+  // Section switcher (Direct, Films, Séries, Favoris)
+  const handleSelectSection = useCallback(
+    async (section: 'live' | 'vod' | 'series' | 'fav') => {
+      setActiveSection(section);
+
+      const matchingCats = categories.filter((c) => {
+        if (section === 'live') return c.type === 'live' || !c.type;
+        if (section === 'vod') return c.type === 'vod';
+        if (section === 'series') return c.type === 'series';
+        if (section === 'fav') return c.id === 'fav';
+        return true;
+      });
+
+      let targetCat: Category | null = null;
+      if (section === 'fav') {
+        targetCat = categories.find((c) => c.id === 'fav') || null;
+      } else {
+        targetCat =
+          matchingCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) ||
+          matchingCats.find((c) => c.id !== 'fav') ||
+          matchingCats[0] ||
+          null;
+      }
+
+      setSelectedCategory(targetCat);
+      setFocusedCategoryIndex(0);
+      setFocusedChannelIndex(0);
+      if (targetCat) {
+        await loadCategoryChannels(targetCat, channelSort);
+      } else {
+        setChannels([]);
+      }
+    },
+    [categories, channelSort, loadCategoryChannels]
+  );
 
   // Handle category sort change
   const handleCategorySortChange = async (newSort: 'playlist' | 'alpha' | 'count') => {
@@ -915,14 +1019,26 @@ export default function KeoTVHome() {
           })}
         </div>
 
-        {/* Full-width Channel List */}
+        {/* Full-width Channel & VOD List */}
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
-          {filteredChannels.length === 0 ? (
+          {isLoadingCategory ? (
+            <div className="py-16 flex flex-col items-center justify-center text-center space-y-3">
+              <Loader2 className="w-8 h-8 animate-spin text-tv-accent" />
+              <p className="text-xs text-slate-300 font-semibold">Chargement des flux en cours...</p>
+              <p className="text-[11px] text-slate-500">Connexion rapide au serveur IPTV</p>
+            </div>
+          ) : filteredChannels.length === 0 ? (
             <div className="py-12 flex flex-col items-center justify-center text-center space-y-3 px-4">
               <AlertCircle className="w-8 h-8 text-sky-400" />
-              <p className="text-sm font-bold text-white">Aucune chaîne dans ce bouquet</p>
+              <p className="text-sm font-bold text-white">
+                {activeSection === 'vod'
+                  ? 'Aucun film dans ce bouquet'
+                  : activeSection === 'series'
+                  ? 'Aucune série dans ce bouquet'
+                  : 'Aucune chaîne dans ce bouquet'}
+              </p>
               <p className="text-xs text-slate-400 max-w-xs">
-                Si vos chaînes ne sont pas encore apparues en mémoire, vous pouvez les recharger en un clic.
+                Si vos flux ne sont pas encore apparus en mémoire, vous pouvez les recharger en un clic.
               </p>
               <button
                 onClick={() => handleResyncPlaylist()}
@@ -930,13 +1046,14 @@ export default function KeoTVHome() {
                 className="px-4 py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center space-x-2 shadow-lg disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isResyncing ? 'animate-spin' : ''}`} />
-                <span>{isResyncing ? 'Chargement en cours...' : 'Recharger les chaînes maintenant'}</span>
+                <span>{isResyncing ? 'Chargement en cours...' : 'Recharger maintenant'}</span>
               </button>
             </div>
           ) : (
             filteredChannels.map((ch, idx) => {
               const isActive = activeChannel?.id === ch.id;
               const chEpg = getMockEpgForChannel(ch.id);
+              const isVodOrSeries = ch.stream_type === 'vod' || ch.stream_type === 'series' || activeSection === 'vod' || activeSection === 'series';
 
               return (
                 <div
@@ -945,26 +1062,28 @@ export default function KeoTVHome() {
                     setFocusedChannelIndex(idx);
                     handleSelectChannel(idx, false);
                   }}
-                  className={`flex items-center justify-between p-3 rounded-xl border transition ${
+                  className={`flex items-center justify-between p-3 rounded-xl border transition cursor-pointer ${
                     isActive
                       ? 'bg-tv-card border-tv-accent shadow-md'
                       : 'bg-tv-card/50 border-tv-border/50 text-slate-300 hover:bg-tv-cardHover'
                   }`}
                 >
                   <div className="flex items-center space-x-3 min-w-0 flex-1">
-                    <span className={`text-xs font-mono font-bold w-6 text-right ${isActive ? 'text-tv-accent' : 'text-slate-500'}`}>
+                    <span className={`text-xs font-mono font-bold w-6 text-right flex-shrink-0 ${isActive ? 'text-tv-accent' : 'text-slate-500'}`}>
                       {ch.num}
                     </span>
-                    <div className="w-10 h-10 rounded-lg bg-black/40 border border-white/5 flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <div className={`${isVodOrSeries ? 'w-10 h-14' : 'w-10 h-10'} rounded-lg bg-black/40 border border-white/5 flex items-center justify-center flex-shrink-0 overflow-hidden`}>
                       {ch.logo ? (
                         <img
                           src={ch.logo}
                           alt={ch.name}
-                          className="w-full h-full object-contain p-1"
+                          className={`w-full h-full ${isVodOrSeries ? 'object-cover' : 'object-contain p-1'}`}
                           onError={(e) => {
                             (e.target as HTMLElement).style.display = 'none';
                           }}
                         />
+                      ) : isVodOrSeries ? (
+                        <Film className="w-5 h-5 text-slate-500" />
                       ) : (
                         <span className="text-xs font-bold text-slate-400">
                           {ch.name.slice(0, 3)}
@@ -983,7 +1102,9 @@ export default function KeoTVHome() {
                         )}
                       </div>
                       <p className="text-xs text-slate-400 truncate mt-0.5">
-                        {chEpg.current.title}
+                        {isVodOrSeries
+                          ? (ch.stream_type === 'series' ? 'Série complète VOD' : 'Film disponible en lecture instantanée')
+                          : chEpg.current.title}
                       </p>
                     </div>
                   </div>
@@ -1002,76 +1123,59 @@ export default function KeoTVHome() {
           )}
         </div>
 
-        {/* Mobile Bottom Navigation Bar */}
-        <div className="h-14 bg-tv-surface border-t border-tv-border flex items-center justify-around px-2 flex-shrink-0">
+        {/* Mobile Bottom Navigation Bar (5 Main Sections) */}
+        <div className="h-14 bg-tv-surface border-t border-tv-border flex items-center justify-around px-1 flex-shrink-0">
+          {/* 1. Direct */}
           <button
-            onClick={() => {
-              setActiveSection('live');
-              const targetCat = (selectedCategory && selectedCategory.id !== 'fav')
-                ? selectedCategory
-                : (sortedCategories.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || sortedCategories[0]);
-              if (targetCat) {
-                const targetIdx = sortedCategories.findIndex((c) => c.id === targetCat.id);
-                handleSelectCategory(targetCat, targetIdx !== -1 ? targetIdx : 0);
-              }
-            }}
-            className={`flex flex-col items-center justify-center flex-1 py-1 ${activeSection === 'live' ? 'text-tv-accent' : 'text-slate-400'}`}
+            onClick={() => handleSelectSection('live')}
+            className={`flex flex-col items-center justify-center flex-1 py-1 transition ${
+              activeSection === 'live' ? 'text-tv-accent font-bold' : 'text-slate-400 hover:text-white'
+            }`}
           >
             <Tv className="w-4 h-4" />
             <span className="text-[10px] mt-0.5">Direct</span>
           </button>
 
+          {/* 2. Films (VOD) */}
           <button
-            onClick={() => setIsCategoryModalOpen(true)}
-            className="flex flex-col items-center justify-center flex-1 py-1 text-slate-400 hover:text-tv-accent"
-          >
-            <Layers className="w-4 h-4" />
-            <span className="text-[10px] mt-0.5 font-bold">Groupes</span>
-          </button>
-
-          <button
-            onClick={() => {
-              const favCat = sortedCategories.find((c) => c.id === 'fav');
-              if (favCat) handleSelectCategory(favCat, 0);
-            }}
-            className={`flex flex-col items-center justify-center flex-1 py-1 ${selectedCategory?.id === 'fav' ? 'text-amber-400' : 'text-slate-400'}`}
-          >
-            <Star className="w-4 h-4" />
-            <span className="text-[10px] mt-0.5">Favoris</span>
-          </button>
-
-          <button
-            onClick={() => {
-              const cinemaCat = sortedCategories.find((c) =>
-                c.id.includes('cinema') || c.id.includes('film') || c.id.includes('movie') ||
-                c.name.toLowerCase().includes('cinema') || c.name.toLowerCase().includes('film')
-              ) || sortedCategories[1];
-              if (cinemaCat) {
-                const idx = sortedCategories.findIndex((c) => c.id === cinemaCat.id);
-                handleSelectCategory(cinemaCat, idx !== -1 ? idx : 0);
-              }
-            }}
-            className={`flex flex-col items-center justify-center flex-1 py-1 ${selectedCategory?.name?.toLowerCase().includes('film') || selectedCategory?.name?.toLowerCase().includes('cinema') ? 'text-purple-400' : 'text-slate-400'}`}
+            onClick={() => handleSelectSection('vod')}
+            className={`flex flex-col items-center justify-center flex-1 py-1 transition ${
+              activeSection === 'vod' ? 'text-purple-400 font-bold' : 'text-slate-400 hover:text-white'
+            }`}
           >
             <Film className="w-4 h-4" />
             <span className="text-[10px] mt-0.5">Films</span>
           </button>
 
-          {/* PARAMETRES BUTTON */}
+          {/* 3. Séries */}
+          <button
+            onClick={() => handleSelectSection('series')}
+            className={`flex flex-col items-center justify-center flex-1 py-1 transition ${
+              activeSection === 'series' ? 'text-pink-400 font-bold' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Clapperboard className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Séries</span>
+          </button>
+
+          {/* 4. Favoris */}
+          <button
+            onClick={() => handleSelectSection('fav')}
+            className={`flex flex-col items-center justify-center flex-1 py-1 transition ${
+              activeSection === 'fav' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Star className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Favoris</span>
+          </button>
+
+          {/* 5. Paramètres */}
           <button
             onClick={() => setIsSettingsModalOpen(true)}
-            className="flex flex-col items-center justify-center flex-1 py-1 text-slate-400 hover:text-tv-accent"
+            className="flex flex-col items-center justify-center flex-1 py-1 text-slate-400 hover:text-tv-accent transition"
           >
             <Settings className="w-4 h-4" />
             <span className="text-[10px] mt-0.5 font-bold">Paramètres</span>
-          </button>
-
-          <button
-            onClick={() => setIsSyncModalOpen(true)}
-            className="flex flex-col items-center justify-center flex-1 py-1 text-emerald-400"
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span className="text-[10px] mt-0.5">Synchro</span>
           </button>
         </div>
       </div>
@@ -1088,7 +1192,7 @@ export default function KeoTVHome() {
         <div className="flex-1 flex overflow-hidden">
           <NavigationSidebar
             activeSection={activeSection}
-            onSelectSection={setActiveSection}
+            onSelectSection={(sec) => handleSelectSection(sec as any)}
             activePane={activePane}
             onOpenSyncModal={() => setIsSyncModalOpen(true)}
             onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
@@ -1137,7 +1241,7 @@ export default function KeoTVHome() {
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
         onResyncPlaylist={handleResyncPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={8}
+        currentBuildNumber={9}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}

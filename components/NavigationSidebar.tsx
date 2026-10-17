@@ -21,9 +21,9 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
 }) => {
   const menuItems = [
     { id: 'live', label: 'Direct', icon: Tv },
-    { id: 'movies', label: 'Films', icon: Film },
+    { id: 'vod', label: 'Films', icon: Film },
     { id: 'series', label: 'Séries', icon: Clapperboard },
-    { id: 'favs', label: 'Favoris', icon: Star },
+    { id: 'fav', label: 'Favoris', icon: Star },
   ];
 
   return (

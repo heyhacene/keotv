@@ -25,6 +25,14 @@ export class KeoTVDatabase extends Dexie {
       playlists: 'id, type, status',
       settings: 'key',
     });
+    // Version 3: Index stream_type for fast section filtering (live, vod, series)
+    this.version(3).stores({
+      channels: 'id, group_id, stream_type, num, custom_order, name',
+      categories: 'id, type, custom_order',
+      epg_programs: 'id, channel_id, start, end, [channel_id+start]',
+      playlists: 'id, type, status',
+      settings: 'key',
+    });
   }
 }
 

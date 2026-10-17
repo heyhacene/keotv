@@ -50,7 +50,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onRestoreDemoPlaylist,
   onResyncPlaylist,
   isResyncing = false,
-  currentBuildNumber = 8,
+  currentBuildNumber = 9,
   categorySort = 'playlist',
   onCategorySortChange,
   channelSort = 'playlist',
