@@ -1,0 +1,179 @@
+name: Compiler APK Android KeoTV
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Génération de l'APK Android TV & Mobile
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupération du code source
+        uses: actions/checkout@v4
+
+      - name: Configuration de Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Configuration de Java JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: 21
+
+      - name: Configuration du SDK Android
+        uses: android-actions/setup-android@v4
+
+      - name: Installation des dépendances
+        run: npm install
+
+      - name: Construction de l'application Web (Next.js export)
+        run: npm run build
+        env:
+          NEXT_PUBLIC_BUILD_NUMBER: ${{ github.run_number }}
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://qvfmfstwrkcerzlbemzb.supabase.co' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs' }}
+
+      - name: Initialisation du projet Android Capacitor
+        run: |
+          if [ ! -d "android" ]; then
+            npx cap add android
+          fi
+
+      - name: Configuration du support Android TV (Leanback & Banner)
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          
+          # Ajout des déclarations Leanback (TV) non restrictives pour garder le support smartphone
+          if ! grep -q "android.software.leanback" "$MANIFEST"; then
+            sed -i '/<application/i \    <uses-feature android:name="android.software.leanback" android:required="false" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />' "$MANIFEST"
+          fi
+
+          # Ajout de la catégorie LEANBACK_LAUNCHER pour que l'app apparaisse sur le launcher Android TV
+          if ! grep -q "android.intent.category.LEANBACK_LAUNCHER" "$MANIFEST"; then
+            sed -i '/android.intent.category.LAUNCHER/a \                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />' "$MANIFEST"
+          fi
+
+          # Ajout de la bannière TV dans la balise application
+          if ! grep -q "android:banner" "$MANIFEST"; then
+            sed -i 's/<application/<application android:banner="@drawable\/tv_banner"/' "$MANIFEST"
+          fi
+
+      - name: Génération automatique des icônes Android et de la Bannière Android TV
+        run: |
+          sudo apt-get update && sudo apt-get install -y librsvg2-bin
+          mkdir -p android/app/src/main/res/drawable
+          # Bannière Android TV 16:9 (320x180)
+          rsvg-convert -w 320 -h 180 public/icon.svg -o android/app/src/main/res/drawable/tv_banner.png
+          # Icônes de lancement Android (Mipmap Standard & Round)
+          rsvg-convert -w 48 -h 48 public/icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+          rsvg-convert -w 48 -h 48 public/icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
+          rsvg-convert -w 72 -h 72 public/icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+          rsvg-convert -w 72 -h 72 public/icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
+          rsvg-convert -w 96 -h 96 public/icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          rsvg-convert -w 96 -h 96 public/icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
+          rsvg-convert -w 144 -h 144 public/icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          rsvg-convert -w 144 -h 144 public/icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
+          rsvg-convert -w 192 -h 192 public/icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+          rsvg-convert -w 192 -h 192 public/icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
+
+      - name: Synchronisation Capacitor Android
+        run: npx cap sync android
+
+      - name: Compilation et Signature de l'APK Android
+        working-directory: android
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          KEY_STORE_PASSWORD: ${{ secrets.KEY_STORE_PASSWORD }}
+          ALIAS: ${{ secrets.ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          chmod +x ./gradlew
+          if [ -n "$SIGNING_KEY" ]; then
+            echo "🚀 Secrets de signature détectés : compilation Release officielle..."
+            ./gradlew assembleRelease --stacktrace
+
+            echo "🔑 Préparation du trousseau de clés..."
+            echo "$SIGNING_KEY" | base64 -d > release.keystore
+
+            APKSIGNER=$(find $ANDROID_SDK_ROOT/build-tools $ANDROID_HOME/build-tools /usr/local/lib/android/sdk/build-tools -name apksigner 2>/dev/null | sort -V | tail -n 1)
+            echo "Outil apksigner : $APKSIGNER"
+
+            UNSIGNED_APK="app/build/outputs/apk/release/app-release-unsigned.apk"
+            if [ ! -f "$UNSIGNED_APK" ]; then
+              UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
+            fi
+
+            ZIPALIGN=$(find $ANDROID_SDK_ROOT/build-tools $ANDROID_HOME/build-tools /usr/local/lib/android/sdk/build-tools -name zipalign 2>/dev/null | sort -V | tail -n 1)
+            if [ -n "$ZIPALIGN" ] && ! $ZIPALIGN -c 4 "$UNSIGNED_APK"; then
+              echo "Alignement 4-byte de l'APK..."
+              $ZIPALIGN -p -f 4 "$UNSIGNED_APK" aligned.apk
+              UNSIGNED_APK="aligned.apk"
+            fi
+
+            echo "✍️ Signature cryptographique avec apksigner (v1, v2, v3)..."
+            $APKSIGNER sign \
+              --ks release.keystore \
+              --ks-key-alias "$ALIAS" \
+              --ks-pass "pass:$KEY_STORE_PASSWORD" \
+              --key-pass "pass:${KEY_PASSWORD:-$KEY_STORE_PASSWORD}" \
+              --v1-signing-enabled true \
+              --v2-signing-enabled true \
+              --v3-signing-enabled true \
+              --out ../KeoTV.apk \
+              "$UNSIGNED_APK"
+
+            echo "🛡️ Validation de l'APK signé :"
+            $APKSIGNER verify --verbose ../KeoTV.apk
+            rm -f release.keystore aligned.apk
+            cp ../KeoTV.apk "../KeoTV-Build-${{ github.run_number }}.apk"
+          else
+            echo "⚠️ Secret SIGNING_KEY non configuré : compilation en mode Debug temporaire..."
+            ./gradlew assembleDebug --stacktrace
+            cp app/build/outputs/apk/debug/app-debug.apk ../KeoTV.apk
+            cp ../KeoTV.apk "../KeoTV-Build-${{ github.run_number }}.apk"
+          fi
+
+      - name: Publication de l'APK en téléchargement (Artifacts)
+        uses: actions/upload-artifact@v4
+        with:
+          name: keotv-android-apk
+          path: |
+            KeoTV.apk
+            KeoTV-Build-${{ github.run_number }}.apk
+          retention-days: 30
+
+      - name: Publication automatique sur GitHub Releases
+        uses: softprops/action-gh-release@v2
+        if: github.ref == 'refs/heads/main'
+        with:
+          tag_name: v1.0.0-build.${{ github.run_number }}
+          name: "KeoTV v1.0.0 (Build ${{ github.run_number }})"
+          body: |
+            ### 📺 KeoTV v1.0.0 (Build ${{ github.run_number }})
+            Cliquez sur le fichier **KeoTV-Build-${{ github.run_number }}.apk** ci-dessous pour installer l'application sur votre Android TV ou smartphone.
+
+            #### ✨ Fonctionnalités :
+            - **Interface TiviMate TV-First** : Navigation fluide au D-Pad (télécommande) et au toucher sur smartphone.
+            - **Mini-Player intégré** : Le flux vidéo continue de tourner sans interruption pendant la navigation dans le guide TV.
+            - **Lecteur HLS & Zapping instantané** : Support des flux Live HLS (.m3u8), détection automatique de résolution HD/FHD/4K.
+            - **Bandeau OSD Plein Écran** : Titre du programme en cours, barre de progression temporelle, programme suivant et zapping rapide.
+            - **Support Xtream Codes & M3U** : Configuration simplifiée de playlists et abonnements.
+            - **Synchronisation Multi-Appareils Cloud** : Sauvegarde et appairage instantané par Code PIN (KEO-XXXX) entre TV et téléphone.
+            - **Moteur IndexedDB haute performance** : Capacité de stockage locale pour des dizaines de milliers de flux.
+          files: |
+            KeoTV.apk
+            KeoTV-Build-${{ github.run_number }}.apk
+          make_latest: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

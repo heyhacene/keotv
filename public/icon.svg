@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0d14"/>
+      <stop offset="50%" stop-color="#111622"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="100%" stop-color="#0284c7"/>
+    </linearGradient>
+  </defs>
+  <!-- Background Rounded Squircle -->
+  <rect width="512" height="512" rx="128" fill="url(#bgGrad)"/>
+  
+  <!-- TV Outer Frame -->
+  <rect x="76" y="96" width="360" height="250" rx="32" fill="#161d2d" stroke="#38bdf8" stroke-width="12"/>
+  
+  <!-- Screen Glow -->
+  <rect x="96" y="116" width="320" height="210" rx="20" fill="#0d121c"/>
+  
+  <!-- Play Symbol inside TV -->
+  <polygon points="220,165 330,221 220,277" fill="url(#glowGrad)"/>
+  
+  <!-- TV Stand Base -->
+  <path d="M216,346 L200,400 L312,400 L296,346 Z" fill="#232d42"/>
+  <rect x="170" y="400" width="172" height="16" rx="8" fill="#38bdf8"/>
+</svg>
