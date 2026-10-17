@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Tv, Film, Clapperboard, Star, PlusCircle, RefreshCw, Settings } from 'lucide-react';
+import { Tv, Film, Clapperboard, Star, Settings, RefreshCw } from 'lucide-react';
 import { NavigationPane } from '@/types/iptv';
 
 interface NavigationSidebarProps {
@@ -9,7 +9,7 @@ interface NavigationSidebarProps {
   onSelectSection: (section: string) => void;
   activePane: NavigationPane;
   onOpenSyncModal: () => void;
-  onOpenXtreamModal: () => void;
+  onOpenSettingsModal: () => void;
 }
 
 export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
@@ -17,7 +17,7 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
   onSelectSection,
   activePane,
   onOpenSyncModal,
-  onOpenXtreamModal,
+  onOpenSettingsModal,
 }) => {
   const menuItems = [
     { id: 'live', label: 'Direct', icon: Tv },
@@ -68,12 +68,12 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
       {/* Bottom utility buttons */}
       <div className="flex flex-col space-y-2 w-full px-2 pt-4 border-t border-tv-border/50">
         <button
-          onClick={onOpenXtreamModal}
+          onClick={onOpenSettingsModal}
           className="w-full py-2.5 rounded-xl flex flex-col items-center justify-center text-slate-400 hover:text-tv-accent hover:bg-tv-card/50 transition"
-          title="Ajouter une playlist (Xtream / M3U)"
+          title="Paramètres de l'application"
         >
-          <PlusCircle className="w-5 h-5 mb-0.5 text-tv-accent" />
-          <span className="text-[8px] font-semibold">Ajouter</span>
+          <Settings className="w-5 h-5 mb-0.5 text-tv-accent" />
+          <span className="text-[8px] font-semibold">Options</span>
         </button>
 
         <button

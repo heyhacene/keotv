@@ -12,8 +12,9 @@ import { LiveVideoPlayer } from '@/components/LiveVideoPlayer';
 import { XtreamModal } from '@/components/XtreamModal';
 import { SyncModal } from '@/components/SyncModal';
 import { CategoryDrawerModal } from '@/components/CategoryDrawerModal';
+import { SettingsModal } from '@/components/SettingsModal';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
-import { Star, Tv, Film, Clapperboard, PlusCircle, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers } from 'lucide-react';
+import { Star, Tv, Film, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles } from 'lucide-react';
 
 export default function KeoTVHome() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -36,6 +37,7 @@ export default function KeoTVHome() {
   const [isXtreamModalOpen, setIsXtreamModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
   // 1. Initialize IndexedDB & Seed initial channels
   useEffect(() => {
@@ -353,7 +355,7 @@ export default function KeoTVHome() {
             className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-left transition"
           >
             <Layers className="w-4 h-4 text-tv-accent flex-shrink-0" />
-            <span className="text-xs font-bold text-white truncate max-w-[200px]">
+            <span className="text-xs font-bold text-white truncate max-w-[190px]">
               {selectedCategory?.name || 'Groupes'}
             </span>
             <span className="text-[10px] text-slate-400 font-mono">
@@ -497,12 +499,13 @@ export default function KeoTVHome() {
             <span className="text-[10px] mt-0.5">Films</span>
           </button>
 
+          {/* PARAMETRES BUTTON (replaces the '+' button) */}
           <button
-            onClick={() => setIsXtreamModalOpen(true)}
-            className="flex flex-col items-center justify-center flex-1 py-1 text-tv-accent"
+            onClick={() => setIsSettingsModalOpen(true)}
+            className="flex flex-col items-center justify-center flex-1 py-1 text-slate-400 hover:text-tv-accent"
           >
-            <PlusCircle className="w-4 h-4" />
-            <span className="text-[10px] mt-0.5">Ajouter</span>
+            <Settings className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5 font-bold">Paramètres</span>
           </button>
 
           <button
@@ -530,7 +533,7 @@ export default function KeoTVHome() {
             onSelectSection={setActiveSection}
             activePane={activePane}
             onOpenSyncModal={() => setIsSyncModalOpen(true)}
-            onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
+            onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
           />
 
           <TVGuide
@@ -557,8 +560,17 @@ export default function KeoTVHome() {
       </div>
 
       {/* ============================================================== */}
-      {/* 3. MODALS (Categories Drawer, Xtream & Cloud Sync)             */}
+      {/* 3. MODALS (Settings Hub, Category Drawer, Xtream & Sync)       */}
       {/* ============================================================== */}
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        syncCode={syncCode}
+        onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
+        onOpenSyncModal={() => setIsSyncModalOpen(true)}
+        currentBuildNumber={4}
+      />
+
       <CategoryDrawerModal
         isOpen={isCategoryModalOpen}
         onClose={() => setIsCategoryModalOpen(false)}
