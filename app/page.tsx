@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { db, getSetting, setSetting } from '@/lib/db';
 import { INITIAL_CATEGORIES, INITIAL_CHANNELS, getMockEpgForChannel } from '@/lib/mock-data';
 import { Channel, Category, EpgProgram, NavigationPane, PlaylistConfig } from '@/types/iptv';
@@ -15,7 +15,9 @@ import { CategoryDrawerModal } from '@/components/CategoryDrawerModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
 import { syncXtreamPlaylist, parseM3UPlaylist } from '@/lib/iptv-service';
-import { Star, Tv, Film, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square, ArrowUpDown } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
+import { App as CapApp } from '@capacitor/app';
+import { Star, Tv, Film, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square, ArrowUpDown, AlertCircle } from 'lucide-react';
 
 export default function KeoTVHome() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -23,6 +25,14 @@ export default function KeoTVHome() {
   const [playlists, setPlaylists] = useState<PlaylistConfig[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [favCount, setFavCount] = useState<number>(0);
+
+  // Resync and channel loading recovery states
+  const [isResyncing, setIsResyncing] = useState<boolean>(false);
+  const [syncStatusBanner, setSyncStatusBanner] = useState<string | null>(null);
+
+  // Android Back navigation & Double-press to exit
+  const [backToastVisible, setBackToastVisible] = useState<boolean>(false);
+  const lastBackPressTimeRef = useRef<number>(0);
 
   // Sorting preferences
   const [categorySort, setCategorySort] = useState<'playlist' | 'alpha' | 'count'>('playlist');
@@ -47,7 +57,7 @@ export default function KeoTVHome() {
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
 
-  // Channel loader for the selected category from IndexedDB with sorting
+  // Channel loader for the selected category from IndexedDB with multi-tier lookup & sorting
   const loadCategoryChannels = useCallback(
     async (cat: Category | null, sortMode: 'playlist' | 'alpha' | 'num' = channelSort) => {
       if (!cat) {
@@ -60,15 +70,37 @@ export default function KeoTVHome() {
         if (cat.id === 'fav') {
           rawList = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
         } else {
+          // Tier 1: exact group_id indexed match
           rawList = await db.channels.where('group_id').equals(cat.id).toArray();
-          // Fallback if ID was stored without 'grp_' prefix
+
+          // Tier 2: alternate group_id prefix (with or without 'grp_')
           if (rawList.length === 0) {
             const altId = cat.id.startsWith('grp_') ? cat.id.replace('grp_', '') : `grp_${cat.id}`;
             rawList = await db.channels.where('group_id').equals(altId).toArray();
           }
-          // Secondary fallback: group_name match
+
+          // Tier 3: exact group_name match
           if (rawList.length === 0 && cat.name) {
-            rawList = await db.channels.filter((c) => c.group_name === cat.name).toArray();
+            rawList = await db.channels.filter((c) => 
+              Boolean(c.group_name && c.group_name.trim().toLowerCase() === cat.name.trim().toLowerCase())
+            ).toArray();
+          }
+
+          // Tier 4: universal memory fallback across all channels in Dexie
+          if (rawList.length === 0) {
+            const all = await db.channels.toArray();
+            const cleanCatId = cat.id.replace('grp_', '').trim().toLowerCase();
+            const cleanCatName = cat.name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+
+            rawList = all.filter((c) => {
+              const cGrpId = (c.group_id || '').replace('grp_', '').trim().toLowerCase();
+              if (cGrpId && cGrpId === cleanCatId) return true;
+              const cGrpName = (c.group_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+              if (cGrpName && cleanCatName && (cGrpName === cleanCatName || cGrpName.includes(cleanCatName) || cleanCatName.includes(cGrpName))) {
+                return true;
+              }
+              return false;
+            });
           }
         }
 
@@ -143,6 +175,15 @@ export default function KeoTVHome() {
         setCategories(loadedCats);
         setPlaylists(loadedPlaylists);
         setFavCount(initialFavCount);
+
+        // Auto-recovery if a playlist was saved but 0 channels exist (e.g. from Build 7 boolean index issue)
+        if (plCount > 0 && chCount === 0 && loadedPlaylists.length > 0) {
+          console.warn('Playlist exists but 0 channels in Dexie. Triggering auto-recovery...');
+          const activePl = loadedPlaylists[0];
+          setTimeout(() => {
+            handleResyncPlaylist(activePl);
+          }, 400);
+        }
 
         // Pick initial category: first non-fav category with count > 0 (or TNT if demo)
         let initialCat = loadedCats.find((c) => c.id === 'tnt');
@@ -311,7 +352,101 @@ export default function KeoTVHome() {
     loadCategoryChannels(cat, channelSort);
   };
 
-  // Register remote control D-Pad keyboard events
+  // ==============================================================
+  // ANDROID HIERARCHICAL BACK BUTTON & DOUBLE-PRESS TO EXIT
+  // ==============================================================
+  const handleAndroidBack = useCallback(() => {
+    // 1. Fullscreen player -> exit fullscreen
+    if (isFullscreen) {
+      setIsFullscreen(false);
+      return;
+    }
+
+    // 2. Modals -> close active modal
+    if (isSettingsModalOpen) {
+      setIsSettingsModalOpen(false);
+      return;
+    }
+    if (isCategoryModalOpen) {
+      setIsCategoryModalOpen(false);
+      return;
+    }
+    if (isXtreamModalOpen) {
+      setIsXtreamModalOpen(false);
+      return;
+    }
+    if (isSyncModalOpen) {
+      setIsSyncModalOpen(false);
+      return;
+    }
+
+    // 3. Channels list pane -> go back to categories pane
+    if (activePane === 'channels') {
+      setActivePane('categories');
+      return;
+    }
+
+    // 4. Double back to exit application
+    const now = Date.now();
+    if (now - lastBackPressTimeRef.current < 2000) {
+      if (Capacitor.isNativePlatform()) {
+        CapApp.exitApp();
+      }
+    } else {
+      lastBackPressTimeRef.current = now;
+      setBackToastVisible(true);
+      setTimeout(() => {
+        setBackToastVisible(false);
+      }, 2000);
+    }
+  }, [
+    isFullscreen,
+    isSettingsModalOpen,
+    isCategoryModalOpen,
+    isXtreamModalOpen,
+    isSyncModalOpen,
+    activePane,
+  ]);
+
+  // Register hardware Android Back button and webview history fallback
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    let appListenerHandle: any = null;
+    if (Capacitor.isNativePlatform()) {
+      CapApp.addListener('backButton', () => {
+        handleAndroidBack();
+      }).then((h) => {
+        appListenerHandle = h;
+      });
+    }
+
+    const onPopState = (e: PopStateEvent) => {
+      e.preventDefault();
+      window.history.pushState(null, '', window.location.href);
+      handleAndroidBack();
+    };
+    window.history.pushState(null, '', window.location.href);
+    window.addEventListener('popstate', onPopState);
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.keyCode === 4) {
+        e.preventDefault();
+        handleAndroidBack();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      if (appListenerHandle) {
+        appListenerHandle.remove();
+      }
+      window.removeEventListener('popstate', onPopState);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [handleAndroidBack]);
+
+  // Register remote control D-Pad keyboard events with hierarchical back handler
   useTVNavigation({
     activePane,
     setActivePane,
@@ -326,7 +461,102 @@ export default function KeoTVHome() {
     isFullscreen,
     setIsFullscreen,
     onJumpToChannelNumber: handleJumpToChannelNumber,
+    onBack: handleAndroidBack,
   });
+
+  // Re-synchronize existing playlist and reload all channels safely into Dexie
+  const handleResyncPlaylist = useCallback(async (pl?: PlaylistConfig) => {
+    const targetPl = pl || playlists[0];
+    if (!targetPl) return;
+
+    setIsResyncing(true);
+    setSyncStatusBanner(`Re-synchronisation de "${targetPl.name}"...`);
+
+    try {
+      let result: { playlist: PlaylistConfig; categories: Category[]; channels: Channel[] };
+      if (targetPl.type === 'xtream') {
+        result = await syncXtreamPlaylist({
+          serverUrl: targetPl.server_url,
+          username: targetPl.username || '',
+          password: targetPl.password || '',
+          name: targetPl.name,
+          onProgress: (p) => setSyncStatusBanner(p),
+        });
+      } else {
+        result = await parseM3UPlaylist({
+          m3uUrl: targetPl.m3u_url || targetPl.server_url,
+          name: targetPl.name,
+          onProgress: (p) => setSyncStatusBanner(p),
+        });
+      }
+
+      setSyncStatusBanner(`Enregistrement de ${result.channels.length} chaînes...`);
+
+      await db.playlists.clear();
+      await db.categories.clear();
+      await db.channels.clear();
+
+      await db.playlists.put(result.playlist);
+      await db.categories.bulkPut(result.categories);
+
+      const CHUNK_SIZE = 500;
+      for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
+        const chunk = result.channels.slice(i, i + CHUNK_SIZE);
+        try {
+          await db.channels.bulkPut(chunk);
+        } catch (chunkErr) {
+          console.warn('bulkPut chunk error, fallback to individual put:', chunkErr);
+          for (const item of chunk) {
+            try {
+              await db.channels.put(item);
+            } catch (putErr) {
+              console.error('Failed to put channel', item.id, putErr);
+            }
+          }
+        }
+        if (result.channels.length > 1000) {
+          const percent = Math.min(100, Math.round(((i + chunk.length) / result.channels.length) * 100));
+          setSyncStatusBanner(`Enregistrement local : ${percent}% (${Math.min(i + chunk.length, result.channels.length)}/${result.channels.length} chaînes)...`);
+        }
+      }
+
+      const loadedCats = await db.categories.orderBy('custom_order').toArray();
+      const loadedPlaylists = await db.playlists.toArray();
+      setCategories(loadedCats);
+      setPlaylists(loadedPlaylists);
+      setFavCount(0);
+
+      let firstCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
+      if (firstCat) {
+        setSelectedCategory(firstCat);
+        setFocusedCategoryIndex(0);
+        setFocusedChannelIndex(0);
+        await loadCategoryChannels(firstCat, channelSort);
+      }
+
+      const firstChannel = result.channels[0];
+      if (firstChannel) {
+        setActiveChannel(firstChannel);
+        setCurrentEpg({
+          id: 'epg_' + firstChannel.id,
+          channel_id: firstChannel.id,
+          title: firstChannel.name + ' (En Direct)',
+          description: 'Flux en direct de ' + firstChannel.name,
+          start: new Date().toISOString(),
+          end: new Date(Date.now() + 7200000).toISOString(),
+          duration_min: 120,
+        });
+        setNextEpg(null);
+        setIsStopped(false);
+      }
+    } catch (err: any) {
+      console.error('Failed to resync playlist:', err);
+      alert(`Erreur lors de la synchronisation : ${err.message}`);
+    } finally {
+      setIsResyncing(false);
+      setSyncStatusBanner(null);
+    }
+  }, [playlists, channelSort, loadCategoryChannels]);
 
   // Save & Synchronize new playlist (Xtream / M3U) with chunked bulkPut to support 50k+ channels
   const handleSavePlaylist = async (
@@ -364,14 +594,25 @@ export default function KeoTVHome() {
     // Save real categories in Dexie
     await db.categories.bulkPut(result.categories);
 
-    // Chunked channels save to prevent SQLite / IndexedDB transaction limits & memory errors
-    const CHUNK_SIZE = 1000;
+    // Chunked channels save with individual put fallback to prevent SQLite / IndexedDB transaction limits & memory errors
+    const CHUNK_SIZE = 500;
     for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
       const chunk = result.channels.slice(i, i + CHUNK_SIZE);
-      await db.channels.bulkPut(chunk);
-      if (result.channels.length > 2000) {
+      try {
+        await db.channels.bulkPut(chunk);
+      } catch (chunkErr) {
+        console.warn('bulkPut chunk error, falling back to individual put:', chunkErr);
+        for (const item of chunk) {
+          try {
+            await db.channels.put(item);
+          } catch (itemErr) {
+            console.error('Failed to put channel:', item.id, itemErr);
+          }
+        }
+      }
+      if (result.channels.length > 1000) {
         const percent = Math.min(100, Math.round(((i + chunk.length) / result.channels.length) * 100));
-        onProgress(`Enregistrement local : ${percent}% (${i + chunk.length}/${result.channels.length} chaînes)...`);
+        onProgress(`Enregistrement local : ${percent}% (${Math.min(i + chunk.length, result.channels.length)}/${result.channels.length} chaînes)...`);
       }
     }
 
@@ -677,8 +918,20 @@ export default function KeoTVHome() {
         {/* Full-width Channel List */}
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1.5">
           {filteredChannels.length === 0 ? (
-            <div className="py-12 text-center text-slate-500 text-xs">
-              Aucune chaîne dans cette catégorie.
+            <div className="py-12 flex flex-col items-center justify-center text-center space-y-3 px-4">
+              <AlertCircle className="w-8 h-8 text-sky-400" />
+              <p className="text-sm font-bold text-white">Aucune chaîne dans ce bouquet</p>
+              <p className="text-xs text-slate-400 max-w-xs">
+                Si vos chaînes ne sont pas encore apparues en mémoire, vous pouvez les recharger en un clic.
+              </p>
+              <button
+                onClick={() => handleResyncPlaylist()}
+                disabled={isResyncing}
+                className="px-4 py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center space-x-2 shadow-lg disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isResyncing ? 'animate-spin' : ''}`} />
+                <span>{isResyncing ? 'Chargement en cours...' : 'Recharger les chaînes maintenant'}</span>
+              </button>
             </div>
           ) : (
             filteredChannels.map((ch, idx) => {
@@ -882,7 +1135,9 @@ export default function KeoTVHome() {
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
         onDeletePlaylist={handleDeletePlaylist}
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
-        currentBuildNumber={7}
+        onResyncPlaylist={handleResyncPlaylist}
+        isResyncing={isResyncing}
+        currentBuildNumber={8}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
@@ -912,6 +1167,20 @@ export default function KeoTVHome() {
         onApplySyncCode={handleApplySyncCode}
         onForceSync={handleForceSync}
       />
+
+      {/* Floating Status & Back Toast Notifications */}
+      {syncStatusBanner && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-sky-950/95 text-sky-200 border border-sky-500/50 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-2xl flex items-center space-x-2 backdrop-blur-md animate-fade-in pointer-events-none">
+          <RefreshCw className="w-4 h-4 animate-spin text-sky-400" />
+          <span>{syncStatusBanner}</span>
+        </div>
+      )}
+
+      {backToastVisible && (
+        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white text-xs font-semibold px-4 py-2 rounded-full border border-tv-border shadow-2xl backdrop-blur-md animate-fade-in pointer-events-none">
+          Appuyez à nouveau pour quitter KeoTV
+        </div>
+      )}
     </main>
   );
 }

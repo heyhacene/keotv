@@ -1,28 +1,103 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
+    <!-- Background Outer Squircle Gradient -->
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0a0d14"/>
-      <stop offset="50%" stop-color="#111622"/>
+      <stop offset="0%" stop-color="#080c14"/>
+      <stop offset="60%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#03254c"/>
+    </linearGradient>
+
+    <!-- TV Frame Gradient -->
+    <linearGradient id="bezelGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#2d3748"/>
+      <stop offset="50%" stop-color="#1a202c"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+
+    <!-- TV Display Inner Gradient -->
+    <linearGradient id="screenGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#050811"/>
+      <stop offset="100%" stop-color="#020408"/>
+    </linearGradient>
+
+    <!-- Neon Cyan & Electric Blue Gradient for 'K' -->
+    <linearGradient id="kCyanGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#67e8f9"/>
+      <stop offset="50%" stop-color="#38bdf8"/>
       <stop offset="100%" stop-color="#0284c7"/>
     </linearGradient>
-    <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+
+    <!-- Play Arrow Accent Gradient -->
+    <linearGradient id="kPlayGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#38bdf8"/>
-      <stop offset="100%" stop-color="#0284c7"/>
+      <stop offset="100%" stop-color="#2563eb"/>
+    </linearGradient>
+
+    <!-- Screen Ambient Center Glow -->
+    <radialGradient id="screenGlow" cx="50%" cy="45%" r="45%">
+      <stop offset="0%" stop-color="#0284c7" stop-opacity="0.32"/>
+      <stop offset="60%" stop-color="#0369a1" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#020408" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Subtle Glass Gloss Highlight -->
+    <linearGradient id="glassGloss" x1="0%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.12"/>
+      <stop offset="45%" stop-color="#ffffff" stop-opacity="0.02"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
     </linearGradient>
   </defs>
-  <!-- Background Rounded Squircle -->
-  <rect width="512" height="512" rx="128" fill="url(#bgGrad)"/>
-  
-  <!-- TV Outer Frame -->
-  <rect x="76" y="96" width="360" height="250" rx="32" fill="#161d2d" stroke="#38bdf8" stroke-width="12"/>
-  
-  <!-- Screen Glow -->
-  <rect x="96" y="116" width="320" height="210" rx="20" fill="#0d121c"/>
-  
-  <!-- Play Symbol inside TV -->
-  <polygon points="220,165 330,221 220,277" fill="url(#glowGrad)"/>
-  
-  <!-- TV Stand Base -->
-  <path d="M216,346 L200,400 L312,400 L296,346 Z" fill="#232d42"/>
-  <rect x="170" y="400" width="172" height="16" rx="8" fill="#38bdf8"/>
+
+  <!-- Base App Icon Squircle -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)"/>
+  <rect width="508" height="508" x="2" y="2" rx="110" fill="none" stroke="#38bdf8" stroke-width="2" stroke-opacity="0.25"/>
+
+  <!-- TV Desktop Pedestal Stand -->
+  <path d="M224,348 L212,398 L300,398 L288,348 Z" fill="#1e293b"/>
+  <!-- TV Stand Base Bar -->
+  <rect x="160" y="398" width="192" height="14" rx="7" fill="#334155"/>
+  <rect x="226" y="402" width="60" height="6" rx="3" fill="#38bdf8" fill-opacity="0.7"/>
+
+  <!-- TV Outer Bezel Frame -->
+  <rect x="68" y="86" width="376" height="262" rx="28" fill="url(#bezelGrad)" stroke="#38bdf8" stroke-width="3" stroke-opacity="0.4"/>
+
+  <!-- TV Screen Glass -->
+  <rect x="80" y="98" width="352" height="238" rx="18" fill="url(#screenGrad)"/>
+
+  <!-- Screen Backlight Glow Behind 'K' -->
+  <rect x="80" y="98" width="352" height="238" rx="18" fill="url(#screenGlow)"/>
+
+  <!-- Diagonal Glass Reflection Sweep -->
+  <path d="M80,98 L260,98 L110,248 L80,248 Z" fill="url(#glassGloss)"/>
+
+  <!-- TV Status LED -->
+  <circle cx="256" cy="341" r="2.5" fill="#38bdf8"/>
+
+  <!-- ============================================== -->
+  <!-- THE STYLIZED GLOWING 'K' WITH PLAY ARROW       -->
+  <!-- ============================================== -->
+  <g transform="translate(178, 132)">
+    <!-- Ambient Neon Shadow / Glow for K -->
+    <g opacity="0.35">
+      <!-- Glow Vertical Stem -->
+      <rect x="10" y="10" width="34" height="150" rx="17" fill="#0284c7"/>
+      <!-- Glow Upper Arm -->
+      <polygon points="40,90 120,20 150,46 72,114" fill="#0284c7"/>
+      <!-- Glow Lower Play Arm -->
+      <polygon points="42,88 152,148 42,168" fill="#0284c7"/>
+    </g>
+
+    <!-- 1. Vertical Stem of 'K' -->
+    <rect x="10" y="10" width="34" height="150" rx="17" fill="url(#kCyanGrad)"/>
+
+    <!-- 2. Upper Diagonal Arm of 'K' -->
+    <path d="M40,94 L108,30 C114,24 124,24 130,30 L136,36 C142,42 142,52 136,58 L68,122 Z" fill="url(#kCyanGrad)"/>
+
+    <!-- 3. Lower Dynamic Play Arrow Branch of 'K' -->
+    <path d="M38,82 L138,138 C148,144 148,158 138,164 L48,168 C38,168 32,160 38,150 Z" fill="url(#kPlayGrad)"/>
+
+    <!-- Internal Crisp Highlights -->
+    <circle cx="27" cy="27" r="6" fill="#ffffff" fill-opacity="0.7"/>
+    <polygon points="60,98 126,138 60,154" fill="#ffffff" fill-opacity="0.2"/>
+  </g>
 </svg>

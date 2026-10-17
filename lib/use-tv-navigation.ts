@@ -17,6 +17,7 @@ interface TVNavOptions {
   isFullscreen: boolean;
   setIsFullscreen: (full: boolean) => void;
   onJumpToChannelNumber: (num: number) => void;
+  onBack?: () => void;
 }
 
 export function useTVNavigation({
@@ -33,6 +34,7 @@ export function useTVNavigation({
   isFullscreen,
   setIsFullscreen,
   onJumpToChannelNumber,
+  onBack,
 }: TVNavOptions) {
   const numberBufferRef = useRef<string>('');
   const numberTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -65,6 +67,10 @@ export function useTVNavigation({
       if (isFullscreen) {
         if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'GoBack') {
           e.preventDefault();
+          if (onBack) {
+            onBack();
+            return;
+          }
           setIsFullscreen(false);
           return;
         }
@@ -148,6 +154,10 @@ export function useTVNavigation({
         case 'Backspace':
         case 'GoBack':
           e.preventDefault();
+          if (onBack) {
+            onBack();
+            return;
+          }
           if (activePane === 'channels') {
             setActivePane('categories');
           } else if (activePane === 'categories') {
@@ -173,6 +183,7 @@ export function useTVNavigation({
       onToggleFavorite,
       setIsFullscreen,
       onJumpToChannelNumber,
+      onBack,
     ]
   );
 

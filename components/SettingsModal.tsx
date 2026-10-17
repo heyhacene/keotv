@@ -30,6 +30,8 @@ interface SettingsModalProps {
   onOpenSyncModal: () => void;
   onDeletePlaylist: (id: string) => Promise<void>;
   onRestoreDemoPlaylist: () => Promise<void>;
+  onResyncPlaylist?: (playlist: PlaylistConfig) => Promise<void>;
+  isResyncing?: boolean;
   currentBuildNumber?: number;
   categorySort?: 'playlist' | 'alpha' | 'count';
   onCategorySortChange?: (sort: 'playlist' | 'alpha' | 'count') => void;
@@ -46,7 +48,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenSyncModal,
   onDeletePlaylist,
   onRestoreDemoPlaylist,
-  currentBuildNumber = 7,
+  onResyncPlaylist,
+  isResyncing = false,
+  currentBuildNumber = 8,
   categorySort = 'playlist',
   onCategorySortChange,
   channelSort = 'playlist',
@@ -274,13 +278,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </button>
                         </div>
                       ) : (
-                        <button
-                          onClick={() => setDeletingId(pl.id)}
-                          className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition flex-shrink-0"
-                          title="Supprimer cette playlist"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center space-x-1 flex-shrink-0">
+                          {onResyncPlaylist && (
+                            <button
+                              onClick={() => onResyncPlaylist(pl)}
+                              disabled={isResyncing}
+                              className="p-2 text-slate-400 hover:text-tv-accent hover:bg-sky-500/10 rounded-lg transition disabled:opacity-50"
+                              title="Re-synchroniser et recharger les chaînes"
+                            >
+                              <RefreshCw className={`w-4 h-4 ${isResyncing ? 'animate-spin text-tv-accent' : ''}`} />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setDeletingId(pl.id)}
+                            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
+                            title="Supprimer cette playlist"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
                       )}
                     </div>
                   ))
