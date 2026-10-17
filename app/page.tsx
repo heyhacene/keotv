@@ -11,8 +11,9 @@ import { TVGuide } from '@/components/TVGuide';
 import { LiveVideoPlayer } from '@/components/LiveVideoPlayer';
 import { XtreamModal } from '@/components/XtreamModal';
 import { SyncModal } from '@/components/SyncModal';
+import { CategoryDrawerModal } from '@/components/CategoryDrawerModal';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
-import { Star, Tv, Film, Clapperboard, PlusCircle, RefreshCw, Trophy, Globe, Compass, Sparkles, Maximize2 } from 'lucide-react';
+import { Star, Tv, Film, Clapperboard, PlusCircle, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers } from 'lucide-react';
 
 export default function KeoTVHome() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -34,13 +35,17 @@ export default function KeoTVHome() {
 
   const [isXtreamModalOpen, setIsXtreamModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
 
-  // 1. Initialize IndexedDB & Seed initial channels on first launch
+  // 1. Initialize IndexedDB & Seed initial channels
   useEffect(() => {
     async function initDB() {
       try {
-        const catCount = await db.categories.count();
-        if (catCount === 0) {
+        const chCount = await db.channels.count();
+        // If empty or older small seed (< 25 channels), reload the full channel catalog
+        if (chCount < 25) {
+          await db.categories.clear();
+          await db.channels.clear();
           await db.categories.bulkAdd(INITIAL_CATEGORIES);
           await db.channels.bulkAdd(INITIAL_CHANNELS);
         }
@@ -51,10 +56,11 @@ export default function KeoTVHome() {
         setCategories(loadedCats);
         setChannels(loadedChannels);
 
-        // Pick initial category & initial channel
+        // Pick initial category (TNT by default)
         const initialCat = loadedCats.find((c) => c.id === 'tnt') || loadedCats[0];
         setSelectedCategory(initialCat || null);
 
+        // Pick initial channel
         const initialChannel = loadedChannels.find((ch) => ch.id === 'ch_tf1') || loadedChannels[0];
         if (initialChannel) {
           setActiveChannel(initialChannel);
@@ -77,6 +83,19 @@ export default function KeoTVHome() {
     initDB();
   }, []);
 
+  // Compute exact live counts for each category
+  const categoriesWithCounts = useMemo(() => {
+    return categories.map((cat) => {
+      let count = 0;
+      if (cat.id === 'fav') {
+        count = channels.filter((c) => c.is_favorite).length;
+      } else {
+        count = channels.filter((c) => c.group_id === cat.id).length;
+      }
+      return { ...cat, count };
+    });
+  }, [categories, channels]);
+
   // Filter channels according to the selected category
   const filteredChannels = useMemo(() => {
     if (!selectedCategory) return channels;
@@ -96,19 +115,22 @@ export default function KeoTVHome() {
     }
   }, [focusedChannelIndex, filteredChannels]);
 
-  // Channel Selection: single press plays preview, second press goes fullscreen
+  // Channel Selection: single tap plays channel in the single player
   const handleSelectChannel = useCallback(
     (index: number, forceFullscreen: boolean = false) => {
       const targetChannel = filteredChannels[index];
       if (!targetChannel) return;
 
-      if (activeChannel?.id === targetChannel.id || forceFullscreen) {
+      if (activeChannel?.id === targetChannel.id && forceFullscreen) {
         setIsFullscreen(true);
       } else {
         setActiveChannel(targetChannel);
         const epg = getMockEpgForChannel(targetChannel.id);
         setCurrentEpg(epg.current);
         setNextEpg(epg.next);
+        if (forceFullscreen) {
+          setIsFullscreen(true);
+        }
       }
     },
     [filteredChannels, activeChannel]
@@ -165,7 +187,7 @@ export default function KeoTVHome() {
     activePane,
     setActivePane,
     channelCount: filteredChannels.length,
-    categoryCount: categories.length,
+    categoryCount: categoriesWithCounts.length,
     focusedCategoryIndex,
     setFocusedCategoryIndex,
     focusedChannelIndex,
@@ -273,19 +295,25 @@ export default function KeoTVHome() {
   };
 
   return (
-    <main className="h-screen w-screen flex flex-col bg-tv-bg overflow-hidden font-tv select-none text-slate-100">
+    <main className="h-screen w-screen flex flex-col bg-tv-bg overflow-hidden font-tv select-none text-slate-100 relative">
       {/* ============================================================== */}
       {/* 1. MOBILE VIEW (Visible on Portrait / Small Screens < 1024px)  */}
       {/* ============================================================== */}
       <div className="flex lg:hidden flex-col h-full w-full bg-tv-bg overflow-hidden">
-        {/* Top Video Player */}
-        <div className="w-full aspect-video bg-black flex-shrink-0 relative">
+        {/* Top Video Player (Expands to fixed inset-0 if isFullscreen is active) */}
+        <div
+          className={`bg-black flex-shrink-0 transition-all ${
+            isFullscreen
+              ? 'fixed inset-0 z-50 w-screen h-screen'
+              : 'w-full aspect-video relative'
+          }`}
+        >
           <LiveVideoPlayer
             channel={activeChannel}
             currentEpg={currentEpg}
             nextEpg={nextEpg}
-            isFullscreen={false}
-            onToggleFullscreen={() => setIsFullscreen(true)}
+            isFullscreen={isFullscreen}
+            onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
           />
         </div>
 
@@ -309,33 +337,45 @@ export default function KeoTVHome() {
               {currentEpg?.title || 'Programme en direct'}
             </p>
           </div>
-          <div className="flex items-center space-x-1">
-            <button
-              onClick={() => activeChannel && handleToggleFavorite(activeChannel)}
-              className="p-1.5 text-slate-400 hover:text-amber-400 transition"
-              title="Favori"
-            >
-              <Star className={`w-5 h-5 ${activeChannel?.is_favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
-            </button>
-            <button
-              onClick={() => setIsFullscreen(true)}
-              className="p-1.5 text-slate-300 hover:text-white transition"
-              title="Plein écran"
-            >
-              <Maximize2 className="w-5 h-5 text-tv-accent" />
-            </button>
-          </div>
+          <button
+            onClick={() => activeChannel && handleToggleFavorite(activeChannel)}
+            className="p-1.5 text-slate-400 hover:text-amber-400 transition"
+            title="Favori"
+          >
+            <Star className={`w-5 h-5 ${activeChannel?.is_favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
+          </button>
+        </div>
+
+        {/* Category Header & Drawer Opener */}
+        <div className="px-3 py-1.5 bg-tv-surface/90 border-b border-tv-border flex items-center justify-between flex-shrink-0">
+          <button
+            onClick={() => setIsCategoryModalOpen(true)}
+            className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-left transition"
+          >
+            <Layers className="w-4 h-4 text-tv-accent flex-shrink-0" />
+            <span className="text-xs font-bold text-white truncate max-w-[200px]">
+              {selectedCategory?.name || 'Groupes'}
+            </span>
+            <span className="text-[10px] text-slate-400 font-mono">
+              ({filteredChannels.length})
+            </span>
+            <ChevronDown className="w-3.5 h-3.5 text-slate-400 ml-1" />
+          </button>
+
+          <span className="text-[10px] uppercase tracking-wider text-slate-500 font-bold">
+            {filteredChannels.length} chaînes
+          </span>
         </div>
 
         {/* Horizontal Category Pills */}
-        <div className="flex items-center space-x-2 px-3 py-2 bg-tv-surface/60 border-b border-tv-border overflow-x-auto scrollbar-none flex-shrink-0">
-          {categories.map((cat, idx) => {
+        <div className="flex items-center space-x-2 px-3 py-2 bg-tv-surface/40 border-b border-tv-border overflow-x-auto scrollbar-none flex-shrink-0">
+          {categoriesWithCounts.map((cat, idx) => {
             const isSelected = selectedCategory?.id === cat.id;
             return (
               <button
                 key={cat.id}
                 onClick={() => handleSelectCategory(cat, idx)}
-                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                className={`flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
                   isSelected
                     ? 'bg-tv-focus text-white shadow-md'
                     : 'bg-tv-card text-slate-400 hover:text-white border border-tv-border/60'
@@ -343,7 +383,7 @@ export default function KeoTVHome() {
               >
                 {getCategoryIcon(cat.icon)}
                 <span>{cat.name}</span>
-                <span className="text-[10px] opacity-75">({cat.count})</span>
+                <span className="text-[10px] opacity-75 font-mono">({cat.count})</span>
               </button>
             );
           })}
@@ -416,36 +456,47 @@ export default function KeoTVHome() {
         {/* Mobile Bottom Navigation Bar */}
         <div className="h-14 bg-tv-surface border-t border-tv-border flex items-center justify-around px-2 flex-shrink-0">
           <button
-            onClick={() => setActiveSection('live')}
+            onClick={() => {
+              setActiveSection('live');
+              const tntCat = categoriesWithCounts.find((c) => c.id === 'tnt');
+              if (tntCat) handleSelectCategory(tntCat, 1);
+            }}
             className={`flex flex-col items-center justify-center flex-1 py-1 ${activeSection === 'live' ? 'text-tv-accent' : 'text-slate-400'}`}
           >
             <Tv className="w-4 h-4" />
             <span className="text-[10px] mt-0.5">Direct</span>
           </button>
+
           <button
-            onClick={() => setActiveSection('movies')}
-            className={`flex flex-col items-center justify-center flex-1 py-1 ${activeSection === 'movies' ? 'text-tv-accent' : 'text-slate-400'}`}
+            onClick={() => setIsCategoryModalOpen(true)}
+            className="flex flex-col items-center justify-center flex-1 py-1 text-slate-400 hover:text-tv-accent"
           >
-            <Film className="w-4 h-4" />
-            <span className="text-[10px] mt-0.5">Films</span>
+            <Layers className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5 font-bold">Groupes</span>
           </button>
-          <button
-            onClick={() => setActiveSection('series')}
-            className={`flex flex-col items-center justify-center flex-1 py-1 ${activeSection === 'series' ? 'text-tv-accent' : 'text-slate-400'}`}
-          >
-            <Clapperboard className="w-4 h-4" />
-            <span className="text-[10px] mt-0.5">Séries</span>
-          </button>
+
           <button
             onClick={() => {
-              const favCat = categories.find((c) => c.id === 'fav');
+              const favCat = categoriesWithCounts.find((c) => c.id === 'fav');
               if (favCat) handleSelectCategory(favCat, 0);
             }}
-            className="flex flex-col items-center justify-center flex-1 py-1 text-slate-400 hover:text-amber-400"
+            className={`flex flex-col items-center justify-center flex-1 py-1 ${selectedCategory?.id === 'fav' ? 'text-amber-400' : 'text-slate-400'}`}
           >
             <Star className="w-4 h-4" />
             <span className="text-[10px] mt-0.5">Favoris</span>
           </button>
+
+          <button
+            onClick={() => {
+              const cinemaCat = categoriesWithCounts.find((c) => c.id === 'cinema');
+              if (cinemaCat) handleSelectCategory(cinemaCat, 3);
+            }}
+            className={`flex flex-col items-center justify-center flex-1 py-1 ${selectedCategory?.id === 'cinema' ? 'text-purple-400' : 'text-slate-400'}`}
+          >
+            <Film className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Films</span>
+          </button>
+
           <button
             onClick={() => setIsXtreamModalOpen(true)}
             className="flex flex-col items-center justify-center flex-1 py-1 text-tv-accent"
@@ -453,6 +504,7 @@ export default function KeoTVHome() {
             <PlusCircle className="w-4 h-4" />
             <span className="text-[10px] mt-0.5">Ajouter</span>
           </button>
+
           <button
             onClick={() => setIsSyncModalOpen(true)}
             className="flex flex-col items-center justify-center flex-1 py-1 text-emerald-400"
@@ -467,15 +519,12 @@ export default function KeoTVHome() {
       {/* 2. TV / LANDSCAPE VIEW (Screens >= 1024px or Android TV 16:9)  */}
       {/* ============================================================== */}
       <div className="hidden lg:flex flex-col h-full w-full">
-        {/* Top Bar Header */}
         <TopBar
           currentCategoryName={selectedCategory?.name}
           onToggleFullscreen={() => setIsFullscreen(true)}
         />
 
-        {/* Main TV Layout */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Leftmost Sidebar */}
           <NavigationSidebar
             activeSection={activeSection}
             onSelectSection={setActiveSection}
@@ -484,9 +533,8 @@ export default function KeoTVHome() {
             onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
           />
 
-          {/* Center & Right: Complete TV Guide with integrated Preview Player */}
           <TVGuide
-            categories={categories}
+            categories={categoriesWithCounts}
             channels={filteredChannels}
             selectedCategory={selectedCategory}
             focusedCategoryIndex={focusedCategoryIndex}
@@ -509,21 +557,16 @@ export default function KeoTVHome() {
       </div>
 
       {/* ============================================================== */}
-      {/* 3. FULLSCREEN PLAYER OVERLAY                                  */}
+      {/* 3. MODALS (Categories Drawer, Xtream & Cloud Sync)             */}
       {/* ============================================================== */}
-      {isFullscreen && (
-        <LiveVideoPlayer
-          channel={activeChannel}
-          currentEpg={currentEpg}
-          nextEpg={nextEpg}
-          isFullscreen={true}
-          onToggleFullscreen={() => setIsFullscreen(false)}
-        />
-      )}
+      <CategoryDrawerModal
+        isOpen={isCategoryModalOpen}
+        onClose={() => setIsCategoryModalOpen(false)}
+        categories={categoriesWithCounts}
+        selectedCategory={selectedCategory}
+        onSelectCategory={handleSelectCategory}
+      />
 
-      {/* ============================================================== */}
-      {/* 4. MODALS (Xtream & Cloud Sync)                               */}
-      {/* ============================================================== */}
       <XtreamModal
         isOpen={isXtreamModalOpen}
         onClose={() => setIsXtreamModalOpen(false)}
