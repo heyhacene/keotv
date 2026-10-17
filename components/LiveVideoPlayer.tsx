@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { Channel, EpgProgram } from '@/types/iptv';
-import { Maximize2, Minimize2, Volume2, VolumeX, Radio, Clock, ShieldCheck, Sparkles } from 'lucide-react';
+import { Maximize2, Minimize2, Volume2, VolumeX, Radio, Clock, Sparkles, Square, Play } from 'lucide-react';
 
 interface LiveVideoPlayerProps {
   channel: Channel | null;
@@ -11,8 +11,8 @@ interface LiveVideoPlayerProps {
   nextEpg?: EpgProgram | null;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
-  onPreviousChannel?: () => void;
-  onNextChannel?: () => void;
+  isStopped?: boolean;
+  onTogglePlayStop?: () => void;
 }
 
 export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
@@ -21,18 +21,38 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   nextEpg,
   isFullscreen,
   onToggleFullscreen,
+  isStopped: externalIsStopped,
+  onTogglePlayStop: externalTogglePlayStop,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const [internalIsStopped, setInternalIsStopped] = useState<boolean>(false);
+  const isStopped = externalIsStopped !== undefined ? externalIsStopped : internalIsStopped;
+
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [showOsd, setShowOsd] = useState<boolean>(true);
   const [streamError, setStreamError] = useState<string | null>(null);
   const osdTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Load stream whenever channel changes
+  // Stop or start stream when channel changes or isStopped changes
   useEffect(() => {
     if (!channel || !videoRef.current) return;
+
+    if (isStopped) {
+      if (hlsRef.current) {
+        hlsRef.current.stopLoad();
+        hlsRef.current.detachMedia();
+      }
+      if (videoRef.current) {
+        videoRef.current.pause();
+        videoRef.current.removeAttribute('src');
+        videoRef.current.load();
+      }
+      setIsPlaying(false);
+      return;
+    }
+
     setStreamError(null);
     setIsPlaying(false);
 
@@ -58,7 +78,6 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         video.play().catch(() => {
-          // Auto-play policy might require mute on first load
           video.muted = true;
           setIsMuted(true);
           video.play().catch((e) => console.warn('Autoplay failed:', e));
@@ -95,7 +114,6 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       video.play().catch(() => {});
     }
 
-    // Trigger OSD on channel change
     triggerOsd();
 
     return () => {
@@ -104,9 +122,17 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
         hlsRef.current = null;
       }
     };
-  }, [channel]);
+  }, [channel, isStopped]);
 
-  // Handle OSD fade out
+  const toggleStopPlay = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (externalTogglePlayStop) {
+      externalTogglePlayStop();
+    } else {
+      setInternalIsStopped(!internalIsStopped);
+    }
+  };
+
   const triggerOsd = () => {
     setShowOsd(true);
     if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
@@ -125,7 +151,6 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
     }
   };
 
-  // Calculate EPG progress
   const getEpgProgress = () => {
     if (!currentEpg) return 40;
     const now = Date.now();
@@ -148,15 +173,37 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       {/* HTML5 Video element */}
       <video
         ref={videoRef}
-        className="w-full h-full object-contain"
+        className={`w-full h-full object-contain ${isStopped ? 'hidden' : 'block'}`}
         playsInline
         autoPlay
         muted={isMuted}
       />
 
+      {/* Stopped resting screen */}
+      {isStopped && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-tv-surface text-center p-6 select-none">
+          <div className="w-14 h-14 rounded-2xl bg-tv-card border border-tv-border flex items-center justify-center mb-3 text-slate-400 shadow-xl">
+            <Radio className="w-7 h-7 text-tv-accent" />
+          </div>
+          <h3 className="text-base font-bold text-white mb-0.5">
+            {channel?.name || 'Lecture arrêtée'}
+          </h3>
+          <p className="text-xs text-slate-400 mb-4">
+            Le flux vidéo et la bande passante sont suspendus.
+          </p>
+          <button
+            onClick={toggleStopPlay}
+            className="px-5 py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center space-x-2 shadow-lg scale-100 active:scale-95"
+          >
+            <Play className="w-4 h-4 fill-white" />
+            <span>Relancer la lecture</span>
+          </button>
+        </div>
+      )}
+
       {/* Stream loading / error state */}
-      {streamError && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/80 text-white p-6 text-center">
+      {!isStopped && streamError && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/85 text-white p-6 text-center select-none">
           <Radio className="w-12 h-12 text-rose-500 mb-3 animate-pulse" />
           <p className="text-lg font-medium text-slate-200">{channel?.name}</p>
           <p className="text-sm text-rose-400 mt-1">{streamError}</p>
@@ -164,16 +211,38 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Preview Player Overlay (when not fullscreen) */}
+      {/* Controls Overlay (when not fullscreen) */}
       {!isFullscreen && (
-        <div className="absolute top-2 right-2 flex items-center space-x-1.5 bg-black/60 backdrop-blur-md rounded-lg p-1.5 border border-white/10 z-10">
+        <div className="absolute top-2 right-2 flex items-center space-x-1.5 bg-black/70 backdrop-blur-md rounded-lg p-1.5 border border-white/10 z-10">
+          {/* Stop / Resume Button */}
           <button
-            onClick={toggleMute}
-            className="p-1.5 text-slate-200 hover:text-white hover:bg-white/10 rounded transition"
-            title={isMuted ? 'Activer le son' : 'Couper le son'}
+            onClick={toggleStopPlay}
+            className={`p-1.5 rounded transition ${
+              isStopped
+                ? 'text-emerald-400 hover:bg-emerald-500/20'
+                : 'text-slate-300 hover:text-rose-400 hover:bg-white/10'
+            }`}
+            title={isStopped ? 'Reprendre la lecture' : 'Arrêter le flux (Stop)'}
           >
-            {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+            {isStopped ? (
+              <Play className="w-4 h-4 fill-current" />
+            ) : (
+              <Square className="w-4 h-4 fill-current text-rose-400" />
+            )}
           </button>
+
+          {/* Mute Button */}
+          {!isStopped && (
+            <button
+              onClick={toggleMute}
+              className="p-1.5 text-slate-200 hover:text-white hover:bg-white/10 rounded transition"
+              title={isMuted ? 'Activer le son' : 'Couper le son'}
+            >
+              {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+            </button>
+          )}
+
+          {/* Fullscreen Button */}
           <button
             onClick={onToggleFullscreen}
             className="p-1.5 text-slate-200 hover:text-white hover:bg-white/10 rounded transition"
@@ -206,6 +275,16 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
                 <Clock className="w-4 h-4 mr-1.5 text-tv-accent" />
                 {new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
               </span>
+
+              {/* Stop in fullscreen */}
+              <button
+                onClick={toggleStopPlay}
+                className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"
+                title={isStopped ? 'Reprendre' : 'Arrêter (Stop)'}
+              >
+                {isStopped ? <Play className="w-5 h-5 fill-white" /> : <Square className="w-5 h-5 fill-rose-400 text-rose-400" />}
+              </button>
+
               <button
                 onClick={onToggleFullscreen}
                 className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"
@@ -216,10 +295,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
             </div>
           </div>
 
-          {/* Bottom Info Banner (TiviMate signature) */}
+          {/* Bottom Info Banner */}
           <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-6 pt-16">
             <div className="max-w-6xl mx-auto flex items-end space-x-6">
-              {/* Channel Logo and Number */}
               <div className="flex items-center space-x-4 flex-shrink-0">
                 <div className="text-3xl font-black text-tv-accent font-mono w-12 text-right">
                   {channel?.num || 1}
@@ -231,19 +309,19 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
                 </div>
               </div>
 
-              {/* Program Details & Progress */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center space-x-3 mb-1">
                   <h2 className="text-xl font-bold text-white truncate">
                     {currentEpg?.title || 'Programme en direct'}
                   </h2>
-                  <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs px-2 py-0.5 rounded font-medium flex items-center">
-                    <Sparkles className="w-3 h-3 mr-1" />
-                    {channel?.resolution || 'FHD'}
-                  </span>
+                  {channel?.resolution && (
+                    <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs px-2 py-0.5 rounded font-medium flex items-center">
+                      <Sparkles className="w-3 h-3 mr-1" />
+                      {channel.resolution}
+                    </span>
+                  )}
                 </div>
 
-                {/* Progress bar */}
                 <div className="flex items-center space-x-3 my-2">
                   <span className="text-xs text-slate-400 font-mono">
                     {currentEpg ? new Date(currentEpg.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '20:00'}
@@ -259,17 +337,15 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
                   </span>
                 </div>
 
-                {/* Next program */}
                 <div className="text-xs text-slate-400 truncate flex items-center">
                   <span className="text-slate-500 mr-2 uppercase tracking-wide">Suivant :</span>
                   <span className="text-slate-300 font-medium">{nextEpg?.title || 'Journal de la nuit'}</span>
                 </div>
               </div>
 
-              {/* TV Remote Tips */}
               <div className="hidden lg:flex flex-col text-right text-xs text-slate-500 space-y-1">
-                <span>▲ / ▼ Zapper de chaîne</span>
-                <span>OK Infos / Pause</span>
+                <span>▲ / ▼ Zapper</span>
+                <span>OK Infos</span>
                 <span>Retour Guide TV</span>
               </div>
             </div>

@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db, getSetting, setSetting } from '@/lib/db';
 import { INITIAL_CATEGORIES, INITIAL_CHANNELS, getMockEpgForChannel } from '@/lib/mock-data';
-import { Channel, Category, EpgProgram, NavigationPane } from '@/types/iptv';
+import { Channel, Category, EpgProgram, NavigationPane, PlaylistConfig } from '@/types/iptv';
 import { useTVNavigation } from '@/lib/use-tv-navigation';
 import { NavigationSidebar } from '@/components/NavigationSidebar';
 import { TopBar } from '@/components/TopBar';
@@ -14,11 +14,12 @@ import { SyncModal } from '@/components/SyncModal';
 import { CategoryDrawerModal } from '@/components/CategoryDrawerModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
-import { Star, Tv, Film, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles } from 'lucide-react';
+import { Star, Tv, Film, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square } from 'lucide-react';
 
 export default function KeoTVHome() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [channels, setChannels] = useState<Channel[]>([]);
+  const [playlists, setPlaylists] = useState<PlaylistConfig[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
 
   const [activePane, setActivePane] = useState<NavigationPane>('channels');
@@ -27,6 +28,7 @@ export default function KeoTVHome() {
 
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isStopped, setIsStopped] = useState<boolean>(false);
 
   const [currentEpg, setCurrentEpg] = useState<EpgProgram | null>(null);
   const [nextEpg, setNextEpg] = useState<EpgProgram | null>(null);
@@ -44,19 +46,46 @@ export default function KeoTVHome() {
     async function initDB() {
       try {
         const chCount = await db.channels.count();
+        const plCount = await db.playlists.count();
+
         // If empty or older small seed (< 25 channels), reload the full channel catalog
-        if (chCount < 25) {
+        if (chCount < 25 && plCount === 0) {
           await db.categories.clear();
           await db.channels.clear();
           await db.categories.bulkAdd(INITIAL_CATEGORIES);
           await db.channels.bulkAdd(INITIAL_CHANNELS);
+
+          const demoPlaylist: PlaylistConfig = {
+            id: 'pl_demo_default',
+            name: 'Chaînes Démo Gratuites',
+            type: 'm3u',
+            server_url: 'https://test-streams.mux.dev',
+            status: 'active',
+            channel_count: INITIAL_CHANNELS.length,
+            last_sync_at: new Date().toISOString(),
+          };
+          await db.playlists.put(demoPlaylist);
+        } else if (plCount === 0 && chCount >= 25) {
+          // If channels exist from previous build but playlist wasn't registered
+          const demoPlaylist: PlaylistConfig = {
+            id: 'pl_demo_default',
+            name: 'Chaînes Démo Gratuites',
+            type: 'm3u',
+            server_url: 'https://test-streams.mux.dev',
+            status: 'active',
+            channel_count: chCount,
+            last_sync_at: new Date().toISOString(),
+          };
+          await db.playlists.put(demoPlaylist);
         }
 
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
         const loadedChannels = await db.channels.orderBy('num').toArray();
+        const loadedPlaylists = await db.playlists.toArray();
 
         setCategories(loadedCats);
         setChannels(loadedChannels);
+        setPlaylists(loadedPlaylists);
 
         // Pick initial category (TNT by default)
         const initialCat = loadedCats.find((c) => c.id === 'tnt') || loadedCats[0];
@@ -123,6 +152,7 @@ export default function KeoTVHome() {
       const targetChannel = filteredChannels[index];
       if (!targetChannel) return;
 
+      setIsStopped(false);
       if (activeChannel?.id === targetChannel.id && forceFullscreen) {
         setIsFullscreen(true);
       } else {
@@ -203,7 +233,7 @@ export default function KeoTVHome() {
 
   // Save new playlist (Xtream / M3U)
   const handleSavePlaylist = async (data: any) => {
-    const newPlaylist = {
+    const newPlaylist: PlaylistConfig = {
       id: 'pl_' + Date.now(),
       name: data.name,
       type: data.type,
@@ -212,10 +242,11 @@ export default function KeoTVHome() {
       password: data.password,
       m3u_url: data.m3u_url,
       status: 'active' as const,
-      channel_count: 0,
+      channel_count: 1,
       last_sync_at: new Date().toISOString(),
     };
     await db.playlists.add(newPlaylist);
+    setPlaylists((prev) => [...prev, newPlaylist]);
 
     const newCat: Category = {
       id: 'grp_xtream_' + Date.now(),
@@ -249,6 +280,72 @@ export default function KeoTVHome() {
     setCategories((prev) => [...prev, newCat]);
     setChannels((prev) => [...prev, newChannel]);
     setSelectedCategory(newCat);
+    setActiveChannel(newChannel);
+    setIsStopped(false);
+  };
+
+  // Delete playlist handler
+  const handleDeletePlaylist = async (id: string) => {
+    await db.playlists.delete(id);
+    const remainingPlaylists = await db.playlists.toArray();
+    setPlaylists(remainingPlaylists);
+
+    if (id === 'pl_demo_default' || remainingPlaylists.length === 0) {
+      await db.categories.clear();
+      await db.channels.clear();
+      setCategories([]);
+      setChannels([]);
+      setActiveChannel(null);
+      setSelectedCategory(null);
+      setIsStopped(true);
+    } else {
+      const remainingCats = await db.categories.toArray();
+      const remainingChannels = await db.channels.toArray();
+      setCategories(remainingCats);
+      setChannels(remainingChannels);
+      if (remainingCats.length > 0 && (!selectedCategory || !remainingCats.some((c) => c.id === selectedCategory.id))) {
+        setSelectedCategory(remainingCats[0]);
+      }
+    }
+  };
+
+  // Restore demo playlist handler
+  const handleRestoreDemoPlaylist = async () => {
+    await db.categories.clear();
+    await db.channels.clear();
+    await db.categories.bulkAdd(INITIAL_CATEGORIES);
+    await db.channels.bulkAdd(INITIAL_CHANNELS);
+
+    const demoPlaylist: PlaylistConfig = {
+      id: 'pl_demo_default',
+      name: 'Chaînes Démo Gratuites',
+      type: 'm3u',
+      server_url: 'https://test-streams.mux.dev',
+      status: 'active',
+      channel_count: INITIAL_CHANNELS.length,
+      last_sync_at: new Date().toISOString(),
+    };
+    await db.playlists.put(demoPlaylist);
+
+    const loadedCats = await db.categories.orderBy('custom_order').toArray();
+    const loadedChannels = await db.channels.orderBy('num').toArray();
+    const loadedPlaylists = await db.playlists.toArray();
+
+    setCategories(loadedCats);
+    setChannels(loadedChannels);
+    setPlaylists(loadedPlaylists);
+
+    const initialCat = loadedCats.find((c) => c.id === 'tnt') || loadedCats[0];
+    setSelectedCategory(initialCat || null);
+
+    const initialChannel = loadedChannels.find((ch) => ch.id === 'ch_tf1') || loadedChannels[0];
+    if (initialChannel) {
+      setActiveChannel(initialChannel);
+      const epg = getMockEpgForChannel(initialChannel.id);
+      setCurrentEpg(epg.current);
+      setNextEpg(epg.next);
+      setIsStopped(false);
+    }
   };
 
   // Cloud Sync Handler
@@ -316,6 +413,8 @@ export default function KeoTVHome() {
             nextEpg={nextEpg}
             isFullscreen={isFullscreen}
             onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
+            isStopped={isStopped}
+            onTogglePlayStop={() => setIsStopped(!isStopped)}
           />
         </div>
 
@@ -339,13 +438,31 @@ export default function KeoTVHome() {
               {currentEpg?.title || 'Programme en direct'}
             </p>
           </div>
-          <button
-            onClick={() => activeChannel && handleToggleFavorite(activeChannel)}
-            className="p-1.5 text-slate-400 hover:text-amber-400 transition"
-            title="Favori"
-          >
-            <Star className={`w-5 h-5 ${activeChannel?.is_favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
-          </button>
+
+          <div className="flex items-center space-x-1.5 flex-shrink-0">
+            <button
+              onClick={() => setIsStopped(!isStopped)}
+              className={`p-1.5 rounded-lg border transition ${
+                isStopped
+                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                  : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border-rose-500/20'
+              }`}
+              title={isStopped ? 'Reprendre le direct' : 'Arrêter le flux'}
+            >
+              {isStopped ? (
+                <Play className="w-4 h-4 fill-emerald-400" />
+              ) : (
+                <Square className="w-4 h-4 fill-rose-400" />
+              )}
+            </button>
+            <button
+              onClick={() => activeChannel && handleToggleFavorite(activeChannel)}
+              className="p-1.5 text-slate-400 hover:text-amber-400 transition"
+              title="Favori"
+            >
+              <Star className={`w-5 h-5 ${activeChannel?.is_favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
+            </button>
+          </div>
         </div>
 
         {/* Category Header & Drawer Opener */}
@@ -555,6 +672,8 @@ export default function KeoTVHome() {
             onOpenSyncModal={() => setIsSyncModalOpen(true)}
             onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
             onToggleFullscreen={() => setIsFullscreen(true)}
+            isStopped={isStopped}
+            onTogglePlayStop={() => setIsStopped(!isStopped)}
           />
         </div>
       </div>
@@ -566,9 +685,12 @@ export default function KeoTVHome() {
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
         syncCode={syncCode}
+        playlists={playlists}
         onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
-        currentBuildNumber={4}
+        onDeletePlaylist={handleDeletePlaylist}
+        onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
+        currentBuildNumber={5}
       />
 
       <CategoryDrawerModal

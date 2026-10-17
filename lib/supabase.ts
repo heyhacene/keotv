@@ -58,3 +58,38 @@ export async function pullSyncFromCloud(code: string): Promise<CloudDeviceSync |
     return null;
   }
 }
+
+// Universal In-App Feedback submitter (reusable across KeoTV, KeoNote, KeoPass, Dar)
+export async function submitAppFeedback(data: {
+  app_name: string;
+  category: string;
+  message: string;
+  contact_email?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  try {
+    const payload = {
+      app_name: data.app_name,
+      category: data.category,
+      message: data.message.trim(),
+      contact_email: data.contact_email?.trim() || null,
+      device_info: {
+        userAgent: typeof window !== 'undefined' ? window.navigator.userAgent : '',
+        screen: typeof window !== 'undefined' ? `${window.innerWidth}x${window.innerHeight}` : '',
+      },
+      created_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('app_feedback')
+      .insert([payload]);
+
+    if (error) {
+      console.warn('Feedback submission error:', error.message);
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    console.warn('Feedback submit failed:', err);
+    return { success: false, error: err.message || 'Erreur réseau' };
+  }
+}

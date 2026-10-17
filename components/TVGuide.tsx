@@ -21,6 +21,8 @@ interface TVGuideProps {
   onOpenSyncModal: () => void;
   onOpenXtreamModal: () => void;
   onToggleFullscreen: () => void;
+  isStopped?: boolean;
+  onTogglePlayStop?: () => void;
 }
 
 export const TVGuide: React.FC<TVGuideProps> = ({
@@ -37,6 +39,8 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   onSelectChannel,
   onToggleFavorite,
   onToggleFullscreen,
+  isStopped,
+  onTogglePlayStop,
 }) => {
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
@@ -238,6 +242,8 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             nextEpg={nextEpg}
             isFullscreen={false}
             onToggleFullscreen={onToggleFullscreen}
+            isStopped={isStopped}
+            onTogglePlayStop={onTogglePlayStop}
           />
         </div>
 
