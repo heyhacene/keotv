@@ -33,6 +33,7 @@ export default function KeoTVHome() {
   // Android Back navigation & Double-press to exit
   const [backToastVisible, setBackToastVisible] = useState<boolean>(false);
   const lastBackPressTimeRef = useRef<number>(0);
+  const hasInitRunRef = useRef<boolean>(false);
 
   // Sorting preferences
   const [categorySort, setCategorySort] = useState<'playlist' | 'alpha' | 'count'>('playlist');
@@ -170,101 +171,107 @@ export default function KeoTVHome() {
   );
 
   // Re-synchronize existing playlist and reload all channels safely into Dexie
-  const handleResyncPlaylist = useCallback(async (pl?: PlaylistConfig) => {
-    const targetPl = pl || playlists[0];
-    if (!targetPl) return;
+  const handleResyncPlaylist = useCallback(
+    async (pl?: PlaylistConfig) => {
+      const targetPl = pl || (await db.playlists.toCollection().first());
+      if (!targetPl) return;
 
-    setIsResyncing(true);
-    setSyncStatusBanner(`Re-synchronisation de "${targetPl.name}"...`);
+      setIsResyncing(true);
+      setSyncStatusBanner(`Re-synchronisation de "${targetPl.name}"...`);
 
-    try {
-      let result: { playlist: PlaylistConfig; categories: Category[]; channels: Channel[] };
-      if (targetPl.type === 'xtream') {
-        result = await syncXtreamPlaylist({
-          serverUrl: targetPl.server_url,
-          username: targetPl.username || '',
-          password: targetPl.password || '',
-          name: targetPl.name,
-          onProgress: (p) => setSyncStatusBanner(p),
-        });
-      } else {
-        result = await parseM3UPlaylist({
-          m3uUrl: targetPl.m3u_url || targetPl.server_url,
-          name: targetPl.name,
-          onProgress: (p) => setSyncStatusBanner(p),
-        });
-      }
+      try {
+        let result: { playlist: PlaylistConfig; categories: Category[]; channels: Channel[] };
+        if (targetPl.type === 'xtream') {
+          result = await syncXtreamPlaylist({
+            serverUrl: targetPl.server_url,
+            username: targetPl.username || '',
+            password: targetPl.password || '',
+            name: targetPl.name,
+            onProgress: (p) => setSyncStatusBanner(p),
+          });
+        } else {
+          result = await parseM3UPlaylist({
+            m3uUrl: targetPl.m3u_url || targetPl.server_url,
+            name: targetPl.name,
+            onProgress: (p) => setSyncStatusBanner(p),
+          });
+        }
 
-      setSyncStatusBanner(`Enregistrement de ${result.channels.length} chaînes...`);
+        setSyncStatusBanner(`Enregistrement de ${result.channels.length} chaînes...`);
 
-      await db.playlists.clear();
-      await db.categories.clear();
-      await db.channels.clear();
+        await db.playlists.clear();
+        await db.categories.clear();
+        await db.channels.clear();
 
-      await db.playlists.put(result.playlist);
-      await db.categories.bulkPut(result.categories);
+        await db.playlists.put(result.playlist);
+        await db.categories.bulkPut(result.categories);
 
-      const CHUNK_SIZE = 500;
-      for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
-        const chunk = result.channels.slice(i, i + CHUNK_SIZE);
-        try {
-          await db.channels.bulkPut(chunk);
-        } catch (chunkErr) {
-          console.warn('bulkPut chunk error, fallback to individual put:', chunkErr);
-          for (const item of chunk) {
-            try {
-              await db.channels.put(item);
-            } catch (putErr) {
-              console.error('Failed to put channel', item.id, putErr);
+        const CHUNK_SIZE = 500;
+        for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
+          const chunk = result.channels.slice(i, i + CHUNK_SIZE);
+          try {
+            await db.channels.bulkPut(chunk);
+          } catch (chunkErr) {
+            console.warn('bulkPut chunk error, fallback to individual put:', chunkErr);
+            for (const item of chunk) {
+              try {
+                await db.channels.put(item);
+              } catch (putErr) {
+                console.error('Failed to put channel', item.id, putErr);
+              }
             }
           }
+          if (result.channels.length > 1000) {
+            const percent = Math.min(100, Math.round(((i + chunk.length) / result.channels.length) * 100));
+            setSyncStatusBanner(`Enregistrement local : ${percent}% (${Math.min(i + chunk.length, result.channels.length)}/${result.channels.length} chaînes)...`);
+          }
         }
-        if (result.channels.length > 1000) {
-          const percent = Math.min(100, Math.round(((i + chunk.length) / result.channels.length) * 100));
-          setSyncStatusBanner(`Enregistrement local : ${percent}% (${Math.min(i + chunk.length, result.channels.length)}/${result.channels.length} chaînes)...`);
+
+        const loadedCats = await db.categories.orderBy('custom_order').toArray();
+        const loadedPlaylists = await db.playlists.toArray();
+        setCategories(loadedCats);
+        setPlaylists(loadedPlaylists);
+        setFavCount(0);
+
+        let firstCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
+        if (firstCat) {
+          setSelectedCategory(firstCat);
+          setFocusedCategoryIndex(0);
+          setFocusedChannelIndex(0);
+          await loadCategoryChannels(firstCat, channelSort);
         }
+
+        const firstChannel = result.channels[0];
+        if (firstChannel) {
+          setActiveChannel(firstChannel);
+          setCurrentEpg({
+            id: 'epg_' + firstChannel.id,
+            channel_id: firstChannel.id,
+            title: firstChannel.name + ' (En Direct)',
+            description: 'Flux en direct de ' + firstChannel.name,
+            start: new Date().toISOString(),
+            end: new Date(Date.now() + 7200000).toISOString(),
+            duration_min: 120,
+          });
+          setNextEpg(null);
+          setIsStopped(false);
+        }
+      } catch (err: any) {
+        console.error('Failed to resync playlist:', err);
+        alert(`Erreur lors de la synchronisation : ${err.message}`);
+      } finally {
+        setIsResyncing(false);
+        setSyncStatusBanner(null);
       }
+    },
+    [channelSort, loadCategoryChannels]
+  );
 
-      const loadedCats = await db.categories.orderBy('custom_order').toArray();
-      const loadedPlaylists = await db.playlists.toArray();
-      setCategories(loadedCats);
-      setPlaylists(loadedPlaylists);
-      setFavCount(0);
-
-      let firstCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
-      if (firstCat) {
-        setSelectedCategory(firstCat);
-        setFocusedCategoryIndex(0);
-        setFocusedChannelIndex(0);
-        await loadCategoryChannels(firstCat, channelSort);
-      }
-
-      const firstChannel = result.channels[0];
-      if (firstChannel) {
-        setActiveChannel(firstChannel);
-        setCurrentEpg({
-          id: 'epg_' + firstChannel.id,
-          channel_id: firstChannel.id,
-          title: firstChannel.name + ' (En Direct)',
-          description: 'Flux en direct de ' + firstChannel.name,
-          start: new Date().toISOString(),
-          end: new Date(Date.now() + 7200000).toISOString(),
-          duration_min: 120,
-        });
-        setNextEpg(null);
-        setIsStopped(false);
-      }
-    } catch (err: any) {
-      console.error('Failed to resync playlist:', err);
-      alert(`Erreur lors de la synchronisation : ${err.message}`);
-    } finally {
-      setIsResyncing(false);
-      setSyncStatusBanner(null);
-    }
-  }, [playlists, channelSort, loadCategoryChannels]);
-
-  // 1. Initialize IndexedDB & Seed initial channels
+  // 1. Initialize IndexedDB & Seed initial channels (strictly once on component mount)
   useEffect(() => {
+    if (hasInitRunRef.current) return;
+    hasInitRunRef.current = true;
+
     async function initDB() {
       try {
         const savedCatSort = await getSetting<'playlist' | 'alpha' | 'count'>('category_sort', 'playlist');
@@ -272,58 +279,101 @@ export default function KeoTVHome() {
         setCategorySort(savedCatSort);
         setChannelSort(savedChSort);
 
-        // Build 10 Auto-Clean Migration: clean legacy corrupted cache (overwritten categories or 0 channels)
-        const build10Migrated = await getSetting<boolean>('build10_clean_migrated', false);
-        if (!build10Migrated) {
-          await setSetting('build10_clean_migrated', true);
-          const currentPlaylists = await db.playlists.toArray();
-          const userPl = currentPlaylists.find((p) => p.id !== 'pl_demo_default');
-          if (userPl) {
-            console.log('Build 10 migration: Auto-resyncing user playlist with fixed categories and channel lineup...');
-            await db.categories.clear();
-            await db.channels.clear();
-            setTimeout(() => {
-              handleResyncPlaylist(userPl);
-            }, 300);
-            return;
-          } else if (currentPlaylists.length > 0) {
-            await db.categories.clear();
-            await db.channels.clear();
-            await db.playlists.clear();
+        const allChannels = await db.channels.toArray();
+        const chCount = allChannels.length;
+        const currentPlaylists = await db.playlists.toArray();
+        const plCount = currentPlaylists.length;
+
+        // Check if channels are user IPTV channels rather than TNT mock channels
+        const isOnlyDemoChannels =
+          chCount > 0 &&
+          chCount <= 35 &&
+          allChannels.every(
+            (c) =>
+              c.id.startsWith('ch_tf1') ||
+              c.id.startsWith('ch_france') ||
+              c.id.startsWith('ch_m6') ||
+              c.id.startsWith('ch_arte') ||
+              c.id.startsWith('ch_w9') ||
+              c.id.startsWith('ch_tmc') ||
+              c.id.startsWith('ch_bfm') ||
+              c.id.startsWith('ch_c8')
+          );
+
+        // If real user channels exist in database:
+        if (!isOnlyDemoChannels && chCount > 0) {
+          // If the playlists table is empty or incorrectly set to demo, recover real playlist credentials
+          const hasRealUserPlaylist = currentPlaylists.some(
+            (p) => p.id !== 'pl_demo_default' && !p.server_url?.includes('mux.dev')
+          );
+
+          if (!hasRealUserPlaylist) {
+            let userServerUrl = '';
+            let userUsername = '';
+            let userPassword = '';
+            let isXtream = false;
+
+            for (const ch of allChannels) {
+              if (ch.stream_url) {
+                const m = ch.stream_url.match(/^(https?:\/\/[^\/]+)\/(?:live|movie|series)\/([^\/]+)\/([^\/]+)\//i);
+                if (m) {
+                  userServerUrl = m[1];
+                  userUsername = decodeURIComponent(m[2]);
+                  userPassword = decodeURIComponent(m[3]);
+                  isXtream = true;
+                  break;
+                }
+              }
+            }
+
+            if (isXtream && userServerUrl) {
+              const recoveredPl: PlaylistConfig = {
+                id: 'pl_xtream_' + Date.now(),
+                name: 'Mon Abonnement IPTV',
+                type: 'xtream',
+                server_url: userServerUrl,
+                username: userUsername,
+                password: userPassword,
+                status: 'active',
+                channel_count: chCount,
+                last_sync_at: new Date().toISOString(),
+              };
+              await db.playlists.clear();
+              await db.playlists.put(recoveredPl);
+            } else {
+              const recoveredPl: PlaylistConfig = {
+                id: 'pl_m3u_' + Date.now(),
+                name: 'Mon Abonnement IPTV',
+                type: 'm3u',
+                server_url: allChannels[0]?.stream_url || '',
+                status: 'active',
+                channel_count: chCount,
+                last_sync_at: new Date().toISOString(),
+              };
+              await db.playlists.clear();
+              await db.playlists.put(recoveredPl);
+            }
           }
-        }
+        } else if (chCount === 0 && plCount === 0) {
+          // Only seed demo on completely blank first install if user hasn't explicitly deleted all playlists
+          const userHasDeletedAll = await getSetting<boolean>('user_deleted_all_playlists', false);
+          if (!userHasDeletedAll) {
+            await db.categories.clear();
+            await db.channels.clear();
+            await db.categories.bulkAdd(INITIAL_CATEGORIES);
+            await db.channels.bulkAdd(INITIAL_CHANNELS);
 
-        const chCount = await db.channels.count();
-        const plCount = await db.playlists.count();
-
-        // If empty or older small seed (< 25 channels), reload the full channel catalog
-        if (chCount < 25 && plCount === 0) {
-          await db.categories.clear();
-          await db.channels.clear();
-          await db.categories.bulkAdd(INITIAL_CATEGORIES);
-          await db.channels.bulkAdd(INITIAL_CHANNELS);
-
-          const demoPlaylist: PlaylistConfig = {
-            id: 'pl_demo_default',
-            name: 'Chaînes Démo Gratuites',
-            type: 'm3u',
-            server_url: 'https://test-streams.mux.dev',
-            status: 'active',
-            channel_count: INITIAL_CHANNELS.length,
-            last_sync_at: new Date().toISOString(),
-          };
-          await db.playlists.put(demoPlaylist);
-        } else if (plCount === 0 && chCount >= 25) {
-          const demoPlaylist: PlaylistConfig = {
-            id: 'pl_demo_default',
-            name: 'Chaînes Démo Gratuites',
-            type: 'm3u',
-            server_url: 'https://test-streams.mux.dev',
-            status: 'active',
-            channel_count: chCount,
-            last_sync_at: new Date().toISOString(),
-          };
-          await db.playlists.put(demoPlaylist);
+            const demoPlaylist: PlaylistConfig = {
+              id: 'pl_demo_default',
+              name: 'Chaînes Démo Gratuites',
+              type: 'm3u',
+              server_url: 'https://test-streams.mux.dev',
+              status: 'active',
+              channel_count: INITIAL_CHANNELS.length,
+              last_sync_at: new Date().toISOString(),
+            };
+            await db.playlists.put(demoPlaylist);
+          }
         }
 
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
@@ -334,19 +384,13 @@ export default function KeoTVHome() {
         setPlaylists(loadedPlaylists);
         setFavCount(initialFavCount);
 
-        // Auto-recovery if a playlist was saved but 0 channels exist
-        if (plCount > 0 && chCount === 0 && loadedPlaylists.length > 0) {
-          console.warn('Playlist exists but 0 channels in Dexie. Triggering auto-recovery...');
-          const activePl = loadedPlaylists[0];
-          setTimeout(() => {
-            handleResyncPlaylist(activePl);
-          }, 400);
-        }
-
         // Pick initial category: first non-fav category with count > 0 (or TNT if demo)
         let initialCat = loadedCats.find((c) => c.id === 'tnt');
         if (!initialCat) {
-          initialCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
+          initialCat =
+            loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) ||
+            loadedCats.find((c) => c.id !== 'fav') ||
+            loadedCats[0];
         }
 
         setSelectedCategory(initialCat || null);
@@ -376,7 +420,7 @@ export default function KeoTVHome() {
       }
     }
     initDB();
-  }, [loadCategoryChannels, handleResyncPlaylist]);
+  }, []);
 
   // Compute sorted categories based on user's preference and activeSection (Direct / Films / Séries / Favoris)
   const sortedCategories = useMemo(() => {
@@ -491,8 +535,8 @@ export default function KeoTVHome() {
 
   // Channel Selection: single tap plays channel in the single player
   const handleSelectChannel = useCallback(
-    (index: number, forceFullscreen: boolean = false) => {
-      const targetChannel = filteredChannels[index];
+    (target: Channel | number, forceFullscreen: boolean = false) => {
+      const targetChannel = typeof target === 'number' ? filteredChannels[target] : target;
       if (!targetChannel) return;
 
       setIsStopped(false);
@@ -686,6 +730,7 @@ export default function KeoTVHome() {
     data: any,
     onProgress: (step: string) => void
   ) => {
+    await setSetting('user_deleted_all_playlists', false);
     let result: { playlist: PlaylistConfig; categories: Category[]; channels: Channel[] };
 
     if (data.type === 'xtream') {
@@ -785,6 +830,7 @@ export default function KeoTVHome() {
     setPlaylists(remainingPlaylists);
 
     if (id === 'pl_demo_default' || remainingPlaylists.length === 0) {
+      await setSetting('user_deleted_all_playlists', true);
       await db.categories.clear();
       await db.channels.clear();
       setCategories([]);
@@ -809,6 +855,7 @@ export default function KeoTVHome() {
 
   // Restore demo playlist handler
   const handleRestoreDemoPlaylist = async () => {
+    await setSetting('user_deleted_all_playlists', false);
     await db.categories.clear();
     await db.channels.clear();
     await db.categories.bulkAdd(INITIAL_CATEGORIES);
@@ -1087,7 +1134,7 @@ export default function KeoTVHome() {
                   key={ch.id}
                   onClick={() => {
                     setFocusedChannelIndex(idx);
-                    handleSelectChannel(idx, false);
+                    handleSelectChannel(ch, false);
                   }}
                   className={`flex items-center justify-between p-3 rounded-xl border transition cursor-pointer ${
                     isActive
@@ -1268,7 +1315,7 @@ export default function KeoTVHome() {
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
         onResyncPlaylist={handleResyncPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={10}
+        currentBuildNumber={11}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}

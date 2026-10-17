@@ -50,6 +50,9 @@ jobs:
             npx cap add android
           fi
 
+      - name: Synchronisation Capacitor Android
+        run: npx cap sync android
+
       - name: Configuration du support Android TV (Leanback & Banner)
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
@@ -80,20 +83,20 @@ jobs:
           mkdir -p android/app/src/main/res/drawable
           # Bannière Android TV 16:9 (320x180)
           rsvg-convert -w 320 -h 180 public/icon.svg -o android/app/src/main/res/drawable/tv_banner.png
-          # Icônes de lancement Android (Mipmap Standard & Round)
-          rsvg-convert -w 48 -h 48 public/icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher.png
-          rsvg-convert -w 48 -h 48 public/icon.svg -o android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png
-          rsvg-convert -w 72 -h 72 public/icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher.png
-          rsvg-convert -w 72 -h 72 public/icon.svg -o android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png
-          rsvg-convert -w 96 -h 96 public/icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
-          rsvg-convert -w 96 -h 96 public/icon.svg -o android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png
-          rsvg-convert -w 144 -h 144 public/icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
-          rsvg-convert -w 144 -h 144 public/icon.svg -o android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png
-          rsvg-convert -w 192 -h 192 public/icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
-          rsvg-convert -w 192 -h 192 public/icon.svg -o android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png
 
-      - name: Synchronisation Capacitor Android
-        run: npx cap sync android
+          # Supprimer le dossier anydpi-v26 pour éviter que l'icône adaptative par défaut de Capacitor masque notre icône
+          rm -rf android/app/src/main/res/mipmap-anydpi-v26
+
+          # Générer les icônes standard, rondes et premier plan (foreground) pour toutes les densités
+          for density_spec in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
+            density="${density_spec%%:*}"
+            size="${density_spec##*:}"
+            target_dir="android/app/src/main/res/mipmap-$density"
+            mkdir -p "$target_dir"
+            rsvg-convert -w "$size" -h "$size" public/icon.svg -o "$target_dir/ic_launcher.png"
+            rsvg-convert -w "$size" -h "$size" public/icon.svg -o "$target_dir/ic_launcher_round.png"
+            rsvg-convert -w "$size" -h "$size" public/icon.svg -o "$target_dir/ic_launcher_foreground.png"
+          done
 
       - name: Configuration de la version Android strictement incrémentale
         run: |
