@@ -2,12 +2,17 @@ package fr.keo.tv;
 
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.appcompat.app.AppCompatActivity;
@@ -31,11 +36,12 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * Full screen native player (ExoPlayer / Media3).
- * - Back button closes the player and returns to the KeoTV channel list.
- * - The whole category is loaded as a playlist: previous / next buttons (or channel up / down,
- *   D-pad up / down for live TV) zap between channels or episodes.
- * - Live .m3u8 URLs automatically fall back to the .ts variant if the HLS stream cannot be opened.
+ * Full screen native player (ExoPlayer / Media3) optimized for Android TV remote controls.
+ * - Live TV: Clean screen, no transport seekbars or pause buttons covering the stream.
+ * - Up / Down / Channel +/- arrows zap seamlessly between channels.
+ * - OK / Center button toggles the sleek channel info banner.
+ * - Channel info banner automatically animates in and fades out after 3.5 seconds.
+ * - Back button cleanly returns to the KeoTV TV guide.
  */
 @UnstableApi
 public class PlayerActivity extends AppCompatActivity {
@@ -48,10 +54,32 @@ public class PlayerActivity extends AppCompatActivity {
 
     private ExoPlayer player;
     private PlayerView playerView;
+    private LinearLayout osdContainer;
     private TextView titleView;
+    private TextView indexView;
     private TextView errorView;
     private final Set<Integer> triedTsFallback = new HashSet<>();
     private boolean isLive = true;
+
+    private final Handler osdHandler = new Handler(Looper.getMainLooper());
+    private final Runnable hideOsdRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (osdContainer != null) {
+                osdContainer.animate()
+                        .alpha(0f)
+                        .setDuration(350)
+                        .withEndAction(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (osdContainer != null) {
+                                    osdContainer.setVisibility(View.GONE);
+                                }
+                            }
+                        });
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -64,30 +92,77 @@ public class PlayerActivity extends AppCompatActivity {
         root.setBackgroundColor(Color.BLACK);
 
         playerView = new PlayerView(this);
-        playerView.setShowNextButton(true);
-        playerView.setShowPreviousButton(true);
-        playerView.setControllerShowTimeoutMs(4000);
+        if (isLive) {
+            // Live TV: Do not show media controller seekbar/transport buttons
+            playerView.setUseController(false);
+        } else {
+            // VOD: Auto-hiding transport controls for movies & series
+            playerView.setUseController(true);
+            playerView.setShowNextButton(true);
+            playerView.setShowPreviousButton(true);
+            playerView.setControllerShowTimeoutMs(3000);
+            playerView.setControllerAutoShow(false);
+        }
         root.addView(playerView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
+        // Modern On-Screen Display (OSD) top banner with gradient
+        osdContainer = new LinearLayout(this);
+        osdContainer.setOrientation(LinearLayout.HORIZONTAL);
+        osdContainer.setGravity(Gravity.CENTER_VERTICAL);
+        osdContainer.setPadding(48, 32, 48, 32);
+
+        GradientDrawable osdBg = new GradientDrawable(
+                GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{Color.parseColor("#E6090D16"), Color.parseColor("#99090D16"), Color.TRANSPARENT}
+        );
+        osdContainer.setBackground(osdBg);
+
+        // Badge indicator
+        TextView badge = new TextView(this);
+        badge.setText(isLive ? "DIRECT TV" : "VOD");
+        badge.setTextColor(Color.parseColor("#38BDF8"));
+        badge.setTextSize(11f);
+        badge.setTypeface(Typeface.DEFAULT_BOLD);
+        badge.setPadding(18, 6, 18, 6);
+        GradientDrawable badgeBg = new GradientDrawable();
+        badgeBg.setColor(Color.parseColor("#2638BDF8"));
+        badgeBg.setCornerRadius(12f);
+        badgeBg.setStroke(2, Color.parseColor("#4D38BDF8"));
+        badge.setBackground(badgeBg);
+        osdContainer.addView(badge);
+
+        // Title text
         titleView = new TextView(this);
         titleView.setTextColor(Color.WHITE);
-        titleView.setTextSize(16f);
+        titleView.setTextSize(18f);
         titleView.setTypeface(Typeface.DEFAULT_BOLD);
-        titleView.setShadowLayer(6f, 0f, 0f, Color.BLACK);
-        titleView.setPadding(40, 40, 40, 16);
-        root.addView(titleView, new FrameLayout.LayoutParams(
+        titleView.setShadowLayer(8f, 0f, 0f, Color.BLACK);
+        titleView.setPadding(20, 0, 20, 0);
+        LinearLayout.LayoutParams titleParams = new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+        osdContainer.addView(titleView, titleParams);
+
+        // Channel index counter
+        indexView = new TextView(this);
+        indexView.setTextColor(Color.parseColor("#94A3B8"));
+        indexView.setTextSize(13f);
+        indexView.setTypeface(Typeface.MONOSPACE);
+        osdContainer.addView(indexView);
+
+        root.addView(osdContainer, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP));
 
+        // Error message overlay
         errorView = new TextView(this);
         errorView.setTextColor(Color.parseColor("#FF8A80"));
         errorView.setTextSize(15f);
         errorView.setGravity(Gravity.CENTER);
-        errorView.setBackgroundColor(Color.parseColor("#CC000000"));
+        errorView.setBackgroundColor(Color.parseColor("#D9000000"));
         errorView.setPadding(48, 32, 48, 32);
-        errorView.setVisibility(android.view.View.GONE);
+        errorView.setVisibility(View.GONE);
         errorView.setOnClickListener(v -> {
-            errorView.setVisibility(android.view.View.GONE);
+            errorView.setVisibility(View.GONE);
             if (player != null) {
                 player.seekToDefaultPosition();
                 player.prepare();
@@ -124,13 +199,14 @@ public class PlayerActivity extends AppCompatActivity {
             @Override
             public void onMediaItemTransition(MediaItem mediaItem, int reason) {
                 updateTitle();
-                errorView.setVisibility(android.view.View.GONE);
+                showOsd();
+                errorView.setVisibility(View.GONE);
             }
 
             @Override
             public void onPlaybackStateChanged(int playbackState) {
                 if (playbackState == Player.STATE_READY) {
-                    errorView.setVisibility(android.view.View.GONE);
+                    errorView.setVisibility(View.GONE);
                 }
             }
 
@@ -143,6 +219,7 @@ public class PlayerActivity extends AppCompatActivity {
         player.prepare();
         player.setPlayWhenReady(true);
         updateTitle();
+        showOsd();
     }
 
     private MediaItem buildItem(String url, String title) {
@@ -157,6 +234,33 @@ public class PlayerActivity extends AppCompatActivity {
         MediaItem current = player.getCurrentMediaItem();
         CharSequence title = current != null ? current.mediaMetadata.title : null;
         titleView.setText(title != null ? title : "");
+
+        int currentIdx = player.getCurrentMediaItemIndex() + 1;
+        int total = player.getMediaItemCount();
+        if (total > 0) {
+            indexView.setText(currentIdx + " / " + total);
+        } else {
+            indexView.setText("");
+        }
+    }
+
+    private void showOsd() {
+        if (osdContainer == null) return;
+        osdHandler.removeCallbacks(hideOsdRunnable);
+        osdContainer.setVisibility(View.VISIBLE);
+        osdContainer.animate().cancel();
+        osdContainer.setAlpha(1f);
+        osdHandler.postDelayed(hideOsdRunnable, 3500);
+    }
+
+    private void toggleOsd() {
+        if (osdContainer == null) return;
+        if (osdContainer.getVisibility() == View.VISIBLE && osdContainer.getAlpha() > 0.5f) {
+            osdHandler.removeCallbacks(hideOsdRunnable);
+            hideOsdRunnable.run();
+        } else {
+            showOsd();
+        }
     }
 
     private void handlePlayerError(PlaybackException error) {
@@ -201,21 +305,58 @@ public class PlayerActivity extends AppCompatActivity {
         } else if (cause != null && cause.getMessage() != null) {
             details += " - " + cause.getMessage();
         }
-        errorView.setText("Impossible de lire ce flux\n" + details + "\n\nTouchez ici pour réessayer");
-        errorView.setVisibility(android.view.View.VISIBLE);
+        errorView.setText("Impossible de lire ce flux\n" + details + "\n\nAppuyez sur OK pour réessayer");
+        errorView.setVisibility(View.VISIBLE);
     }
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         if (player != null && event.getAction() == KeyEvent.ACTION_DOWN) {
             int key = event.getKeyCode();
-            boolean controllerHidden = !playerView.isControllerFullyVisible();
-            if (key == KeyEvent.KEYCODE_CHANNEL_UP || (isLive && controllerHidden && key == KeyEvent.KEYCODE_DPAD_UP)) {
-                player.seekToPreviousMediaItem();
+
+            // Zapping to Previous Channel (Up, Channel Up, Page Up)
+            if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_CHANNEL_UP || key == KeyEvent.KEYCODE_PAGE_UP) {
+                if (player.hasPreviousMediaItem()) {
+                    player.seekToPreviousMediaItem();
+                } else if (player.getMediaItemCount() > 0) {
+                    player.seekToDefaultPosition(player.getMediaItemCount() - 1);
+                }
+                updateTitle();
+                showOsd();
                 return true;
             }
-            if (key == KeyEvent.KEYCODE_CHANNEL_DOWN || (isLive && controllerHidden && key == KeyEvent.KEYCODE_DPAD_DOWN)) {
-                player.seekToNextMediaItem();
+
+            // Zapping to Next Channel (Down, Channel Down, Page Down)
+            if (key == KeyEvent.KEYCODE_DPAD_DOWN || key == KeyEvent.KEYCODE_CHANNEL_DOWN || key == KeyEvent.KEYCODE_PAGE_DOWN) {
+                if (player.hasNextMediaItem()) {
+                    player.seekToNextMediaItem();
+                } else if (player.getMediaItemCount() > 0) {
+                    player.seekToDefaultPosition(0);
+                }
+                updateTitle();
+                showOsd();
+                return true;
+            }
+
+            // Toggle OSD Info Banner (OK / Enter / Center)
+            if (key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                toggleOsd();
+                return true;
+            }
+
+            // Toggle Pause/Play on Media buttons
+            if (key == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || key == KeyEvent.KEYCODE_MEDIA_PLAY || key == KeyEvent.KEYCODE_MEDIA_PAUSE) {
+                if (player.isPlaying()) {
+                    player.pause();
+                } else {
+                    player.play();
+                }
+                return true;
+            }
+
+            // Back button returns to TV Guide
+            if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
+                finish();
                 return true;
             }
         }
@@ -241,6 +382,7 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        osdHandler.removeCallbacks(hideOsdRunnable);
         if (player != null) {
             player.release();
             player = null;

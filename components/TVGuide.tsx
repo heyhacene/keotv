@@ -15,7 +15,7 @@ interface TVGuideProps {
   currentEpg: EpgProgram | null;
   nextEpg: EpgProgram | null;
   activePane: NavigationPane;
-  onSelectCategory: (cat: Category, index: number) => void;
+  onSelectCategory: (cat: Category, index: number, switchPane?: boolean) => void;
   onSelectChannel: (channel: Channel, index: number) => void;
   onToggleFavorite: (channel: Channel) => void;
   onOpenSyncModal: () => void;
@@ -153,7 +153,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             <button
               key={cat.id}
               id={`category-item-${idx}`}
-              onClick={() => onSelectCategory(cat, idx)}
+              onClick={() => onSelectCategory(cat, idx, true)}
               className={`flex items-center justify-between px-3 py-2.5 mx-2 my-0.5 rounded-lg text-left text-sm transition-all duration-150 ${
                 isFocused
                   ? 'bg-tv-focus text-white font-bold shadow-tv-focus scale-[1.02] ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg'

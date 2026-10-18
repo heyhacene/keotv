@@ -15,7 +15,7 @@ export interface TVNavOptions {
   setFocusedChannelIndex: (index: number | ((prev: number) => number)) => void;
   focusedMenuIndex: number;
   setFocusedMenuIndex: (index: number | ((prev: number) => number)) => void;
-  onSelectCategory: (index: number) => void;
+  onSelectCategory: (index: number, switchPane?: boolean) => void;
   onSelectChannel: (index: number, fullscreen: boolean) => void;
   onToggleFavorite: (channelIndex: number) => void;
   onSelectMenuItem: (menuIndex: number) => void;
@@ -169,7 +169,7 @@ export function useTVNavigation({
         } else if (activePane === 'categories') {
           setFocusedCategoryIndex((prev) => {
             const next = prev > 0 ? prev - 1 : Math.max(0, categoryCount - 1);
-            onSelectCategory(next);
+            onSelectCategory(next, false);
             return next;
           });
         } else if (activePane === 'menu') {
@@ -185,7 +185,7 @@ export function useTVNavigation({
         } else if (activePane === 'categories') {
           setFocusedCategoryIndex((prev) => {
             const next = prev < categoryCount - 1 ? prev + 1 : 0;
-            onSelectCategory(next);
+            onSelectCategory(next, false);
             return next;
           });
         } else if (activePane === 'menu') {
@@ -219,7 +219,7 @@ export function useTVNavigation({
         if (activePane === 'menu') {
           onSelectMenuItem(focusedMenuIndex);
         } else if (activePane === 'categories') {
-          onSelectCategory(focusedCategoryIndex);
+          onSelectCategory(focusedCategoryIndex, true);
           setActivePane('channels');
         } else if (activePane === 'channels') {
           onSelectChannel(focusedChannelIndex, false);

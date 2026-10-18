@@ -889,11 +889,13 @@ export default function KeoTVHome() {
   );
 
   // Category selection
-  const handleSelectCategory = (cat: Category, index: number) => {
+  const handleSelectCategory = (cat: Category, index: number, switchPane: boolean = false) => {
     setSelectedCategory(cat);
     setFocusedCategoryIndex(index);
     setFocusedChannelIndex(0);
-    setActivePane('channels');
+    if (switchPane) {
+      setActivePane('channels');
+    }
     loadCategoryChannels(cat, channelSort);
   };
 
@@ -940,6 +942,12 @@ export default function KeoTVHome() {
     // 3. Channels list pane -> go back to categories pane
     if (activePane === 'channels') {
       setActivePane('categories');
+      return;
+    }
+
+    // 3b. Categories pane -> go back to sidebar menu pane
+    if (activePane === 'categories') {
+      setActivePane('menu');
       return;
     }
 
@@ -1025,10 +1033,10 @@ export default function KeoTVHome() {
     setFocusedChannelIndex,
     focusedMenuIndex,
     setFocusedMenuIndex,
-    onSelectCategory: (idx) => {
+    onSelectCategory: (idx, switchPane = false) => {
       const cat = sortedCategories[idx];
       if (cat) {
-        handleSelectCategory(cat, idx);
+        handleSelectCategory(cat, idx, switchPane);
       }
     },
     onSelectChannel: handleSelectChannel,
@@ -1404,7 +1412,7 @@ export default function KeoTVHome() {
             return (
               <button
                 key={cat.id}
-                onClick={() => handleSelectCategory(cat, idx)}
+                onClick={() => handleSelectCategory(cat, idx, true)}
                 className={`flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
                   isSelected
                     ? 'bg-tv-focus text-white shadow-md'
@@ -1621,7 +1629,7 @@ export default function KeoTVHome() {
               currentEpg={currentEpg}
               nextEpg={nextEpg}
               activePane={activePane}
-              onSelectCategory={handleSelectCategory}
+              onSelectCategory={(cat, idx, switchPane = true) => handleSelectCategory(cat, idx, switchPane)}
               onSelectChannel={(ch, idx) => {
                 setFocusedChannelIndex(idx);
                 handleSelectChannel(idx, false);
@@ -1661,7 +1669,7 @@ export default function KeoTVHome() {
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
         onResyncPlaylist={handleResyncPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={18}
+        currentBuildNumber={19}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
@@ -1673,7 +1681,7 @@ export default function KeoTVHome() {
         onClose={() => setIsCategoryModalOpen(false)}
         categories={sortedCategories}
         selectedCategory={selectedCategory}
-        onSelectCategory={handleSelectCategory}
+        onSelectCategory={(cat, idx) => handleSelectCategory(cat, idx, true)}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
       />

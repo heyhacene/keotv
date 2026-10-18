@@ -17,6 +17,7 @@ import {
   AlertTriangle,
   Send,
   CheckCircle2,
+  Radio,
 } from 'lucide-react';
 import { PlaylistConfig } from '@/types/iptv';
 import { submitAppFeedback } from '@/lib/supabase';
@@ -39,11 +40,12 @@ interface SettingsModalProps {
   onChannelSortChange?: (sort: 'playlist' | 'alpha' | 'num') => void;
 }
 
-const TABS: Array<{ id: 'playlists' | 'sync' | 'update' | 'player' | 'feedback'; label: string; icon: any }> = [
+const TABS: Array<{ id: 'playlists' | 'controls' | 'player' | 'sync' | 'update' | 'feedback'; label: string; icon: any }> = [
   { id: 'playlists', label: 'Playlists & Abonnements', icon: Server },
+  { id: 'controls', label: 'Télécommande & Zapping', icon: Radio },
+  { id: 'player', label: 'Affichage & Buffer', icon: Sliders },
   { id: 'sync', label: 'Identification & Synchro', icon: RefreshCw },
   { id: 'update', label: 'Mise à jour', icon: Download },
-  { id: 'player', label: 'Affichage & Tri', icon: Sliders },
   { id: 'feedback', label: 'Avis & Dons', icon: Heart },
 ];
 
@@ -58,15 +60,52 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onRestoreDemoPlaylist,
   onResyncPlaylist,
   isResyncing = false,
-  currentBuildNumber = 17,
+  currentBuildNumber = 19,
   categorySort = 'playlist',
   onCategorySortChange,
   channelSort = 'playlist',
   onChannelSortChange,
 }) => {
-  const [activeTab, setActiveTab] = useState<'playlists' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
+  const [activeTab, setActiveTab] = useState<'playlists' | 'controls' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+
+  // TV Remote & Zapping configurable settings
+  const [zappingMode, setZappingMode] = useState<'direct' | 'banner'>('direct');
+  const [osdDuration, setOsdDuration] = useState<'2s' | '3.5s' | '5s' | 'manual'>('3.5s');
+  const [okAction, setOkAction] = useState<'fullscreen' | 'preview'>('fullscreen');
+  const [bufferSize, setBufferSize] = useState<'300ms' | '1000ms' | '2500ms'>('300ms');
+
+  // Load saved preferences on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('keotv_controls_settings');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.zappingMode) setZappingMode(parsed.zappingMode);
+        if (parsed.osdDuration) setOsdDuration(parsed.osdDuration);
+        if (parsed.okAction) setOkAction(parsed.okAction);
+        if (parsed.bufferSize) setBufferSize(parsed.bufferSize);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  const saveControlSetting = (key: string, val: string) => {
+    try {
+      const current = {
+        zappingMode,
+        osdDuration,
+        okAction,
+        bufferSize,
+        [key]: val,
+      };
+      localStorage.setItem('keotv_controls_settings', JSON.stringify(current));
+    } catch {
+      // ignore
+    }
+  };
 
   // Playlist delete confirmation
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -166,11 +205,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
       // --- SECTION 1: TOP TABS NAVIGATION ---
       if (focusArea === 'tabs') {
+        const totalItems = TABS.length + 1; // tabs (0..TABS.length-1) + close button (TABS.length)
+
         if (isLeft) {
           e.preventDefault();
           setSelectedTabNavIndex((prev) => {
-            const next = prev > 0 ? prev - 1 : 5;
-            if (next < 5) setActiveTab(TABS[next].id);
+            const next = prev > 0 ? prev - 1 : totalItems - 1;
+            if (next < TABS.length) setActiveTab(TABS[next].id);
             const target = document.getElementById(`settings-tab-${next}`);
             target?.focus();
             return next;
@@ -181,8 +222,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         if (isRight) {
           e.preventDefault();
           setSelectedTabNavIndex((prev) => {
-            const next = prev < 5 ? prev + 1 : 0;
-            if (next < 5) setActiveTab(TABS[next].id);
+            const next = prev < totalItems - 1 ? prev + 1 : 0;
+            if (next < TABS.length) setActiveTab(TABS[next].id);
             const target = document.getElementById(`settings-tab-${next}`);
             target?.focus();
             return next;
@@ -203,7 +244,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
 
         if (isEnter) {
-          if (selectedTabNavIndex === 5) {
+          if (selectedTabNavIndex === TABS.length) {
             e.preventDefault();
             onClose();
           } else {
@@ -348,10 +389,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
           <button
-            id="settings-tab-5"
+            id={`settings-tab-${TABS.length}`}
             onClick={onClose}
             className={`p-1.5 rounded-xl transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
-              focusArea === 'tabs' && selectedTabNavIndex === 5
+              focusArea === 'tabs' && selectedTabNavIndex === TABS.length
                 ? 'bg-rose-500/20 text-white ring-2 ring-tv-accent'
                 : 'text-slate-400 hover:text-white hover:bg-white/10'
             }`}
@@ -498,7 +539,283 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {/* ============================================================== */}
-          {/* TAB 2: SYNCHRONISATION                                         */}
+          {/* TAB 2: TÉLÉCOMMANDE & ZAPPING                                  */}
+          {/* ============================================================== */}
+          {activeTab === 'controls' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-sm font-bold text-white">Télécommande & Configuration du Zapping</h3>
+                <p className="text-xs text-slate-400">
+                  Personnalisez le comportement des touches de votre télécommande Android TV et maîtrisez le zapping.
+                </p>
+              </div>
+
+              {/* Section 1: Guide visuel des touches */}
+              <div className="bg-tv-card/80 border border-tv-border rounded-xl p-4 space-y-3">
+                <div className="flex items-center space-x-2 text-tv-accent">
+                  <Radio className="w-4 h-4" />
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                    Guide des Touches Télécommande
+                  </h4>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                  {/* Flèches Haut / Bas */}
+                  <div className="p-3 bg-black/40 rounded-xl border border-white/5 flex items-start space-x-3">
+                    <div className="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold flex-shrink-0 text-sm">
+                      ↕
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-white block">Flèches Haut & Bas</span>
+                      <span className="text-[11px] text-slate-300 block mt-0.5">
+                        • <strong>En plein écran :</strong> Zapping instantané vers la chaîne précédente / suivante.
+                      </span>
+                      <span className="text-[11px] text-slate-400 block">
+                        • <strong>Sur le guide TV :</strong> Navigation fluide de haut en bas sans sauter de colonne.
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Flèches Gauche / Droite */}
+                  <div className="p-3 bg-black/40 rounded-xl border border-white/5 flex items-start space-x-3">
+                    <div className="w-8 h-8 rounded-lg bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold flex-shrink-0 text-sm">
+                      ↔
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-white block">Flèches Gauche & Droite</span>
+                      <span className="text-[11px] text-slate-300 block mt-0.5">
+                        • Permet de passer du <strong>Menu</strong> (gauche) aux <strong>Groupes</strong> (centre) puis aux <strong>Chaînes</strong> (droite).
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Touche OK */}
+                  <div className="p-3 bg-black/40 rounded-xl border border-white/5 flex items-start space-x-3">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold flex-shrink-0 text-xs">
+                      OK
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-white block">Touche OK / Centre</span>
+                      <span className="text-[11px] text-slate-300 block mt-0.5">
+                        • <strong>Sur une chaîne :</strong> Lancer immédiatement le direct en plein écran.
+                      </span>
+                      <span className="text-[11px] text-slate-400 block">
+                        • <strong>En plein écran :</strong> Afficher / masquer le bandeau d&apos;info (nom et numéro).
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Touche Retour */}
+                  <div className="p-3 bg-black/40 rounded-xl border border-white/5 flex items-start space-x-3">
+                    <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold flex-shrink-0 text-xs">
+                      BACK
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-white block">Touche Retour (Back / Exit)</span>
+                      <span className="text-[11px] text-slate-300 block mt-0.5">
+                        • <strong>En plein écran :</strong> Quitter le plein écran et revenir au guide TV.
+                      </span>
+                      <span className="text-[11px] text-slate-400 block">
+                        • <strong>Sur le guide :</strong> Retourne à la colonne précédente (Chaînes ➔ Groupes ➔ Menu).
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Touches 0 à 9 */}
+                  <div className="p-3 bg-black/40 rounded-xl border border-white/5 flex items-start space-x-3">
+                    <div className="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold flex-shrink-0 text-xs">
+                      0-9
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-white block">Touches Numériques (0 à 9)</span>
+                      <span className="text-[11px] text-slate-300 block mt-0.5">
+                        • Tapez directement le numéro de votre chaîne (ex: 1 pour TF1, 12 pour NRJ12).
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Touche Jaune / F */}
+                  <div className="p-3 bg-black/40 rounded-xl border border-white/5 flex items-start space-x-3">
+                    <div className="w-8 h-8 rounded-lg bg-yellow-500/20 text-yellow-400 flex items-center justify-center font-bold flex-shrink-0 text-xs">
+                      ★
+                    </div>
+                    <div>
+                      <span className="text-xs font-bold text-white block">Touche Jaune (ou touche F)</span>
+                      <span className="text-[11px] text-slate-300 block mt-0.5">
+                        • Ajouter ou retirer instantanément la chaîne sélectionnée de vos Favoris.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: Réglages interactifs du zapping */}
+              <div className="space-y-3">
+                {/* Réglage 1: Mode de Zapping */}
+                <div className="p-3.5 bg-tv-card/60 rounded-xl border border-tv-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-white block">Mode de Zapping en Plein Écran</span>
+                      <span className="text-[11px] text-slate-400 block">
+                        Comportement lors de l&apos;appui sur Haut / Bas pendant la lecture
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setZappingMode('direct');
+                        saveControlSetting('zappingMode', 'direct');
+                      }}
+                      className={`py-2 px-3 rounded-lg text-xs font-semibold border transition text-left focus:outline-none focus:ring-2 focus:ring-tv-accent ${
+                        zappingMode === 'direct'
+                          ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                          : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                      }`}
+                    >
+                      <div className="font-bold">Zapping Immédiat (Défaut)</div>
+                      <div className="text-[10px] opacity-80 font-normal">Change et lance la chaîne directement</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setZappingMode('banner');
+                        saveControlSetting('zappingMode', 'banner');
+                      }}
+                      className={`py-2 px-3 rounded-lg text-xs font-semibold border transition text-left focus:outline-none focus:ring-2 focus:ring-tv-accent ${
+                        zappingMode === 'banner'
+                          ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                          : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                      }`}
+                    >
+                      <div className="font-bold">Afficher le bandeau avant</div>
+                      <div className="text-[10px] opacity-80 font-normal">Le 2ème appui ou OK valide le changement</div>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Réglage 2: Durée de l'OSD */}
+                <div className="p-3.5 bg-tv-card/60 rounded-xl border border-tv-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-white block">Disparition automatique du bandeau (OSD)</span>
+                      <span className="text-[11px] text-slate-400 block">
+                        Délai avant que le nom de la chaîne ne s&apos;efface de l&apos;écran
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5 pt-1">
+                    {[
+                      { id: '2s', label: '2 secondes' },
+                      { id: '3.5s', label: '3.5s (Défaut)' },
+                      { id: '5s', label: '5 secondes' },
+                      { id: 'manual', label: 'Touche OK' },
+                    ].map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setOsdDuration(item.id as any);
+                          saveControlSetting('osdDuration', item.id);
+                        }}
+                        className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center focus:outline-none focus:ring-2 focus:ring-tv-accent ${
+                          osdDuration === item.id
+                            ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                            : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                        }`}
+                      >
+                        {item.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Réglage 3: Action sur sélection chaîne */}
+                <div className="p-3.5 bg-tv-card/60 rounded-xl border border-tv-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-white block">Action lors du choix d&apos;une chaîne</span>
+                      <span className="text-[11px] text-slate-400 block">
+                        Comportement lorsque vous appuyez sur OK sur une chaîne du guide
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOkAction('fullscreen');
+                        saveControlSetting('okAction', 'fullscreen');
+                      }}
+                      className={`py-2 px-3 rounded-lg text-xs font-semibold border transition text-left focus:outline-none focus:ring-2 focus:ring-tv-accent ${
+                        okAction === 'fullscreen'
+                          ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                          : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                      }`}
+                    >
+                      <div className="font-bold">Plein Écran Immédiat (Défaut)</div>
+                      <div className="text-[10px] opacity-80 font-normal">Ouvre le flux en plein écran sans étape intermédiaire</div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOkAction('preview');
+                        saveControlSetting('okAction', 'preview');
+                      }}
+                      className={`py-2 px-3 rounded-lg text-xs font-semibold border transition text-left focus:outline-none focus:ring-2 focus:ring-tv-accent ${
+                        okAction === 'preview'
+                          ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                          : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                      }`}
+                    >
+                      <div className="font-bold">Aperçu dans le Guide</div>
+                      <div className="text-[10px] opacity-80 font-normal">Démarre le flux en fond d&apos;écran sans quitter le guide</div>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Réglage 4: Buffer de lecture */}
+                <div className="p-3.5 bg-tv-card/60 rounded-xl border border-tv-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-white block">Taille du Buffer de Lecture Vidéo</span>
+                      <span className="text-[11px] text-slate-400 block">
+                        Ajustez selon la vitesse de votre réseau
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 pt-1">
+                    {[
+                      { id: '300ms', label: '300 ms (Fibre/Défaut)', desc: 'Zapping ultra rapide' },
+                      { id: '1000ms', label: '1 000 ms (ADSL/4G)', desc: 'Équilibré' },
+                      { id: '2500ms', label: '2 500 ms (Wi-Fi)', desc: 'Anti-coupures' },
+                    ].map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setBufferSize(item.id as any);
+                          saveControlSetting('bufferSize', item.id);
+                        }}
+                        className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center focus:outline-none focus:ring-2 focus:ring-tv-accent ${
+                          bufferSize === item.id
+                            ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                            : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                        }`}
+                      >
+                        <div className="font-bold">{item.label}</div>
+                        <div className="text-[10px] opacity-75">{item.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* TAB 3: SYNCHRONISATION                                         */}
           {/* ============================================================== */}
           {activeTab === 'sync' && (
             <div className="space-y-4">
@@ -532,7 +849,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {/* ============================================================== */}
-          {/* TAB 3: MISES À JOUR                                            */}
+          {/* TAB 4: MISES À JOUR                                            */}
           {/* ============================================================== */}
           {activeTab === 'update' && (
             <div className="space-y-4">
@@ -547,7 +864,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-slate-300">Version installée</span>
                   <span className="text-xs font-mono font-bold text-tv-accent">
-                    v1.0.0 (Build {process.env.NEXT_PUBLIC_BUILD_NUMBER || currentBuildNumber || 17})
+                    v1.0.0 (Build {process.env.NEXT_PUBLIC_BUILD_NUMBER || currentBuildNumber || 19})
                   </span>
                 </div>
 
@@ -573,7 +890,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Télécharger l&apos;APK (Build 17)</span>
+                    <span>Télécharger l&apos;APK (Build {currentBuildNumber || 19})</span>
                   </a>
                 </div>
 
