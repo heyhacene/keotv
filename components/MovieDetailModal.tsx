@@ -434,21 +434,6 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
           }
           return;
         }
-            setFocusedSection('actors');
-            const target = document.getElementById(`actor-chip-${focusedActorIndex}`);
-            target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          } else {
-            setFocusedFilmIndex((prev) => {
-              const next = Math.max(0, prev - 4);
-              const target = document.getElementById(`actor-film-${next}`);
-              target?.focus();
-              target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-              return next;
-            });
-          }
-          return;
-        }
 
         if (isDown) {
           e.preventDefault();
@@ -488,7 +473,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
 
         if (isEnter) {
           e.preventDefault();
-          const targetItem = actorPlaylistFilms[focusedFilmIndex];
+          const targetItem = personPlaylistFilms[focusedFilmIndex];
           if (targetItem) {
             if (onSelectAnotherMovie) {
               onSelectAnotherMovie(targetItem);
@@ -508,8 +493,10 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
     focusedActorIndex,
     focusedFilmIndex,
     details?.actors,
-    actorPlaylistFilms,
-    selectedActor,
+    details?.director,
+    personPlaylistFilms,
+    selectedPerson,
+    selectedRole,
     movie,
     onClose,
     onPlay,

@@ -441,6 +441,8 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               type: 'vod',
             };
           }
+        }
+
         if (!loaded) {
           loaded = {
             title: focusedChannel.name,
