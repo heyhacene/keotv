@@ -529,36 +529,88 @@ export async function fetchVodInfo(
   };
 }
 
-// Fetch actor filmography in French from Wikidata SPARQL
+// In-memory cache for actor portraits
+const actorPhotoCache = new Map<string, string | null>();
+
+export async function fetchActorPhoto(actorName: string): Promise<string | null> {
+  const cleanName = actorName.trim();
+  if (!cleanName || cleanName.length < 2) return null;
+  if (actorPhotoCache.has(cleanName)) {
+    return actorPhotoCache.get(cleanName) || null;
+  }
+
+  // Format name for Wikipedia title (spaces -> underscores)
+  const wikiTitle = encodeURIComponent(cleanName.replace(/\s+/g, '_'));
+
+  try {
+    // 1. Try French Wikipedia first
+    const frUrl = `https://fr.wikipedia.org/api/rest_v1/page/summary/${wikiTitle}`;
+    const frData = await fetchHttp(frUrl, 'json');
+    if (frData?.thumbnail?.source) {
+      actorPhotoCache.set(cleanName, frData.thumbnail.source);
+      return frData.thumbnail.source;
+    }
+  } catch {
+    // fallback to English Wikipedia
+  }
+
+  try {
+    // 2. Fallback to English Wikipedia
+    const enUrl = `https://en.wikipedia.org/api/rest_v1/page/summary/${wikiTitle}`;
+    const enData = await fetchHttp(enUrl, 'json');
+    if (enData?.thumbnail?.source) {
+      actorPhotoCache.set(cleanName, enData.thumbnail.source);
+      return enData.thumbnail.source;
+    }
+  } catch {
+    // ignore
+  }
+
+  actorPhotoCache.set(cleanName, null);
+  return null;
+}
+
+// Fetch actor filmography in French and English using Wikipedia Search API
 export async function fetchActorFilmography(actorName: string): Promise<string[]> {
   const cleanName = actorName.trim();
   if (!cleanName || cleanName.length < 2) return [];
 
-  const escapedName = cleanName.replace(/"/g, '\\"');
-  const sparql = `SELECT DISTINCT ?filmLabel WHERE {
-    ?actor ?label "${escapedName}"@en .
-    ?film wdt:P161 ?actor .
-    SERVICE wikibase:label { bd:serviceParam wikibase:language "fr,en". }
-  } LIMIT 50`;
+  const titles = new Set<string>();
 
-  const url = `https://query.wikidata.org/sparql?query=${encodeURIComponent(sparql)}&format=json`;
-
+  // 1. Query French Wikipedia search for movies starring this actor
   try {
-    const res = await fetchHttp(url, 'json');
-    const bindings = res?.results?.bindings || [];
-    const titles = new Set<string>();
-
-    for (const b of bindings) {
-      const val = b?.filmLabel?.value;
-      if (val && !val.startsWith('Q') && val.length > 1) {
-        titles.add(val.trim());
+    const frSearchUrl = `https://fr.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(`"${cleanName}" film`)}&format=json&srlimit=40`;
+    const frRes = await fetchHttp(frSearchUrl, 'json');
+    const items = frRes?.query?.search || [];
+    for (const item of items) {
+      const rawTitle = (item?.title || '').trim();
+      // Clean up Wikipedia suffixes like "(film)", "(film, 2021)"
+      const cleanTitle = rawTitle.replace(/\s*\([^)]*\)/g, '').trim();
+      if (cleanTitle && cleanTitle.length >= 2 && !cleanTitle.toLowerCase().includes('catégorie') && !cleanTitle.toLowerCase().includes('liste')) {
+        titles.add(cleanTitle);
       }
     }
-    return Array.from(titles);
   } catch (err) {
-    console.warn(`Could not fetch filmography for actor ${actorName}:`, err);
-    return [];
+    console.warn(`FR Wikipedia filmography search failed for ${actorName}:`, err);
   }
+
+  // 2. Query English Wikipedia search as complementary source
+  try {
+    const enSearchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(`"${cleanName}" film`)}&format=json&srlimit=30`;
+    const enRes = await fetchHttp(enSearchUrl, 'json');
+    const items = enRes?.query?.search || [];
+    for (const item of items) {
+      const rawTitle = (item?.title || '').trim();
+      const cleanTitle = rawTitle.replace(/\s*\([^)]*\)/g, '').trim();
+      if (cleanTitle && cleanTitle.length >= 2 && !cleanTitle.toLowerCase().includes('category') && !cleanTitle.toLowerCase().includes('list')) {
+        titles.add(cleanTitle);
+      }
+    }
+  } catch (err) {
+    console.warn(`EN Wikipedia filmography search failed for ${actorName}:`, err);
+  }
+
+  return Array.from(titles);
 }
 
 // Helper to normalize strings for search and matching

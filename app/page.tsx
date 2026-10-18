@@ -627,16 +627,18 @@ export default function KeoTVHome() {
         return true;
       });
 
-      let targetCat: Category | null = null;
-      if (section === 'fav') {
-        targetCat = categories.find((c) => c.id === 'fav') || null;
+      // Sort matching categories to match the active categorySort preference
+      const favCat = matchingCats.find((c) => c.id === 'fav');
+      const otherCats = matchingCats.filter((c) => c.id !== 'fav');
+      if (categorySort === 'alpha') {
+        otherCats.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      } else if (categorySort === 'count') {
+        otherCats.sort((a, b) => (b.count || 0) - (a.count || 0));
       } else {
-        targetCat =
-          matchingCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) ||
-          matchingCats.find((c) => c.id !== 'fav') ||
-          matchingCats[0] ||
-          null;
+        otherCats.sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0));
       }
+      const sorted = (section === 'live' || section === 'fav') && favCat ? [favCat, ...otherCats] : otherCats;
+      const targetCat = sorted[0] || null;
 
       setSelectedCategory(targetCat);
       setFocusedCategoryIndex(0);
@@ -680,8 +682,12 @@ export default function KeoTVHome() {
 
   // Play an episode chosen from the series detail page
   const handlePlaySeriesEpisode = useCallback(
-    async (episode: SeriesEpisode, allEpisodes: SeriesEpisode[]) => {
+    async (episode: SeriesEpisode, allEpisodes: SeriesEpisode[], audioPref?: string, subPref?: string) => {
       const index = Math.max(0, allEpisodes.findIndex((e) => e.id === episode.id));
+      const seriesKey = String(selectedSeriesForDetails?.id || selectedSeriesForDetails?.name || '');
+      const savedAudio = audioPref || (typeof window !== 'undefined' ? localStorage.getItem(`keotv_series_audio_${seriesKey}`) || 'vf' : 'vf');
+      const savedSub = subPref || (typeof window !== 'undefined' ? localStorage.getItem(`keotv_series_sub_${seriesKey}`) || 'off' : 'off');
+
       if (isNativePlayerAvailable()) {
         try {
           await NativePlayer.play({
@@ -690,6 +696,9 @@ export default function KeoTVHome() {
             index,
             userAgent: NATIVE_PLAYER_USER_AGENT,
             isLive: false,
+            seriesId: seriesKey,
+            preferredAudio: savedAudio,
+            preferredSubtitle: savedSub,
           });
         } catch (err: any) {
           console.error('Native player episode error:', err);
@@ -1052,6 +1061,12 @@ export default function KeoTVHome() {
     isFullscreen,
     setIsFullscreen,
     onJumpToChannelNumber: handleJumpToChannelNumber,
+    onJumpToCurrentCategory: () => {
+      const idx = sortedCategories.findIndex((c) => c.id === selectedCategory?.id);
+      if (idx >= 0) {
+        setFocusedCategoryIndex(idx);
+      }
+    },
     onBack: handleAndroidBack,
   });
 
@@ -1669,7 +1684,7 @@ export default function KeoTVHome() {
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
         onResyncPlaylist={handleResyncPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={19}
+        currentBuildNumber={20}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}

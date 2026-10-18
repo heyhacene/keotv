@@ -60,7 +60,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onRestoreDemoPlaylist,
   onResyncPlaylist,
   isResyncing = false,
-  currentBuildNumber = 19,
+  currentBuildNumber = 20,
   categorySort = 'playlist',
   onCategorySortChange,
   channelSort = 'playlist',
@@ -864,7 +864,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-slate-300">Version installée</span>
                   <span className="text-xs font-mono font-bold text-tv-accent">
-                    v1.0.0 (Build {process.env.NEXT_PUBLIC_BUILD_NUMBER || currentBuildNumber || 19})
+                    v1.0.0 (Build {process.env.NEXT_PUBLIC_BUILD_NUMBER || currentBuildNumber || 20})
                   </span>
                 </div>
 
@@ -890,7 +890,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Télécharger l&apos;APK (Build {currentBuildNumber || 19})</span>
+                    <span>Télécharger l&apos;APK (Build {currentBuildNumber || 20})</span>
                   </a>
                 </div>
 

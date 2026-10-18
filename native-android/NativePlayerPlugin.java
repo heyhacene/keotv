@@ -46,6 +46,9 @@ public class NativePlayerPlugin extends Plugin {
         PlayerActivity.pendingIndex = Math.max(0, Math.min(call.getInt("index", 0), urlList.size() - 1));
         PlayerActivity.pendingUserAgent = call.getString("userAgent", "IPTVSmartersPro/3.1.5 (Linux; Android 12)");
         PlayerActivity.pendingIsLive = call.getBoolean("isLive", true);
+        PlayerActivity.pendingSeriesId = call.getString("seriesId", null);
+        PlayerActivity.pendingPreferredAudio = call.getString("preferredAudio", null);
+        PlayerActivity.pendingPreferredSubtitle = call.getString("preferredSubtitle", null);
 
         Intent intent = new Intent(getContext(), PlayerActivity.class);
         getActivity().startActivity(intent);

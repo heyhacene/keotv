@@ -154,12 +154,12 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               key={cat.id}
               id={`category-item-${idx}`}
               onClick={() => onSelectCategory(cat, idx, true)}
-              className={`flex items-center justify-between px-3 py-2.5 mx-2 my-0.5 rounded-lg text-left text-sm transition-all duration-150 ${
+              className={`flex items-center justify-between px-3 py-2.5 mx-2 my-0.5 rounded-lg text-left text-sm transition-all duration-150 relative ${
                 isFocused
-                  ? 'bg-tv-focus text-white font-bold shadow-tv-focus scale-[1.02] ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg'
+                  ? 'bg-tv-focus text-white font-black shadow-tv-focus scale-[1.02] ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg z-10'
                   : isSelected
-                  ? 'bg-tv-card text-tv-accent font-semibold border border-tv-border'
-                  : 'text-slate-300 hover:bg-tv-cardHover/70'
+                  ? 'bg-tv-card/90 text-tv-accent font-bold border-l-4 border-tv-accent pl-2.5 shadow-sm'
+                  : 'text-slate-300 hover:bg-tv-cardHover/70 border-l-4 border-transparent'
               }`}
             >
               <div className="flex items-center space-x-2.5 min-w-0">
@@ -168,7 +168,11 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               </div>
               <span
                 className={`text-[11px] px-1.5 py-0.5 rounded-full font-mono ${
-                  isFocused ? 'bg-black/30 text-white' : 'bg-slate-800/80 text-slate-400'
+                  isFocused
+                    ? 'bg-black/30 text-white font-bold'
+                    : isSelected
+                    ? 'bg-tv-accent/20 text-tv-accent font-bold'
+                    : 'bg-slate-800/80 text-slate-400'
                 }`}
               >
                 {cat.count}

@@ -6,6 +6,9 @@ export interface NativePlayerPlayOptions {
   index: number;
   userAgent: string;
   isLive: boolean;
+  seriesId?: string;
+  preferredAudio?: string;
+  preferredSubtitle?: string;
 }
 
 interface NativePlayerPlugin {

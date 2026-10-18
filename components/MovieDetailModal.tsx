@@ -4,8 +4,10 @@ import React, { useEffect, useState, useRef } from 'react';
 import { ArrowLeft, Loader2, Play, AlertCircle, Film, Volume2, MessageSquare, Star, Clock, Calendar, User, Clapperboard } from 'lucide-react';
 import { Channel } from '@/types/iptv';
 import {
+import {
   fetchVodInfo,
   fetchActorFilmography,
+  fetchActorPhoto,
   matchMoviesInPlaylist,
   MovieDetails,
 } from '@/lib/iptv-service';
@@ -34,13 +36,22 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Actor photos state: map of actor name -> photo URL
+  const [actorPhotos, setActorPhotos] = useState<Record<string, string>>({});
+
   // Actor filmography in playlist state
   const [selectedActor, setSelectedActor] = useState<string | null>(null);
   const [loadingActorFilms, setLoadingActorFilms] = useState<boolean>(false);
   const [actorPlaylistFilms, setActorPlaylistFilms] = useState<Channel[]>([]);
   const [searchedActor, setSearchedActor] = useState<string | null>(null);
 
+  // TV Remote Navigation states
+  const [focusedSection, setFocusedSection] = useState<'back' | 'play' | 'actors' | 'films'>('play');
+  const [focusedActorIndex, setFocusedActorIndex] = useState<number>(0);
+  const [focusedFilmIndex, setFocusedFilmIndex] = useState<number>(0);
+
   const playButtonRef = useRef<HTMLButtonElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
 
   // Load movie details on open
   useEffect(() => {
@@ -51,6 +62,10 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
     setSelectedActor(null);
     setActorPlaylistFilms([]);
     setSearchedActor(null);
+    setActorPhotos({});
+    setFocusedSection('play');
+    setFocusedActorIndex(0);
+    setFocusedFilmIndex(0);
     setLoading(true);
 
     const vodId = movie.epg_id || movie.id.replace(/^ch_xtream_(?:vod_)?/, '');
@@ -58,11 +73,21 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
       .then((d) => {
         if (cancelled) return;
         setDetails(d);
+
+        // Fetch actor photos in background
+        if (d.actors && d.actors.length > 0) {
+          d.actors.slice(0, 16).forEach((actor) => {
+            fetchActorPhoto(actor).then((url) => {
+              if (!cancelled && url) {
+                setActorPhotos((prev) => ({ ...prev, [actor]: url }));
+              }
+            });
+          });
+        }
       })
       .catch((err: any) => {
         if (cancelled) return;
         console.warn('Could not fetch complete VOD info, using channel fallback:', err);
-        // Fallback
         setDetails({
           id: movie.id,
           streamId: vodId,
@@ -77,7 +102,6 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
       .finally(() => {
         if (!cancelled) {
           setLoading(false);
-          // Autofocus play button for TV remotes
           setTimeout(() => {
             playButtonRef.current?.focus();
           }, 150);
@@ -89,13 +113,19 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
     };
   }, [movie, serverUrl, username, password]);
 
-  // When an actor is clicked: query Wikidata filmography + match against local Dexie playlist
+  // When an actor is clicked: query filmography + match against local Dexie playlist
   const handleActorClick = async (actor: string) => {
-    if (selectedActor === actor && actorPlaylistFilms.length > 0) return;
+    if (selectedActor === actor && actorPlaylistFilms.length > 0) {
+      setFocusedSection('films');
+      setFocusedFilmIndex(0);
+      return;
+    }
     setSelectedActor(actor);
     setLoadingActorFilms(true);
     setActorPlaylistFilms([]);
     setSearchedActor(actor);
+    setFocusedSection('films');
+    setFocusedFilmIndex(0);
 
     try {
       const [actorFilms, allVod] = await Promise.all([
@@ -104,7 +134,6 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
       ]);
 
       const matched = matchMoviesInPlaylist(actor, actorFilms, allVod);
-      // Exclude current movie
       const filtered = matched.filter((m) => m.id !== movie?.id);
       setActorPlaylistFilms(filtered);
     } catch (err) {
@@ -115,22 +144,228 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
     }
   };
 
-  // Keyboard navigation for TV remote
+  // Dedicated TV Remote Navigation handler for the movie sheet
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' || e.key === 'Backspace') {
-        if (selectedActor && actorPlaylistFilms.length > 0) {
+      const keyCode = (e as any).keyCode || 0;
+      const key = e.key || '';
+
+      const isEnter =
+        key === 'Enter' ||
+        key === 'Select' ||
+        key === 'Ok' ||
+        keyCode === 13 ||
+        keyCode === 23 || // DPAD_CENTER
+        keyCode === 66;
+
+      const isUp = key === 'ArrowUp' || keyCode === 38 || keyCode === 19;
+      const isDown = key === 'ArrowDown' || keyCode === 40 || keyCode === 20;
+      const isLeft = key === 'ArrowLeft' || keyCode === 37 || keyCode === 21;
+      const isRight = key === 'ArrowRight' || keyCode === 39 || keyCode === 22;
+      const isBack = key === 'Escape' || key === 'Backspace' || keyCode === 27 || keyCode === 4;
+
+      if (isBack) {
+        e.preventDefault();
+        if (focusedSection === 'films' || (selectedActor && actorPlaylistFilms.length > 0)) {
           setSelectedActor(null);
-          e.preventDefault();
+          setFocusedSection('actors');
           return;
         }
-        e.preventDefault();
+        if (focusedSection === 'actors') {
+          setFocusedSection('play');
+          playButtonRef.current?.focus();
+          scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+          return;
+        }
         onClose();
+        return;
+      }
+
+      // SECTION 0: Header Back button
+      if (focusedSection === 'back') {
+        if (isDown) {
+          e.preventDefault();
+          setFocusedSection('play');
+          playButtonRef.current?.focus();
+          return;
+        }
+        if (isEnter) {
+          e.preventDefault();
+          onClose();
+          return;
+        }
+      }
+
+      // SECTION 1: Play button
+      if (focusedSection === 'play') {
+        if (isUp) {
+          e.preventDefault();
+          setFocusedSection('back');
+          document.getElementById('movie-detail-back')?.focus();
+          return;
+        }
+        if (isDown) {
+          e.preventDefault();
+          if (details?.actors && details.actors.length > 0) {
+            setFocusedSection('actors');
+            const target = document.getElementById(`actor-chip-${focusedActorIndex}`) || document.getElementById('actor-chip-0');
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          return;
+        }
+        if (isEnter) {
+          e.preventDefault();
+          if (movie) onPlay(movie);
+          return;
+        }
+      }
+
+      // SECTION 2: Actors list
+      if (focusedSection === 'actors') {
+        const actorCount = details?.actors?.length || 0;
+
+        if (isUp) {
+          e.preventDefault();
+          setFocusedSection('play');
+          playButtonRef.current?.focus();
+          scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+          return;
+        }
+
+        if (isLeft) {
+          e.preventDefault();
+          setFocusedActorIndex((prev) => {
+            const next = Math.max(0, prev - 1);
+            const target = document.getElementById(`actor-chip-${next}`);
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return next;
+          });
+          return;
+        }
+
+        if (isRight) {
+          e.preventDefault();
+          setFocusedActorIndex((prev) => {
+            const next = Math.min(actorCount - 1, prev + 1);
+            const target = document.getElementById(`actor-chip-${next}`);
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return next;
+          });
+          return;
+        }
+
+        if (isDown) {
+          e.preventDefault();
+          if (actorPlaylistFilms.length > 0) {
+            setFocusedSection('films');
+            setFocusedFilmIndex(0);
+            const target = document.getElementById('actor-film-0');
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          return;
+        }
+
+        if (isEnter) {
+          e.preventDefault();
+          if (details?.actors && details.actors[focusedActorIndex]) {
+            handleActorClick(details.actors[focusedActorIndex]);
+          }
+          return;
+        }
+      }
+
+      // SECTION 3: Actor playlist films grid
+      if (focusedSection === 'films') {
+        const filmCount = actorPlaylistFilms.length;
+
+        if (isUp) {
+          e.preventDefault();
+          if (focusedFilmIndex < 4) {
+            setFocusedSection('actors');
+            const target = document.getElementById(`actor-chip-${focusedActorIndex}`);
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else {
+            setFocusedFilmIndex((prev) => {
+              const next = Math.max(0, prev - 4);
+              const target = document.getElementById(`actor-film-${next}`);
+              target?.focus();
+              target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              return next;
+            });
+          }
+          return;
+        }
+
+        if (isDown) {
+          e.preventDefault();
+          setFocusedFilmIndex((prev) => {
+            const next = Math.min(filmCount - 1, prev + 4);
+            const target = document.getElementById(`actor-film-${next}`);
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return next;
+          });
+          return;
+        }
+
+        if (isLeft) {
+          e.preventDefault();
+          setFocusedFilmIndex((prev) => {
+            const next = Math.max(0, prev - 1);
+            const target = document.getElementById(`actor-film-${next}`);
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return next;
+          });
+          return;
+        }
+
+        if (isRight) {
+          e.preventDefault();
+          setFocusedFilmIndex((prev) => {
+            const next = Math.min(filmCount - 1, prev + 1);
+            const target = document.getElementById(`actor-film-${next}`);
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return next;
+          });
+          return;
+        }
+
+        if (isEnter) {
+          e.preventDefault();
+          const targetItem = actorPlaylistFilms[focusedFilmIndex];
+          if (targetItem) {
+            if (onSelectAnotherMovie) {
+              onSelectAnotherMovie(targetItem);
+            } else {
+              onPlay(targetItem);
+            }
+          }
+          return;
+        }
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, selectedActor, actorPlaylistFilms.length]);
+  }, [
+    focusedSection,
+    focusedActorIndex,
+    focusedFilmIndex,
+    details?.actors,
+    actorPlaylistFilms,
+    selectedActor,
+    movie,
+    onClose,
+    onPlay,
+    onSelectAnotherMovie,
+  ]);
 
   if (!movie) return null;
 
@@ -142,8 +377,13 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
       {/* Top Header */}
       <div className="flex items-center space-x-3 px-4 py-3 bg-tv-surface/90 backdrop-blur-md border-b border-tv-border flex-shrink-0 z-20">
         <button
+          id="movie-detail-back"
           onClick={onClose}
-          className="p-2 rounded-xl bg-tv-card hover:bg-tv-cardHover text-slate-200 hover:text-white transition flex items-center space-x-2 border border-tv-border shadow-sm focus:ring-2 focus:ring-tv-accent focus:outline-none"
+          className={`p-2 rounded-xl transition flex items-center space-x-2 border shadow-sm focus:outline-none ${
+            focusedSection === 'back'
+              ? 'bg-tv-focus text-white border-tv-accent ring-2 ring-tv-accent scale-105'
+              : 'bg-tv-card hover:bg-tv-cardHover text-slate-200 hover:text-white border-tv-border'
+          }`}
           title="Retour au catalogue des films"
         >
           <ArrowLeft className="w-5 h-5 text-tv-accent" />
@@ -156,7 +396,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 overflow-y-auto relative">
+      <div ref={scrollContainerRef} className="flex-1 overflow-y-auto relative">
         {/* Backdrop Background Image with Gradients */}
         {backdrop && (
           <div className="absolute top-0 left-0 right-0 h-96 sm:h-[480px] overflow-hidden pointer-events-none opacity-25">
@@ -254,9 +494,14 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
               {/* Action Buttons: Prominent "Lecture" Button */}
               <div className="pt-2 flex flex-wrap items-center gap-3">
                 <button
+                  id="movie-detail-play"
                   ref={playButtonRef}
                   onClick={() => onPlay(movie)}
-                  className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-tv-accent to-sky-500 text-slate-950 font-black text-sm sm:text-base flex items-center space-x-2.5 shadow-xl shadow-tv-accent/30 hover:scale-[1.02] active:scale-[0.98] transition focus:ring-4 focus:ring-tv-accent/50 focus:outline-none"
+                  className={`px-6 py-3.5 rounded-2xl bg-gradient-to-r from-tv-accent to-sky-500 text-slate-950 font-black text-sm sm:text-base flex items-center space-x-2.5 shadow-xl transition focus:outline-none ${
+                    focusedSection === 'play'
+                      ? 'ring-4 ring-tv-accent ring-offset-2 ring-offset-tv-bg scale-[1.03] shadow-2xl shadow-sky-400/50'
+                      : 'shadow-tv-accent/30 hover:scale-[1.02]'
+                  }`}
                 >
                   <Play className="w-5 h-5 fill-slate-950" />
                   <span>Lancer le film</span>
@@ -296,21 +541,43 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
                 </span>
               </div>
 
-              {/* Actor Chips */}
+              {/* Actor Chips with Round Portraits */}
               <div className="flex flex-wrap gap-2">
-                {details.actors.map((actor) => {
+                {details.actors.map((actor, idx) => {
                   const isSelected = selectedActor === actor;
+                  const isFocused = focusedSection === 'actors' && focusedActorIndex === idx;
+                  const photoUrl = actorPhotos[actor];
+
                   return (
                     <button
                       key={actor}
-                      onClick={() => handleActorClick(actor)}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition border flex items-center space-x-1.5 focus:outline-none focus:ring-2 focus:ring-tv-accent ${
-                        isSelected
-                          ? 'bg-tv-accent text-slate-950 border-tv-accent shadow-md shadow-tv-accent/30 scale-105'
-                          : 'bg-tv-card hover:bg-tv-cardHover text-slate-200 border-tv-border hover:border-slate-500'
+                      id={`actor-chip-${idx}`}
+                      onClick={() => {
+                        setFocusedSection('actors');
+                        setFocusedActorIndex(idx);
+                        handleActorClick(actor);
+                      }}
+                      className={`px-3 py-1.5 rounded-full text-xs transition border flex items-center space-x-2 focus:outline-none ${
+                        isFocused
+                          ? 'bg-tv-focus text-white border-tv-accent ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg scale-105 font-bold shadow-lg shadow-sky-500/30'
+                          : isSelected
+                          ? 'bg-tv-accent text-slate-950 border-tv-accent shadow-md shadow-tv-accent/30 font-bold'
+                          : 'bg-tv-card hover:bg-tv-cardHover text-slate-200 border-tv-border hover:border-slate-500 font-medium'
                       }`}
                     >
-                      <User className={`w-3.5 h-3.5 ${isSelected ? 'text-slate-950' : 'text-slate-400'}`} />
+                      {photoUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={photoUrl}
+                          alt={actor}
+                          className="w-6 h-6 rounded-full object-cover ring-1 ring-white/30 flex-shrink-0"
+                          onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
+                        />
+                      ) : (
+                        <div className={`w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 ${isFocused || isSelected ? 'bg-black/30' : 'bg-slate-800'}`}>
+                          <User className={`w-3.5 h-3.5 ${isFocused ? 'text-white' : isSelected ? 'text-slate-950' : 'text-slate-400'}`} />
+                        </div>
+                      )}
                       <span>{actor}</span>
                     </button>
                   );
@@ -328,7 +595,10 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
                       </span>
                     </h4>
                     <button
-                      onClick={() => setSelectedActor(null)}
+                      onClick={() => {
+                        setSelectedActor(null);
+                        setFocusedSection('actors');
+                      }}
                       className="text-[11px] text-slate-400 hover:text-white underline"
                     >
                       Masquer
@@ -352,44 +622,53 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
 
                   {!loadingActorFilms && actorPlaylistFilms.length > 0 && (
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 pt-1">
-                      {actorPlaylistFilms.map((item) => (
-                        <div
-                          key={item.id}
-                          onClick={() => {
-                            if (onSelectAnotherMovie) {
-                              onSelectAnotherMovie(item);
-                            } else {
-                              onPlay(item);
-                            }
-                          }}
-                          className="group p-2 rounded-xl bg-tv-surface hover:bg-tv-cardHover border border-tv-border hover:border-tv-accent transition cursor-pointer flex flex-col space-y-1.5 focus:outline-none focus:ring-2 focus:ring-tv-accent"
-                          tabIndex={0}
-                        >
-                          <div className="w-full aspect-[2/3] rounded-lg bg-tv-bg border border-tv-border overflow-hidden relative">
-                            {item.logo ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={item.logo}
-                                alt={item.name}
-                                className="w-full h-full object-cover group-hover:scale-105 transition"
-                                onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
-                              />
-                            ) : (
-                              <div className="w-full h-full flex items-center justify-center">
-                                <Film className="w-6 h-6 text-slate-600" />
-                              </div>
-                            )}
-                            <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
-                              <div className="w-9 h-9 rounded-full bg-tv-accent flex items-center justify-center shadow-lg">
-                                <Play className="w-4 h-4 fill-slate-950 text-slate-950 ml-0.5" />
+                      {actorPlaylistFilms.map((item, idx) => {
+                        const isFocused = focusedSection === 'films' && focusedFilmIndex === idx;
+
+                        return (
+                          <div
+                            key={item.id}
+                            id={`actor-film-${idx}`}
+                            onClick={() => {
+                              if (onSelectAnotherMovie) {
+                                onSelectAnotherMovie(item);
+                              } else {
+                                onPlay(item);
+                              }
+                            }}
+                            className={`group p-2 rounded-xl transition cursor-pointer flex flex-col space-y-1.5 border focus:outline-none ${
+                              isFocused
+                                ? 'bg-tv-focus text-white border-tv-accent ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg scale-[1.03] shadow-xl shadow-sky-500/30'
+                                : 'bg-tv-surface hover:bg-tv-cardHover border-tv-border hover:border-tv-accent'
+                            }`}
+                            tabIndex={0}
+                          >
+                            <div className="w-full aspect-[2/3] rounded-lg bg-tv-bg border border-tv-border overflow-hidden relative">
+                              {item.logo ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={item.logo}
+                                  alt={item.name}
+                                  className="w-full h-full object-cover group-hover:scale-105 transition"
+                                  onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
+                                />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center">
+                                  <Film className="w-6 h-6 text-slate-600" />
+                                </div>
+                              )}
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                                <div className="w-9 h-9 rounded-full bg-tv-accent flex items-center justify-center shadow-lg">
+                                  <Play className="w-4 h-4 fill-slate-950 text-slate-950 ml-0.5" />
+                                </div>
                               </div>
                             </div>
+                            <p className="text-[11px] font-semibold text-slate-200 group-hover:text-white truncate">
+                              {item.name}
+                            </p>
                           </div>
-                          <p className="text-[11px] font-semibold text-slate-200 group-hover:text-white truncate">
-                            {item.name}
-                          </p>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

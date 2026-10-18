@@ -12,7 +12,7 @@ interface SeriesDetailModalProps {
   username: string;
   password: string;
   onClose: () => void;
-  onPlayEpisode?: (episode: SeriesEpisode, allEpisodes: SeriesEpisode[]) => void;
+  onPlayEpisode?: (episode: SeriesEpisode, allEpisodes: SeriesEpisode[], audioPref?: string, subPref?: string) => void;
 }
 
 // Full page for a series: seasons (collapsible) and all episodes of each season
@@ -28,6 +28,43 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [openSeason, setOpenSeason] = useState<number | null>(null);
+
+  // Persistent audio & subtitle choices per series
+  const seriesKey = series?.id || series?.name || '';
+  const [seriesAudio, setSeriesAudio] = useState<'vf' | 'vo'>('vf');
+  const [seriesSub, setSeriesSub] = useState<'off' | 'fr' | 'en'>('off');
+
+  // Load saved series language preferences
+  useEffect(() => {
+    if (!seriesKey) return;
+    try {
+      const savedAudio = localStorage.getItem(`keotv_series_audio_${seriesKey}`);
+      if (savedAudio === 'vo' || savedAudio === 'vf') setSeriesAudio(savedAudio);
+
+      const savedSub = localStorage.getItem(`keotv_series_sub_${seriesKey}`);
+      if (savedSub === 'fr' || savedSub === 'en' || savedSub === 'off') setSeriesSub(savedSub);
+    } catch {
+      // ignore
+    }
+  }, [seriesKey]);
+
+  const saveAudioPref = (val: 'vf' | 'vo') => {
+    setSeriesAudio(val);
+    try {
+      localStorage.setItem(`keotv_series_audio_${seriesKey}`, val);
+    } catch {
+      // ignore
+    }
+  };
+
+  const saveSubPref = (val: 'off' | 'fr' | 'en') => {
+    setSeriesSub(val);
+    try {
+      localStorage.setItem(`keotv_series_sub_${seriesKey}`, val);
+    } catch {
+      // ignore
+    }
+  };
 
   useEffect(() => {
     if (!series) return;
@@ -66,7 +103,7 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
     const index = Math.max(0, all.findIndex((e) => e.id === episode.id));
 
     if (onPlayEpisode) {
-      onPlayEpisode(episode, all);
+      onPlayEpisode(episode, all, seriesAudio, seriesSub);
       return;
     }
 
@@ -78,6 +115,9 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
           index,
           userAgent: NATIVE_PLAYER_USER_AGENT,
           isLive: false,
+          seriesId: seriesKey,
+          preferredAudio: seriesAudio,
+          preferredSubtitle: seriesSub,
         });
       } catch (err: any) {
         alert(`Lecture impossible : ${err?.message || err}`);
@@ -175,6 +215,82 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
                   {details.plot}
                 </p>
               )}
+
+              {/* Series Audio & Subtitles Preference Selector */}
+              <div className="mt-3.5 p-3 rounded-xl bg-black/40 border border-white/10 space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5 flex-shrink-0">
+                      <Volume2 className="w-3.5 h-3.5 text-tv-accent" />
+                      <span>Audio :</span>
+                    </span>
+                    <div className="flex items-center space-x-1">
+                      <button
+                        onClick={() => saveAudioPref('vf')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition border ${
+                          seriesAudio === 'vf'
+                            ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                            : 'bg-tv-card/60 text-slate-400 border-white/5 hover:text-white'
+                        }`}
+                      >
+                        Français (VF)
+                      </button>
+                      <button
+                        onClick={() => saveAudioPref('vo')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition border ${
+                          seriesAudio === 'vo'
+                            ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                            : 'bg-tv-card/60 text-slate-400 border-white/5 hover:text-white'
+                        }`}
+                      >
+                        Version Originale (VO)
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5 flex-shrink-0">
+                      <MessageSquare className="w-3.5 h-3.5 text-purple-400" />
+                      <span>Sous-titres :</span>
+                    </span>
+                    <div className="flex items-center space-x-1">
+                      <button
+                        onClick={() => saveSubPref('off')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition border ${
+                          seriesSub === 'off'
+                            ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                            : 'bg-tv-card/60 text-slate-400 border-white/5 hover:text-white'
+                        }`}
+                      >
+                        Sans
+                      </button>
+                      <button
+                        onClick={() => saveSubPref('fr')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition border ${
+                          seriesSub === 'fr'
+                            ? 'bg-purple-600 text-white border-purple-400 shadow-sm'
+                            : 'bg-tv-card/60 text-slate-400 border-white/5 hover:text-white'
+                        }`}
+                      >
+                        Français (FR)
+                      </button>
+                      <button
+                        onClick={() => saveSubPref('en')}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition border ${
+                          seriesSub === 'en'
+                            ? 'bg-purple-600 text-white border-purple-400 shadow-sm'
+                            : 'bg-tv-card/60 text-slate-400 border-white/5 hover:text-white'
+                        }`}
+                      >
+                        Anglais (EN)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <p className="text-[10px] text-slate-400 italic">
+                  ✓ Vos choix de langue et sous-titres sont mémorisés spécifiquement pour cette série et appliqués automatiquement à tous ses épisodes.
+                </p>
+              </div>
             </div>
           </div>
         </div>
