@@ -4,7 +4,6 @@ import React, { useEffect, useState, useRef } from 'react';
 import { ArrowLeft, Loader2, Play, AlertCircle, Film, Volume2, MessageSquare, Star, Clock, Calendar, User, Clapperboard } from 'lucide-react';
 import { Channel } from '@/types/iptv';
 import {
-import {
   fetchVodInfo,
   fetchActorFilmography,
   fetchActorPhoto,
