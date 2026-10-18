@@ -13,7 +13,7 @@ interface SearchModalProps {
   onSelectChannel: (channel: Channel) => void;
   onSelectMovie: (channel: Channel) => void;
   onSelectSeries: (channel: Channel) => void;
-  onToggleFavorite?: (channel: Channel) => void;
+  onToggleFavorite?: (channel: Channel, explicitNewState?: boolean) => void;
   serverCreds?: { serverUrl: string; username: string; password: string } | null;
 }
 
@@ -237,7 +237,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     }
 
     if (onToggleFavorite) {
-      onToggleFavorite({ ...item, is_favorite: nextState });
+      onToggleFavorite(item, nextState);
     }
   };
 

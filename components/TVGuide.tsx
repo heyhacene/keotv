@@ -43,7 +43,7 @@ interface TVGuideProps {
   activePane: NavigationPane;
   onSelectCategory: (cat: Category, index: number, switchPane?: boolean) => void;
   onSelectChannel: (channel: Channel, index: number) => void;
-  onToggleFavorite: (channel: Channel) => void;
+  onToggleFavorite: (channel: Channel, explicitNewState?: boolean) => void;
   onOpenSyncModal: () => void;
   onOpenXtreamModal: () => void;
   onToggleFullscreen: () => void;
@@ -68,10 +68,12 @@ function renderCategoryIcon(iconName?: string, isAdult?: boolean) {
   switch (iconName) {
     case 'Star':
       return <Star className="w-4 h-4 text-amber-400 flex-shrink-0" />;
-    case 'Trophy':
-      return <Trophy className="w-4 h-4 text-rose-400 flex-shrink-0" />;
+    case 'Clapperboard':
+      return <Clapperboard className="w-4 h-4 text-amber-400 flex-shrink-0" />;
     case 'Film':
       return <Film className="w-4 h-4 text-purple-400 flex-shrink-0" />;
+    case 'Trophy':
+      return <Trophy className="w-4 h-4 text-rose-400 flex-shrink-0" />;
     case 'Globe':
       return <Globe className="w-4 h-4 text-emerald-400 flex-shrink-0" />;
     case 'Compass':
@@ -152,7 +154,7 @@ interface ChannelRowProps {
   isFocused: boolean;
   isActive: boolean;
   onSelect: (channel: Channel, index: number) => void;
-  onToggleFavorite: (channel: Channel) => void;
+  onToggleFavorite: (channel: Channel, explicitNewState?: boolean) => void;
   onOpenContextMenu?: (channel: Channel) => void;
 }
 
@@ -618,7 +620,12 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               {selectedCategory?.name || 'Chaînes en direct'}
             </span>
             <span className="text-[10px] text-slate-500 font-mono">
-              {channels.length} chaînes
+              {channels.length}{' '}
+              {selectedCategory?.type === 'series'
+                ? 'séries'
+                : selectedCategory?.type === 'vod'
+                ? 'films'
+                : 'chaînes'}
             </span>
           </div>
           {onChannelSortChange && (
@@ -659,8 +666,20 @@ export const TVGuide: React.FC<TVGuideProps> = ({
 
         {channels.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-slate-500">
-            <Radio className="w-10 h-10 mb-2 opacity-50" />
-            <p className="text-sm">Aucune chaîne dans ce groupe.</p>
+            {selectedCategory?.id.startsWith('fav') ? (
+              <>
+                <Star className="w-10 h-10 mb-2 text-amber-400/50" />
+                <p className="text-sm text-slate-300 font-medium">Aucun favori dans cette catégorie.</p>
+                <p className="text-xs text-slate-500 mt-1 max-w-xs text-center">
+                  Appuyez longuement sur un média ou cliquez sur l&apos;étoile pour l&apos;ajouter à vos favoris.
+                </p>
+              </>
+            ) : (
+              <>
+                <Radio className="w-10 h-10 mb-2 opacity-50" />
+                <p className="text-sm">Aucune chaîne dans ce groupe.</p>
+              </>
+            )}
           </div>
         ) : (
           <div className="flex flex-col">

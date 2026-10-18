@@ -50,7 +50,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
   const sectionCategories = useMemo(() => {
     return localCategories
       .filter((c) => {
-        if (c.id === 'fav') return false;
+        if (c.id === 'fav' || c.id.startsWith('fav_')) return false;
         if (activeTab === 'live') return !c.type || c.type === 'live';
         return c.type === activeTab;
       })

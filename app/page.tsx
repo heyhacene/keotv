@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { db, getSetting, setSetting } from '@/lib/db';
+import { db, getSetting, setSetting, getFavoriteChannelIds, saveFavoriteChannelId } from '@/lib/db';
 import { INITIAL_CATEGORIES, INITIAL_CHANNELS, getMockEpgForChannel } from '@/lib/mock-data';
 import { Channel, Category, EpgProgram, NavigationPane, PlaylistConfig } from '@/types/iptv';
 import { useTVNavigation } from '@/lib/use-tv-navigation';
@@ -46,6 +46,12 @@ export default function KeoTVHome() {
   const [playlists, setPlaylists] = useState<PlaylistConfig[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [favCount, setFavCount] = useState<number>(0);
+  const [favCounts, setFavCounts] = useState<{ live: number; vod: number; series: number; total: number }>({
+    live: 0,
+    vod: 0,
+    series: 0,
+    total: 0,
+  });
 
   // Resync and channel loading recovery states
   const [isResyncing, setIsResyncing] = useState<boolean>(false);
@@ -173,6 +179,80 @@ export default function KeoTVHome() {
     getSetting('parental_hide_adult', false).then((hd) => setParentalHideAdult(Boolean(hd)));
   }, []);
 
+  // Recalculate favorite counts by universe (live, vod, series, total)
+  const updateFavoriteCounts = useCallback(async () => {
+    try {
+      const favs = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
+      let live = 0;
+      let vod = 0;
+      let series = 0;
+      for (const c of favs) {
+        if (c.stream_type === 'vod') vod++;
+        else if (c.stream_type === 'series') series++;
+        else live++;
+      }
+      const counts = { live, vod, series, total: favs.length };
+      setFavCounts(counts);
+      setFavCount(favs.length);
+      return counts;
+    } catch (e) {
+      return { live: 0, vod: 0, series: 0, total: 0 };
+    }
+  }, []);
+
+  // Universe-specific favorite categories
+  const favSeriesCategory: Category = useMemo(
+    () => ({
+      id: 'fav_series',
+      name: '⭐ Séries favorites',
+      type: 'series',
+      count: favCounts.series,
+      icon: 'Clapperboard',
+      is_hidden: false,
+      custom_order: -100,
+    }),
+    [favCounts.series]
+  );
+
+  const favVodCategory: Category = useMemo(
+    () => ({
+      id: 'fav_vod',
+      name: '⭐ Films favoris',
+      type: 'vod',
+      count: favCounts.vod,
+      icon: 'Film',
+      is_hidden: false,
+      custom_order: -100,
+    }),
+    [favCounts.vod]
+  );
+
+  const favLiveCategory: Category = useMemo(
+    () => ({
+      id: 'fav_live',
+      name: '⭐ Chaînes favorites',
+      type: 'live',
+      count: favCounts.live,
+      icon: 'Tv',
+      is_hidden: false,
+      custom_order: -100,
+    }),
+    [favCounts.live]
+  );
+
+  const favAllCategory: Category = useMemo(
+    () => ({
+      id: 'fav',
+      name: '⭐ Tous les favoris',
+      type: 'live',
+      count: favCounts.total,
+      icon: 'Star',
+      is_hidden: false,
+      custom_order: -99,
+    }),
+    [favCounts.total]
+  );
+
   const categoryLoadTokenRef = useRef<number>(0);
 
   // Channel loader for the selected category from IndexedDB with multi-tier lookup & on-demand fetch
@@ -188,8 +268,20 @@ export default function KeoTVHome() {
       setCategoryError(null);
       try {
         let rawList: Channel[] = [];
-        if (cat.id === 'fav') {
+        if (cat.id === 'fav' || cat.id === 'fav_all') {
           rawList = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
+        } else if (cat.id === 'fav_series') {
+          rawList = await db.channels
+            .filter((c) => Boolean(c.is_favorite) && c.stream_type === 'series')
+            .toArray();
+        } else if (cat.id === 'fav_vod') {
+          rawList = await db.channels
+            .filter((c) => Boolean(c.is_favorite) && c.stream_type === 'vod')
+            .toArray();
+        } else if (cat.id === 'fav_live') {
+          rawList = await db.channels
+            .filter((c) => Boolean(c.is_favorite) && (c.stream_type === 'live' || !c.stream_type))
+            .toArray();
         } else {
           // Tier 1: exact group_id indexed match (e.g. grp_live_123, grp_vod_456, grp_series_789)
           rawList = await db.channels.where('group_id').equals(cat.id).toArray();
@@ -198,7 +290,7 @@ export default function KeoTVHome() {
           // stream types mixed Films / Séries / TV together. The group_id is the single source of truth.
 
           // Tier 5: ON-DEMAND FETCH FROM XTREAM SERVER (if local database has 0 items for this category)
-          if (rawList.length === 0 && cat.id !== 'fav') {
+          if (rawList.length === 0 && !cat.id.startsWith('fav')) {
             if (categoryLoadTokenRef.current !== token) return;
             const currentPlaylists = await db.playlists.toArray();
             let activePl = currentPlaylists.find(
@@ -233,18 +325,20 @@ export default function KeoTVHome() {
                 if (categoryLoadTokenRef.current !== token) return;
 
                 if (onDemandStreams.length > 0) {
+                  const favIds = await getFavoriteChannelIds();
+                  const mergedStreams = onDemandStreams.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
                   try {
-                    await db.channels.bulkPut(onDemandStreams);
+                    await db.channels.bulkPut(mergedStreams);
                   } catch (putErr) {
-                    for (const s of onDemandStreams) {
+                    for (const s of mergedStreams) {
                       try { await db.channels.put(s); } catch {}
                     }
                   }
-                  await db.categories.update(cat.id, { count: onDemandStreams.length });
+                  await db.categories.update(cat.id, { count: mergedStreams.length });
                   setCategories((prev) =>
-                    prev.map((c) => (c.id === cat.id ? { ...c, count: onDemandStreams.length } : c))
+                    prev.map((c) => (c.id === cat.id ? { ...c, count: mergedStreams.length } : c))
                   );
-                  rawList = onDemandStreams;
+                  rawList = mergedStreams;
                 }
               } catch (onDemandErr: any) {
                 if (categoryLoadTokenRef.current !== token) return;
@@ -306,9 +400,11 @@ export default function KeoTVHome() {
             password: pl.password,
           });
           if (allSeries.length > 0 && bgLoadTokenRef.current === token) {
-            await db.channels.bulkPut(allSeries);
+            const favIds = await getFavoriteChannelIds();
+            const mergedSeries = allSeries.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
+            await db.channels.bulkPut(mergedSeries);
             const countsByGroup = new Map<string, number>();
-            for (const s of allSeries) {
+            for (const s of mergedSeries) {
               countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
             for (const [gid, cnt] of countsByGroup.entries()) {
@@ -333,10 +429,12 @@ export default function KeoTVHome() {
         shouldAbort: () => bgLoadTokenRef.current !== token,
         onCategoryLoaded: async (cat, streams) => {
           if (streams.length === 0) return;
+          const favIds = await getFavoriteChannelIds();
+          const mergedStreams = streams.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
           try {
-            await db.channels.bulkPut(streams);
+            await db.channels.bulkPut(mergedStreams);
           } catch {
-            for (const s of streams) {
+            for (const s of mergedStreams) {
               try { await db.channels.put(s); } catch {}
             }
           }
@@ -360,10 +458,12 @@ export default function KeoTVHome() {
         shouldAbort: () => bgLoadTokenRef.current !== token,
         onCategoryLoaded: async (cat, streams) => {
           if (streams.length === 0) return;
+          const favIds = await getFavoriteChannelIds();
+          const mergedStreams = streams.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
           try {
-            await db.channels.bulkPut(streams);
+            await db.channels.bulkPut(mergedStreams);
           } catch {
-            for (const s of streams) {
+            for (const s of mergedStreams) {
               try { await db.channels.put(s); } catch {}
             }
           }
@@ -376,6 +476,8 @@ export default function KeoTVHome() {
           }
         },
       });
+
+      await updateFavoriteCounts();
 
       if (bgLoadTokenRef.current === token) {
         const totalChannels = await db.channels.count();
@@ -427,14 +529,16 @@ export default function KeoTVHome() {
         await db.playlists.put(result.playlist);
         await db.categories.bulkPut(result.categories);
 
+        const favIds = await getFavoriteChannelIds();
         const CHUNK_SIZE = 500;
         for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
           const chunk = result.channels.slice(i, i + CHUNK_SIZE);
+          const mergedChunk = chunk.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
           try {
-            await db.channels.bulkPut(chunk);
+            await db.channels.bulkPut(mergedChunk);
           } catch (chunkErr) {
             console.warn('bulkPut chunk error, fallback to individual put:', chunkErr);
-            for (const item of chunk) {
+            for (const item of mergedChunk) {
               try {
                 await db.channels.put(item);
               } catch (putErr) {
@@ -452,7 +556,7 @@ export default function KeoTVHome() {
         const loadedPlaylists = await db.playlists.toArray();
         setCategories(loadedCats);
         setPlaylists(loadedPlaylists);
-        setFavCount(0);
+        await updateFavoriteCounts();
         startBackgroundLiveLoad(result.playlist, loadedCats);
 
         let firstCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
@@ -517,7 +621,7 @@ export default function KeoTVHome() {
 
       if (result && result.categories && result.categories.length > 0) {
         // Keep existing user favorites
-        const favIds = new Set((await db.channels.filter((c) => Boolean(c.is_favorite)).toArray()).map((c) => c.id));
+        const favIds = await getFavoriteChannelIds();
         for (const ch of result.channels) {
           if (favIds.has(ch.id)) {
             ch.is_favorite = true;
@@ -530,10 +634,11 @@ export default function KeoTVHome() {
         const CHUNK_SIZE = 500;
         for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
           const chunk = result.channels.slice(i, i + CHUNK_SIZE);
+          const mergedChunk = chunk.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
           try {
-            await db.channels.bulkPut(chunk);
+            await db.channels.bulkPut(mergedChunk);
           } catch {
-            for (const item of chunk) {
+            for (const item of mergedChunk) {
               try { await db.channels.put(item); } catch {}
             }
           }
@@ -542,6 +647,7 @@ export default function KeoTVHome() {
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
         setCategories(loadedCats);
         setPlaylists(await db.playlists.toArray());
+        await updateFavoriteCounts();
 
         if (selectedCategory) {
           const freshCat = loadedCats.find((c) => c.id === selectedCategory.id) || selectedCategory;
@@ -721,11 +827,20 @@ export default function KeoTVHome() {
 
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
         const loadedPlaylists = await db.playlists.toArray();
-        const initialFavCount = await db.channels.filter((c) => Boolean(c.is_favorite)).count();
+
+        // Ensure saved favorite channel IDs are marked in db.channels
+        const favIds = await getFavoriteChannelIds();
+        if (favIds.size > 0) {
+          for (const fId of favIds) {
+            try {
+              await db.channels.update(fId, { is_favorite: true });
+            } catch {}
+          }
+        }
+        await updateFavoriteCounts();
 
         setCategories(loadedCats);
         setPlaylists(loadedPlaylists);
-        setFavCount(initialFavCount);
 
         // Pick initial category: first non-fav category with count > 0 (or TNT if demo)
         let initialCat = loadedCats.find((c) => c.id === 'tnt');
@@ -803,12 +918,18 @@ export default function KeoTVHome() {
 
   // Compute sorted categories based on user's preference and activeSection (Direct / Films / Séries / Favoris)
   const sortedCategories = useMemo(() => {
-    // 1. Filter categories by activeSection, exclusion (is_hidden), and parental lock
+    // 1. If activeSection === 'fav', return the dedicated favorites categories split by universe
+    if (activeSection === 'fav') {
+      return [favSeriesCategory, favVodCategory, favLiveCategory, favAllCategory];
+    }
+
+    // 2. Filter categories by activeSection, exclusion (is_hidden), and parental lock
     let sectionCats = categories.filter((c) => {
       if (c.is_hidden) return false;
+      if (c.id === 'fav' || c.id.startsWith('fav_')) return false;
       if (parentalEnabled && parentalHideAdult && c.is_adult && !unlockedAdultSession) return false;
       if (activeSection === 'live') {
-        return c.type === 'live' || !c.type || c.id === 'fav';
+        return c.type === 'live' || !c.type;
       }
       if (activeSection === 'vod') {
         return c.type === 'vod';
@@ -816,78 +937,122 @@ export default function KeoTVHome() {
       if (activeSection === 'series') {
         return c.type === 'series';
       }
-      if (activeSection === 'fav') {
-        return c.id === 'fav';
-      }
       return true;
     });
 
     // Graceful fallback ONLY if live section is active but categories had no explicit type tag
     if (activeSection === 'live' && sectionCats.length === 0 && categories.length > 0) {
-      sectionCats = categories.filter((c) => !c.is_hidden && c.id !== 'fav' && (!c.type || c.type === 'live'));
+      sectionCats = categories.filter((c) => !c.is_hidden && !c.id.startsWith('fav') && (!c.type || c.type === 'live'));
     }
 
-    const favCat = sectionCats.find((c) => c.id === 'fav');
-    const otherCats = sectionCats.filter((c) => c.id !== 'fav');
-
     if (categorySort === 'alpha') {
-      otherCats.sort((a, b) =>
+      sectionCats.sort((a, b) =>
         a.name.localeCompare(b.name, undefined, { sensitivity: 'base' })
       );
     } else if (categorySort === 'count') {
-      otherCats.sort((a, b) => (b.count || 0) - (a.count || 0));
+      sectionCats.sort((a, b) => (b.count || 0) - (a.count || 0));
     } else {
       // 'playlist' (strict default lineup order)
-      otherCats.sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0));
+      sectionCats.sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0));
     }
 
-    const result = (activeSection === 'live' || activeSection === 'fav') && favCat ? [favCat, ...otherCats] : otherCats;
-    return result.map((c) => {
-      if (c.id === 'fav') {
-        return { ...c, count: favCount };
-      }
-      return c;
-    });
-  }, [categories, categorySort, favCount, activeSection, parentalEnabled, parentalHideAdult, unlockedAdultSession]);
+    // Prepend universe-specific favorites category at the top of the category list
+    if (activeSection === 'live') {
+      return [favLiveCategory, ...sectionCats];
+    }
+    if (activeSection === 'vod') {
+      return [favVodCategory, ...sectionCats];
+    }
+    if (activeSection === 'series') {
+      return [favSeriesCategory, ...sectionCats];
+    }
+
+    return sectionCats;
+  }, [
+    categories,
+    categorySort,
+    activeSection,
+    parentalEnabled,
+    parentalHideAdult,
+    unlockedAdultSession,
+    favSeriesCategory,
+    favVodCategory,
+    favLiveCategory,
+    favAllCategory,
+  ]);
 
   // Section switcher (Direct, Films, Séries, Favoris)
   const handleSelectSection = useCallback(
     async (section: 'live' | 'vod' | 'series' | 'fav') => {
       setActiveSection(section);
+      setChannels([]); // Immediately clear channels to prevent ghost items from previous category!
 
-      const matchingCats = categories.filter((c) => {
-        if (c.is_hidden) return false;
-        if (parentalEnabled && parentalHideAdult && c.is_adult && !unlockedAdultSession) return false;
-        if (section === 'live') return c.type === 'live' || !c.type;
-        if (section === 'vod') return c.type === 'vod';
-        if (section === 'series') return c.type === 'series';
-        if (section === 'fav') return c.id === 'fav';
-        return true;
-      });
-
-      // Sort matching categories to match the active categorySort preference
-      const favCat = matchingCats.find((c) => c.id === 'fav');
-      const otherCats = matchingCats.filter((c) => c.id !== 'fav');
-      if (categorySort === 'alpha') {
-        otherCats.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-      } else if (categorySort === 'count') {
-        otherCats.sort((a, b) => (b.count || 0) - (a.count || 0));
+      let targetCat: Category | null = null;
+      if (section === 'fav') {
+        if (activeSection === 'series' || (favCounts.series > 0 && favCounts.vod === 0 && favCounts.live === 0)) {
+          targetCat = favSeriesCategory;
+        } else if (activeSection === 'vod') {
+          targetCat = favVodCategory;
+        } else if (activeSection === 'live') {
+          targetCat = favLiveCategory;
+        } else if (favCounts.series > 0) {
+          targetCat = favSeriesCategory;
+        } else if (favCounts.vod > 0) {
+          targetCat = favVodCategory;
+        } else if (favCounts.live > 0) {
+          targetCat = favLiveCategory;
+        } else {
+          targetCat = favSeriesCategory;
+        }
       } else {
-        otherCats.sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0));
+        const matchingCats = categories.filter((c) => {
+          if (c.is_hidden) return false;
+          if (c.id === 'fav' || c.id.startsWith('fav_')) return false;
+          if (parentalEnabled && parentalHideAdult && c.is_adult && !unlockedAdultSession) return false;
+          if (section === 'live') return c.type === 'live' || !c.type;
+          if (section === 'vod') return c.type === 'vod';
+          if (section === 'series') return c.type === 'series';
+          return true;
+        });
+
+        if (categorySort === 'alpha') {
+          matchingCats.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+        } else if (categorySort === 'count') {
+          matchingCats.sort((a, b) => (b.count || 0) - (a.count || 0));
+        } else {
+          matchingCats.sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0));
+        }
+
+        if (section === 'series') {
+          targetCat = favCounts.series > 0 ? favSeriesCategory : matchingCats[0] || favSeriesCategory;
+        } else if (section === 'vod') {
+          targetCat = favCounts.vod > 0 ? favVodCategory : matchingCats[0] || favVodCategory;
+        } else {
+          targetCat = favCounts.live > 0 ? favLiveCategory : matchingCats[0] || favLiveCategory;
+        }
       }
-      const sorted = (section === 'live' || section === 'fav') && favCat ? [favCat, ...otherCats] : otherCats;
-      const targetCat = sorted[0] || null;
 
       setSelectedCategory(targetCat);
       setFocusedCategoryIndex(0);
       setFocusedChannelIndex(0);
       if (targetCat) {
         await loadCategoryChannels(targetCat, channelSort);
-      } else {
-        setChannels([]);
       }
     },
-    [categories, channelSort, loadCategoryChannels, categorySort, parentalEnabled, parentalHideAdult, unlockedAdultSession]
+    [
+      activeSection,
+      categories,
+      channelSort,
+      loadCategoryChannels,
+      categorySort,
+      parentalEnabled,
+      parentalHideAdult,
+      unlockedAdultSession,
+      favCounts,
+      favSeriesCategory,
+      favVodCategory,
+      favLiveCategory,
+    ]
   );
 
   // Handle category sort change
@@ -1132,41 +1297,50 @@ export default function KeoTVHome() {
 
   // Toggle favorite
   const handleToggleFavorite = useCallback(
-    async (targetChannelOrIndex: Channel | number) => {
+    async (targetChannelOrIndex: Channel | number, explicitNewState?: boolean) => {
       const ch =
         typeof targetChannelOrIndex === 'number'
           ? filteredChannels[targetChannelOrIndex]
           : targetChannelOrIndex;
       if (!ch) return;
 
-      const newFavoriteState = !ch.is_favorite;
-      await db.channels.update(ch.id, { is_favorite: newFavoriteState });
+      const newFavoriteState = explicitNewState !== undefined ? explicitNewState : !ch.is_favorite;
 
-      // Update state
+      // 1. Update in IndexedDB channels table
+      try {
+        await db.channels.update(ch.id, { is_favorite: newFavoriteState });
+      } catch {
+        try {
+          await db.channels.put({ ...ch, is_favorite: newFavoriteState });
+        } catch {}
+      }
+
+      // 2. Persist in protected favorite IDs storage
+      await saveFavoriteChannelId(ch.id, newFavoriteState);
+
+      // 3. Update active in-memory channels state
       setChannels((prev) =>
         prev.map((c) => (c.id === ch.id ? { ...c, is_favorite: newFavoriteState } : c))
       );
 
-      // Recalculate favCount
-      const count = await db.channels.filter((c) => Boolean(c.is_favorite)).count();
-      setFavCount(count);
+      // 4. Recalculate favCounts across all universes
+      await updateFavoriteCounts();
 
-      // User-requested toast feedback
+      // 5. User-requested toast feedback
       showToast(newFavoriteState ? `⭐ « ${ch.name} » enregistré dans vos favoris !` : `« ${ch.name} » retiré de vos favoris.`);
 
-      // If viewing favorites, reload to update the view
-      if (selectedCategory?.id === 'fav' || activeSection === 'fav') {
-        const favs = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
-        setChannels(favs);
+      // 6. If currently viewing favorites, reload to update the view
+      if (selectedCategory && (selectedCategory.id === 'fav' || selectedCategory.id.startsWith('fav_'))) {
+        await loadCategoryChannels(selectedCategory, channelSort);
       }
 
-      // Auto-sync favorite to cloud if syncCode exists
+      // 7. Auto-sync favorite to cloud if syncCode exists
       if (syncCode) {
-        const favIds = (await db.channels.filter((c) => Boolean(c.is_favorite)).toArray()).map((c) => c.id);
+        const favIds = Array.from(await getFavoriteChannelIds());
         pushSyncToCloud(syncCode, { favorites: favIds });
       }
     },
-    [filteredChannels, syncCode, selectedCategory, activeSection, showToast]
+    [filteredChannels, syncCode, selectedCategory, channelSort, showToast, updateFavoriteCounts, loadCategoryChannels]
   );
 
   // Category selection with parental protection check
@@ -1176,6 +1350,7 @@ export default function KeoTVHome() {
       setIsParentalPinModalOpen(true);
       return;
     }
+    setChannels([]); // Immediately clear channels to prevent ghost items from lingering!
     setSelectedCategory(cat);
     setFocusedCategoryIndex(index);
     setFocusedChannelIndex(0);
@@ -1589,14 +1764,16 @@ export default function KeoTVHome() {
     await db.categories.bulkPut(result.categories);
 
     // Chunked channels save with individual put fallback to prevent SQLite / IndexedDB transaction limits & memory errors
+    const favIds = await getFavoriteChannelIds();
     const CHUNK_SIZE = 500;
     for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
       const chunk = result.channels.slice(i, i + CHUNK_SIZE);
+      const mergedChunk = chunk.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
       try {
-        await db.channels.bulkPut(chunk);
+        await db.channels.bulkPut(mergedChunk);
       } catch (chunkErr) {
         console.warn('bulkPut chunk error, falling back to individual put:', chunkErr);
-        for (const item of chunk) {
+        for (const item of mergedChunk) {
           try {
             await db.channels.put(item);
           } catch (itemErr) {
@@ -1616,7 +1793,7 @@ export default function KeoTVHome() {
 
     setCategories(loadedCats);
     setPlaylists(loadedPlaylists);
-    setFavCount(0);
+    await updateFavoriteCounts();
     startBackgroundLiveLoad(result.playlist, loadedCats);
 
     // Pick first non-fav category with channels (count > 0)
@@ -1848,12 +2025,12 @@ export default function KeoTVHome() {
       await db.channels.toCollection().modify({ is_favorite: false });
       for (const favId of data.favorites) {
         await db.channels.update(favId, { is_favorite: true });
+        await saveFavoriteChannelId(favId, true);
       }
       if (selectedCategory) {
         await loadCategoryChannels(selectedCategory, channelSort);
       }
-      const count = await db.channels.filter((c) => Boolean(c.is_favorite)).count();
-      setFavCount(count);
+      await updateFavoriteCounts();
     }
     await setSetting('sync_code', code);
     setSyncCode(code);
@@ -1862,7 +2039,7 @@ export default function KeoTVHome() {
 
   const handleForceSync = async () => {
     if (!syncCode) return;
-    const favs = (await db.channels.filter((c) => Boolean(c.is_favorite)).toArray()).map((c) => c.id);
+    const favs = Array.from(await getFavoriteChannelIds());
     const plList = await db.playlists.toArray();
     await pushSyncToCloud(syncCode, {
       favorites: favs,
@@ -1874,10 +2051,12 @@ export default function KeoTVHome() {
     switch (iconName) {
       case 'Star':
         return <Star className="w-3.5 h-3.5 text-amber-400" />;
-      case 'Trophy':
-        return <Trophy className="w-3.5 h-3.5 text-rose-400" />;
+      case 'Clapperboard':
+        return <Clapperboard className="w-3.5 h-3.5 text-amber-400" />;
       case 'Film':
         return <Film className="w-3.5 h-3.5 text-purple-400" />;
+      case 'Trophy':
+        return <Trophy className="w-3.5 h-3.5 text-rose-400" />;
       case 'Globe':
         return <Globe className="w-3.5 h-3.5 text-emerald-400" />;
       case 'Compass':
@@ -2040,35 +2219,47 @@ export default function KeoTVHome() {
             </div>
           ) : filteredChannels.length === 0 ? (
             <div className="py-12 flex flex-col items-center justify-center text-center space-y-3 px-4">
-              <AlertCircle className="w-8 h-8 text-sky-400" />
-              <p className="text-sm font-bold text-white">
-                {sortedCategories.length === 0
-                  ? activeSection === 'vod'
-                    ? 'Aucune catégorie de films dans cet abonnement'
-                    : activeSection === 'series'
-                    ? 'Aucune catégorie de séries dans cet abonnement'
-                    : 'Aucun bouquet disponible'
-                  : activeSection === 'vod'
-                  ? 'Aucun film dans ce bouquet'
-                  : activeSection === 'series'
-                  ? 'Aucune série dans ce bouquet'
-                  : 'Aucune chaîne dans ce bouquet'}
-              </p>
-              <p className="text-xs text-slate-400 max-w-xs">
-                {categoryError
-                  ? categoryError
-                  : sortedCategories.length === 0
-                  ? 'Vous pouvez recharger votre playlist pour récupérer tous vos bouquets TV, Films et Séries.'
-                  : 'Si vos flux ne sont pas encore apparus en mémoire, vous pouvez les recharger en un clic.'}
-              </p>
-              <button
-                onClick={() => handleResyncPlaylist()}
-                disabled={isResyncing}
-                className="px-4 py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center space-x-2 shadow-lg disabled:opacity-50"
-              >
-                <RefreshCw className={`w-3.5 h-3.5 ${isResyncing ? 'animate-spin' : ''}`} />
-                <span>{isResyncing ? 'Chargement en cours...' : 'Recharger maintenant'}</span>
-              </button>
+              {selectedCategory?.id.startsWith('fav') ? (
+                <>
+                  <Star className="w-8 h-8 text-amber-400/50" />
+                  <p className="text-sm font-bold text-white">Aucun favori dans cette catégorie</p>
+                  <p className="text-xs text-slate-400 max-w-xs">
+                    Cliquez sur l&apos;étoile d&apos;une chaîne, d&apos;un film ou d&apos;une série pour l&apos;ajouter à vos favoris.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="w-8 h-8 text-sky-400" />
+                  <p className="text-sm font-bold text-white">
+                    {sortedCategories.length === 0
+                      ? activeSection === 'vod'
+                        ? 'Aucune catégorie de films dans cet abonnement'
+                        : activeSection === 'series'
+                        ? 'Aucune catégorie de séries dans cet abonnement'
+                        : 'Aucun bouquet disponible'
+                      : activeSection === 'vod'
+                      ? 'Aucun film dans ce bouquet'
+                      : activeSection === 'series'
+                      ? 'Aucune série dans ce bouquet'
+                      : 'Aucune chaîne dans ce bouquet'}
+                  </p>
+                  <p className="text-xs text-slate-400 max-w-xs">
+                    {categoryError
+                      ? categoryError
+                      : sortedCategories.length === 0
+                      ? 'Vous pouvez recharger votre playlist pour récupérer tous vos bouquets TV, Films et Séries.'
+                      : 'Si vos flux ne sont pas encore apparus en mémoire, vous pouvez les recharger en un clic.'}
+                  </p>
+                  <button
+                    onClick={() => handleResyncPlaylist()}
+                    disabled={isResyncing}
+                    className="px-4 py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center space-x-2 shadow-lg disabled:opacity-50"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isResyncing ? 'animate-spin' : ''}`} />
+                    <span>{isResyncing ? 'Chargement en cours...' : 'Recharger maintenant'}</span>
+                  </button>
+                </>
+              )}
             </div>
           ) : (
             filteredChannels.map((ch, idx) => {

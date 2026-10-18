@@ -22,7 +22,7 @@ interface MovieDetailModalProps {
   onClose: () => void;
   onPlay: (movie: Channel) => void;
   onSelectAnotherMovie?: (movie: Channel) => void;
-  onToggleFavorite?: (movie: Channel) => void;
+  onToggleFavorite?: (movie: Channel, explicitNewState?: boolean) => void;
 }
 
 export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
@@ -72,9 +72,16 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
     setFocusedSection('play');
     setFocusedActorIndex(0);
     setFocusedFilmIndex(0);
-    setIsFavorite(Boolean(movie.is_favorite));
     setToastMessage(null);
     setLoading(true);
+
+    db.channels.get(movie.id).then((ch) => {
+      if (!cancelled) {
+        setIsFavorite(Boolean(ch ? ch.is_favorite : movie.is_favorite));
+      }
+    }).catch(() => {
+      if (!cancelled) setIsFavorite(Boolean(movie.is_favorite));
+    });
 
     const vodId = movie.epg_id || movie.id.replace(/^ch_xtream_(?:vod_)?/, '');
     fetchVodInfo(serverUrl, username, password, vodId, movie)
@@ -126,21 +133,13 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
     const nextState = !isFavorite;
     setIsFavorite(nextState);
 
-    try {
-      await db.channels.update(movie.id, { is_favorite: nextState });
-    } catch {
-      try {
-        await db.channels.put({ ...movie, is_favorite: nextState });
-      } catch {}
-    }
-
     setToastMessage(nextState ? '⭐ Enregistré dans vos favoris !' : 'Retiré de vos favoris.');
     setTimeout(() => {
       setToastMessage(null);
     }, 2500);
 
     if (onToggleFavorite) {
-      onToggleFavorite({ ...movie, is_favorite: nextState });
+      onToggleFavorite(movie, nextState);
     }
   };
 

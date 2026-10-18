@@ -14,7 +14,7 @@ interface SeriesDetailModalProps {
   password: string;
   onClose: () => void;
   onPlayEpisode?: (episode: SeriesEpisode, allEpisodes: SeriesEpisode[], audioPref?: string, subPref?: string) => void;
-  onToggleFavorite?: (series: Channel) => void;
+  onToggleFavorite?: (series: Channel, explicitNewState?: boolean) => void;
 }
 
 type FocusedSection = 'back' | 'fav' | 'audio' | 'sub' | 'seasons' | 'episodes';
@@ -93,21 +93,13 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
     const nextState = !isFavorite;
     setIsFavorite(nextState);
 
-    try {
-      await db.channels.update(series.id, { is_favorite: nextState });
-    } catch {
-      try {
-        await db.channels.put({ ...series, is_favorite: nextState });
-      } catch {}
-    }
-
     setToastMessage(nextState ? '⭐ Enregistré dans vos favoris !' : 'Retiré de vos favoris.');
     setTimeout(() => {
       setToastMessage(null);
     }, 2500);
 
     if (onToggleFavorite) {
-      onToggleFavorite({ ...series, is_favorite: nextState });
+      onToggleFavorite(series, nextState);
     }
   };
 
@@ -116,9 +108,16 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
     let cancelled = false;
     setDetails(null);
     setError(null);
-    setIsFavorite(Boolean(series.is_favorite));
     setToastMessage(null);
     setLoading(true);
+
+    db.channels.get(series.id).then((ch) => {
+      if (!cancelled) {
+        setIsFavorite(Boolean(ch ? ch.is_favorite : series.is_favorite));
+      }
+    }).catch(() => {
+      if (!cancelled) setIsFavorite(Boolean(series.is_favorite));
+    });
 
     const seriesId = series.epg_id || series.id.replace(/^ch_xtream_(?:series_)?/, '');
     fetchSeriesInfo(serverUrl, username, password, seriesId)
