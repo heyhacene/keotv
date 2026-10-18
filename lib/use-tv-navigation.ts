@@ -189,7 +189,6 @@ export function useTVNavigation({
           const current = focusedCategoryIndexRef.current;
           const next = current > 0 ? current - 1 : Math.max(0, categoryCount - 1);
           setFocusedCategoryIndex(next);
-          onSelectCategory(next, false);
         } else if (activePane === 'menu') {
           setFocusedMenuIndex((prev) => (prev > 0 ? prev - 1 : 6));
         }
@@ -204,7 +203,6 @@ export function useTVNavigation({
           const current = focusedCategoryIndexRef.current;
           const next = current < categoryCount - 1 ? current + 1 : 0;
           setFocusedCategoryIndex(next);
-          onSelectCategory(next, false);
         } else if (activePane === 'menu') {
           setFocusedMenuIndex((prev) => (prev < 6 ? prev + 1 : 0));
         }
@@ -229,6 +227,7 @@ export function useTVNavigation({
         if (activePane === 'menu') {
           setActivePane('categories');
         } else if (activePane === 'categories') {
+          onSelectCategory(focusedCategoryIndexRef.current, true);
           setActivePane('channels');
         }
         return;

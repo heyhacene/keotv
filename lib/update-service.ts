@@ -9,7 +9,7 @@ export interface AppUpdateInfo {
   downloaderCode: string;
 }
 
-export const CURRENT_BUILD_NUMBER = 27;
+export const CURRENT_BUILD_NUMBER = 28;
 export const DOWNLOADER_CODE = '4317787';
 export const DIRECT_APK_URL = 'https://tinyurl.com/keo-apk';
 

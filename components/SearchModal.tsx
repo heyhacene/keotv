@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Search, X, Film, Clapperboard, Tv, Play, Loader2, Star } from 'lucide-react';
 import { Channel } from '@/types/iptv';
 import { db } from '@/lib/db';
+import { searchXtreamCatalog } from '@/lib/iptv-service';
 import { ContextMenuModal } from './ContextMenuModal';
 
 interface SearchModalProps {
@@ -13,6 +14,7 @@ interface SearchModalProps {
   onSelectMovie: (channel: Channel) => void;
   onSelectSeries: (channel: Channel) => void;
   onToggleFavorite?: (channel: Channel) => void;
+  serverCreds?: { serverUrl: string; username: string; password: string } | null;
 }
 
 type SearchFilterType = 'all' | 'vod' | 'series' | 'live';
@@ -29,6 +31,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   onSelectMovie,
   onSelectSeries,
   onToggleFavorite,
+  serverCreds,
 }) => {
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<SearchFilterType>('all');
@@ -78,7 +81,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     }
   }, [isOpen]);
 
-  // Ultra-fast instant search (in-memory index lookup)
+  // Fast instant local search + Xtream Catalog search
   useEffect(() => {
     if (!isOpen) return;
     const trimmed = query.trim().toLowerCase();
@@ -108,27 +111,70 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         if (cancelled) return;
 
         const matched: Channel[] = [];
+        const seenIds = new Set<string>();
+
+        // 1. Instant local search from IndexedDB
         for (let i = 0; i < pool.length; i++) {
           if (pool[i].nameNorm.includes(normalized)) {
             matched.push(pool[i].channel);
-            if (matched.length >= 80) break; // Limit to 80 for instant 60fps rendering
+            seenIds.add(pool[i].channel.id);
+            if (matched.length >= 80) break;
           }
         }
 
-        setResults(matched);
+        setResults([...matched]);
         setFocusedResultIndex(0);
+
+        // 2. Query Xtream server catalog for Films & Séries matching query
+        if (serverCreds?.serverUrl && serverCreds.username && serverCreds.password) {
+          try {
+            const remoteMatches = await searchXtreamCatalog({
+              serverUrl: serverCreds.serverUrl,
+              username: serverCreds.username,
+              password: serverCreds.password,
+              query: trimmed,
+            });
+
+            if (!cancelled && remoteMatches.length > 0) {
+              const newItems: Channel[] = [];
+              for (const rm of remoteMatches) {
+                if (!seenIds.has(rm.id)) {
+                  seenIds.add(rm.id);
+                  matched.push(rm);
+                  newItems.push(rm);
+                }
+              }
+
+              if (newItems.length > 0) {
+                setResults([...matched]);
+                // Save newly discovered items to local database for instant future lookups
+                db.channels.bulkPut(newItems).catch(() => {});
+                if (cachedIndexRef.current) {
+                  for (const ni of newItems) {
+                    cachedIndexRef.current.push({
+                      channel: ni,
+                      nameNorm: (ni.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+                    });
+                  }
+                }
+              }
+            }
+          } catch (serverErr) {
+            console.warn('Remote search error:', serverErr);
+          }
+        }
       } catch (err) {
         console.warn('Search query error:', err);
       } finally {
         if (!cancelled) setIsSearching(false);
       }
-    }, 80); // Ultra-low 80ms debounce
+    }, 150);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [query, isOpen]);
+  }, [query, isOpen, serverCreds]);
 
   // Filtered results according to active tab
   const filteredResults = useMemo(() => {

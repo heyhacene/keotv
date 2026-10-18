@@ -441,17 +441,30 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               type: 'vod',
             };
           }
+        if (!loaded) {
+          loaded = {
+            title: focusedChannel.name,
+            plot: '',
+            cover: focusedChannel.logo,
+            type: focusedChannel.stream_type || 'vod',
+          };
         }
-        if (loaded) {
-          detailsCacheRef.current.set(focusedChannel.id, loaded);
-          setMediaDetails(loaded);
-        }
+        detailsCacheRef.current.set(focusedChannel.id, loaded);
+        setMediaDetails(loaded);
       } catch (err) {
         console.warn('Failed to load media details in right panel:', err);
+        const fallback = {
+          title: focusedChannel.name,
+          plot: '',
+          cover: focusedChannel.logo,
+          type: focusedChannel.stream_type || 'vod',
+        };
+        detailsCacheRef.current.set(focusedChannel.id, fallback);
+        setMediaDetails(fallback);
       } finally {
         setLoadingMediaDetails(false);
       }
-    }, 1200);
+    }, 350);
 
     return () => {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
@@ -804,8 +817,8 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                   {mediaDetails.plot}
                 </p>
               ) : (
-                <p className="text-xs leading-relaxed text-slate-400 italic">
-                  Arrêtez-vous sur ce titre pendant 1 à 2 secondes pour charger le résumé complet.
+                <p className="text-xs leading-relaxed text-slate-500 italic">
+                  Aucun résumé disponible pour ce titre.
                 </p>
               )}
 

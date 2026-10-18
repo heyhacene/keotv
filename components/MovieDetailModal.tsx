@@ -6,8 +6,10 @@ import { Channel } from '@/types/iptv';
 import {
   fetchVodInfo,
   fetchActorFilmography,
+  fetchPersonFilmography,
   fetchActorPhoto,
   matchMoviesInPlaylist,
+  getAllVodChannels,
   MovieDetails,
 } from '@/lib/iptv-service';
 import { db } from '@/lib/db';
@@ -42,14 +44,15 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
   // Actor photos state: map of actor name -> photo URL
   const [actorPhotos, setActorPhotos] = useState<Record<string, string>>({});
 
-  // Actor filmography in playlist state
-  const [selectedActor, setSelectedActor] = useState<string | null>(null);
-  const [loadingActorFilms, setLoadingActorFilms] = useState<boolean>(false);
-  const [actorPlaylistFilms, setActorPlaylistFilms] = useState<Channel[]>([]);
-  const [searchedActor, setSearchedActor] = useState<string | null>(null);
+  // Person filmography (actor or director) in playlist state
+  const [selectedPerson, setSelectedPerson] = useState<string | null>(null);
+  const [selectedRole, setSelectedRole] = useState<'actor' | 'director'>('actor');
+  const [loadingPersonFilms, setLoadingPersonFilms] = useState<boolean>(false);
+  const [personPlaylistFilms, setPersonPlaylistFilms] = useState<Channel[]>([]);
+  const [searchedPerson, setSearchedPerson] = useState<string | null>(null);
 
   // TV Remote Navigation states
-  const [focusedSection, setFocusedSection] = useState<'back' | 'play' | 'fav' | 'actors' | 'films'>('play');
+  const [focusedSection, setFocusedSection] = useState<'back' | 'play' | 'fav' | 'director' | 'actors' | 'films'>('play');
   const [focusedActorIndex, setFocusedActorIndex] = useState<number>(0);
   const [focusedFilmIndex, setFocusedFilmIndex] = useState<number>(0);
 
@@ -62,9 +65,9 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
     let cancelled = false;
     setDetails(null);
     setError(null);
-    setSelectedActor(null);
-    setActorPlaylistFilms([]);
-    setSearchedActor(null);
+    setSelectedPerson(null);
+    setPersonPlaylistFilms([]);
+    setSearchedPerson(null);
     setActorPhotos({});
     setFocusedSection('play');
     setFocusedActorIndex(0);
@@ -141,34 +144,51 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
     }
   };
 
-  // When an actor is clicked: query filmography + match against local Dexie playlist
-  const handleActorClick = async (actor: string) => {
-    if (selectedActor === actor && actorPlaylistFilms.length > 0) {
+  // When an actor or director is clicked: query filmography + match against local & catalog VOD
+  const handlePersonClick = async (personName: string, role: 'actor' | 'director' = 'actor') => {
+    const cleanPerson = personName.trim();
+    if (!cleanPerson) return;
+
+    if (selectedPerson === cleanPerson && personPlaylistFilms.length > 0) {
       setFocusedSection('films');
       setFocusedFilmIndex(0);
       return;
     }
-    setSelectedActor(actor);
-    setLoadingActorFilms(true);
-    setActorPlaylistFilms([]);
-    setSearchedActor(actor);
+
+    setSelectedPerson(cleanPerson);
+    setSelectedRole(role);
+    setLoadingPersonFilms(true);
+    setPersonPlaylistFilms([]);
+    setSearchedPerson(cleanPerson);
     setFocusedSection('films');
     setFocusedFilmIndex(0);
 
     try {
-      const [actorFilms, allVod] = await Promise.all([
-        fetchActorFilmography(actor),
-        db.channels.where('stream_type').equals('vod').toArray(),
+      const [personFilms, allVod] = await Promise.all([
+        fetchPersonFilmography(cleanPerson, role),
+        db.channels.where('stream_type').equals('vod').count().then(async (count) => {
+          if (count >= 30) {
+            return db.channels.where('stream_type').equals('vod').toArray();
+          }
+          // If local VOD count is small, fetch all VODs directly from Xtream server so full filmography is matched!
+          if (serverUrl && username && password) {
+            try {
+              const remoteVods = await getAllVodChannels(serverUrl, username, password);
+              if (remoteVods.length > 0) return remoteVods;
+            } catch {}
+          }
+          return db.channels.where('stream_type').equals('vod').toArray();
+        }),
       ]);
 
-      const matched = matchMoviesInPlaylist(actor, actorFilms, allVod);
+      const matched = matchMoviesInPlaylist(cleanPerson, personFilms, allVod);
       const filtered = matched.filter((m) => m.id !== movie?.id);
-      setActorPlaylistFilms(filtered);
+      setPersonPlaylistFilms(filtered);
     } catch (err) {
-      console.warn('Error loading actor films in playlist:', err);
-      setActorPlaylistFilms([]);
+      console.warn('Error loading person films in playlist:', err);
+      setPersonPlaylistFilms([]);
     } finally {
-      setLoadingActorFilms(false);
+      setLoadingPersonFilms(false);
     }
   };
 
@@ -194,12 +214,12 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
 
       if (isBack) {
         e.preventDefault();
-        if (focusedSection === 'films' || (selectedActor && actorPlaylistFilms.length > 0)) {
-          setSelectedActor(null);
-          setFocusedSection('actors');
+        if (focusedSection === 'films' || (selectedPerson && personPlaylistFilms.length > 0)) {
+          setSelectedPerson(null);
+          setFocusedSection(selectedRole === 'director' ? 'director' : 'actors');
           return;
         }
-        if (focusedSection === 'actors') {
+        if (focusedSection === 'director' || focusedSection === 'actors') {
           setFocusedSection('play');
           playButtonRef.current?.focus();
           scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
@@ -240,7 +260,12 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
         }
         if (isDown) {
           e.preventDefault();
-          if (details?.actors && details.actors.length > 0) {
+          if (details?.director) {
+            setFocusedSection('director');
+            const target = document.getElementById('movie-detail-director');
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else if (details?.actors && details.actors.length > 0) {
             setFocusedSection('actors');
             const target = document.getElementById(`actor-chip-${focusedActorIndex}`) || document.getElementById('actor-chip-0');
             target?.focus();
@@ -271,7 +296,12 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
         }
         if (isDown) {
           e.preventDefault();
-          if (details?.actors && details.actors.length > 0) {
+          if (details?.director) {
+            setFocusedSection('director');
+            const target = document.getElementById('movie-detail-director');
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else if (details?.actors && details.actors.length > 0) {
             setFocusedSection('actors');
             const target = document.getElementById(`actor-chip-${focusedActorIndex}`) || document.getElementById('actor-chip-0');
             target?.focus();
@@ -286,15 +316,52 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
         }
       }
 
+      // SECTION 1C: Director button
+      if (focusedSection === 'director') {
+        if (isUp) {
+          e.preventDefault();
+          setFocusedSection('play');
+          playButtonRef.current?.focus();
+          return;
+        }
+        if (isDown) {
+          e.preventDefault();
+          if (details?.actors && details.actors.length > 0) {
+            setFocusedSection('actors');
+            const target = document.getElementById(`actor-chip-${focusedActorIndex}`) || document.getElementById('actor-chip-0');
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else if (personPlaylistFilms.length > 0) {
+            setFocusedSection('films');
+            setFocusedFilmIndex(0);
+          }
+          return;
+        }
+        if (isEnter) {
+          e.preventDefault();
+          if (details?.director) {
+            handlePersonClick(details.director, 'director');
+          }
+          return;
+        }
+      }
+
       // SECTION 2: Actors list
       if (focusedSection === 'actors') {
         const actorCount = details?.actors?.length || 0;
 
         if (isUp) {
           e.preventDefault();
-          setFocusedSection('play');
-          playButtonRef.current?.focus();
-          scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+          if (details?.director) {
+            setFocusedSection('director');
+            const target = document.getElementById('movie-detail-director');
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else {
+            setFocusedSection('play');
+            playButtonRef.current?.focus();
+            scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+          }
           return;
         }
 
@@ -324,7 +391,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
 
         if (isDown) {
           e.preventDefault();
-          if (actorPlaylistFilms.length > 0) {
+          if (personPlaylistFilms.length > 0) {
             setFocusedSection('films');
             setFocusedFilmIndex(0);
             const target = document.getElementById('actor-film-0');
@@ -337,19 +404,36 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
         if (isEnter) {
           e.preventDefault();
           if (details?.actors && details.actors[focusedActorIndex]) {
-            handleActorClick(details.actors[focusedActorIndex]);
+            handlePersonClick(details.actors[focusedActorIndex], 'actor');
           }
           return;
         }
       }
 
-      // SECTION 3: Actor playlist films grid
+      // SECTION 3: Actor / Director playlist films grid
       if (focusedSection === 'films') {
-        const filmCount = actorPlaylistFilms.length;
+        const filmCount = personPlaylistFilms.length;
 
         if (isUp) {
           e.preventDefault();
           if (focusedFilmIndex < 4) {
+            setFocusedSection(selectedRole === 'director' ? 'director' : 'actors');
+            const target = selectedRole === 'director'
+              ? document.getElementById('movie-detail-director')
+              : document.getElementById(`actor-chip-${focusedActorIndex}`);
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else {
+            setFocusedFilmIndex((prev) => {
+              const next = Math.max(0, prev - 4);
+              const target = document.getElementById(`actor-film-${next}`);
+              target?.focus();
+              target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              return next;
+            });
+          }
+          return;
+        }
             setFocusedSection('actors');
             const target = document.getElementById(`actor-chip-${focusedActorIndex}`);
             target?.focus();
@@ -556,12 +640,32 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
                 )}
               </div>
 
-              {/* Director */}
+              {/* Director (Interactive Button for TV remote and touch) */}
               {details?.director && (
-                <p className="text-xs text-slate-300 flex items-center space-x-1.5 pt-1">
-                  <Clapperboard className="w-3.5 h-3.5 text-tv-accent flex-shrink-0" />
-                  <span>Réalisé par <strong className="text-white">{details.director}</strong></span>
-                </p>
+                <div className="pt-1 flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-slate-400 flex items-center space-x-1">
+                    <Clapperboard className="w-3.5 h-3.5 text-tv-accent flex-shrink-0" />
+                    <span>Réalisateur :</span>
+                  </span>
+                  <button
+                    id="movie-detail-director"
+                    type="button"
+                    onClick={() => {
+                      setFocusedSection('director');
+                      handlePersonClick(details.director!, 'director');
+                    }}
+                    className={`px-3 py-1 rounded-full text-xs transition border flex items-center space-x-1.5 focus:outline-none ${
+                      focusedSection === 'director'
+                        ? 'bg-tv-focus text-white border-tv-accent ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg scale-105 font-bold shadow-lg shadow-sky-500/30'
+                        : selectedPerson === details.director && selectedRole === 'director'
+                        ? 'bg-tv-accent text-slate-950 border-tv-accent font-bold shadow-md shadow-tv-accent/30'
+                        : 'bg-tv-card hover:bg-tv-cardHover text-slate-200 border-tv-border hover:border-slate-500 font-medium'
+                    }`}
+                  >
+                    <span className="font-semibold">{details.director}</span>
+                    <span className="text-[10px] opacity-75 underline ml-1">Voir ses films</span>
+                  </button>
+                </div>
               )}
 
               {/* Action Buttons: Prominent "Lecture" & "Favoris" Buttons */}
@@ -635,7 +739,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
               {/* Actor Chips with Round Portraits */}
               <div className="flex flex-wrap gap-2">
                 {details.actors.map((actor, idx) => {
-                  const isSelected = selectedActor === actor;
+                  const isSelected = selectedPerson === actor && selectedRole === 'actor';
                   const isFocused = focusedSection === 'actors' && focusedActorIndex === idx;
                   const photoUrl = actorPhotos[actor];
 
@@ -646,7 +750,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
                       onClick={() => {
                         setFocusedSection('actors');
                         setFocusedActorIndex(idx);
-                        handleActorClick(actor);
+                        handlePersonClick(actor, 'actor');
                       }}
                       className={`px-3 py-1.5 rounded-full text-xs transition border flex items-center space-x-2 focus:outline-none ${
                         isFocused
@@ -675,20 +779,21 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
                 })}
               </div>
 
-              {/* Filmography in playlist for selected actor */}
-              {selectedActor && (
+              {/* Filmography in playlist for selected actor or director */}
+              {selectedPerson && (
                 <div className="mt-4 p-4 rounded-2xl bg-tv-card/80 border border-tv-border space-y-3 animate-fade-in shadow-xl">
                   <div className="flex items-center justify-between">
                     <h4 className="text-xs sm:text-sm font-bold text-white flex items-center space-x-2">
                       <Film className="w-4 h-4 text-tv-accent" />
                       <span>
-                        Films avec <strong className="text-tv-accent">{searchedActor}</strong> dans votre playlist :
+                        {selectedRole === 'director' ? 'Films réalisés par ' : 'Films avec '}
+                        <strong className="text-tv-accent">{searchedPerson}</strong> dans votre playlist :
                       </span>
                     </h4>
                     <button
                       onClick={() => {
-                        setSelectedActor(null);
-                        setFocusedSection('actors');
+                        setSelectedPerson(null);
+                        setFocusedSection(selectedRole === 'director' ? 'director' : 'actors');
                       }}
                       className="text-[11px] text-slate-400 hover:text-white underline"
                     >
@@ -696,24 +801,26 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
                     </button>
                   </div>
 
-                  {loadingActorFilms && (
+                  {loadingPersonFilms && (
                     <div className="py-6 flex flex-col items-center justify-center space-y-2 text-center">
                       <Loader2 className="w-6 h-6 animate-spin text-tv-accent" />
                       <p className="text-xs text-slate-300 font-medium">
-                        Recherche des films de {selectedActor} dans votre playlist...
+                        Recherche de la filmographie de {selectedPerson} dans votre playlist...
                       </p>
                     </div>
                   )}
 
-                  {!loadingActorFilms && actorPlaylistFilms.length === 0 && (
+                  {!loadingPersonFilms && personPlaylistFilms.length === 0 && (
                     <p className="text-xs text-slate-400 italic py-2">
-                      Aucun autre film avec {searchedActor} n’a été trouvé dans votre playlist actuelle.
+                      {selectedRole === 'director'
+                        ? `Aucun film réalisé par ${searchedPerson} n’a été trouvé dans votre playlist.`
+                        : `Aucun autre film avec ${searchedPerson} n’a été trouvé dans votre playlist.`}
                     </p>
                   )}
 
-                  {!loadingActorFilms && actorPlaylistFilms.length > 0 && (
+                  {!loadingPersonFilms && personPlaylistFilms.length > 0 && (
                     <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 pt-1">
-                      {actorPlaylistFilms.map((item, idx) => {
+                      {personPlaylistFilms.map((item, idx) => {
                         const isFocused = focusedSection === 'films' && focusedFilmIndex === idx;
 
                         return (

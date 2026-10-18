@@ -625,49 +625,6 @@ export async function fetchActorPhoto(actorName: string): Promise<string | null>
   return null;
 }
 
-// Fetch actor filmography in French and English using Wikipedia Search API
-export async function fetchActorFilmography(actorName: string): Promise<string[]> {
-  const cleanName = actorName.trim();
-  if (!cleanName || cleanName.length < 2) return [];
-
-  const titles = new Set<string>();
-
-  // 1. Query French Wikipedia search for movies starring this actor
-  try {
-    const frSearchUrl = `https://fr.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(`"${cleanName}" film`)}&format=json&srlimit=40`;
-    const frRes = await fetchHttp(frSearchUrl, 'json');
-    const items = frRes?.query?.search || [];
-    for (const item of items) {
-      const rawTitle = (item?.title || '').trim();
-      // Clean up Wikipedia suffixes like "(film)", "(film, 2021)"
-      const cleanTitle = rawTitle.replace(/\s*\([^)]*\)/g, '').trim();
-      if (cleanTitle && cleanTitle.length >= 2 && !cleanTitle.toLowerCase().includes('catégorie') && !cleanTitle.toLowerCase().includes('liste')) {
-        titles.add(cleanTitle);
-      }
-    }
-  } catch (err) {
-    console.warn(`FR Wikipedia filmography search failed for ${actorName}:`, err);
-  }
-
-  // 2. Query English Wikipedia search as complementary source
-  try {
-    const enSearchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(`"${cleanName}" film`)}&format=json&srlimit=30`;
-    const enRes = await fetchHttp(enSearchUrl, 'json');
-    const items = enRes?.query?.search || [];
-    for (const item of items) {
-      const rawTitle = (item?.title || '').trim();
-      const cleanTitle = rawTitle.replace(/\s*\([^)]*\)/g, '').trim();
-      if (cleanTitle && cleanTitle.length >= 2 && !cleanTitle.toLowerCase().includes('category') && !cleanTitle.toLowerCase().includes('list')) {
-        titles.add(cleanTitle);
-      }
-    }
-  } catch (err) {
-    console.warn(`EN Wikipedia filmography search failed for ${actorName}:`, err);
-  }
-
-  return Array.from(titles);
-}
-
 // Helper to normalize strings for search and matching
 export function normalizeMovieTitle(str: string): string {
   return (str || '')
@@ -678,44 +635,204 @@ export function normalizeMovieTitle(str: string): string {
     .trim();
 }
 
-// Cross-reference an actor's films with the user's local playlist VOD items
+/**
+ * Strips provider formatting, country prefixes, quality tags and year suffixes
+ * so that "FR | Kaamelott : Premier Volet (2021) [4K MULTI]" cleans down to "kaamelott premier volet".
+ */
+export function extractCleanMovieTitle(raw: string): string {
+  let s = (raw || '').trim();
+  // Strip initial brackets e.g. [FR], [MULTI]
+  s = s.replace(/^\[[^\]]*\]\s*/g, '');
+  // Strip country or category prefix: "FR |", "FR -", "FR:", "EN |", "VOD |", "FILM |", "FILMS :"
+  s = s.replace(/^[A-Z]{2,4}\s*[:|/-]\s*/i, '');
+  s = s.replace(/^(VOD|FILM|FILMS|MULTI|HD|4K|SERIE|SERIES)\s*[:|/-]\s*/i, '');
+  // Strip quality tags, brackets, and year patterns
+  s = s.replace(/\[[^\]]*\]/g, ' ');
+  s = s.replace(/\((19\d\d|20\d\d)\)/g, ' ');
+  s = s.replace(/\b(19\d\d|20\d\d)\b/g, ' ');
+  s = s.replace(/\b(4K|UHD|FHD|HD|1080p|720p|MULTI|TRUEFRENCH|VF|VOSTFR|VOST|HEVC|x264|x265)\b.*/i, ' ');
+  return normalizeMovieTitle(s);
+}
+
+// In-memory cache for person filmographies (actors & directors)
+const personFilmographyCache = new Map<string, string[]>();
+
+/**
+ * Fetches the official, verified filmography of an actor or director
+ * using the Wikidata SPARQL API (P161 = cast member, P57 = director).
+ * Returns real titles without Wikipedia article noise or false positive pages.
+ */
+export async function fetchPersonFilmography(
+  personName: string,
+  role: 'actor' | 'director' | 'both' = 'both'
+): Promise<string[]> {
+  const cleanName = personName.trim();
+  if (!cleanName || cleanName.length < 2) return [];
+
+  const cacheKey = `${role}:${cleanName.toLowerCase()}`;
+  if (personFilmographyCache.has(cacheKey)) {
+    return personFilmographyCache.get(cacheKey)!;
+  }
+
+  const titles = new Set<string>();
+
+  // 1. Search person entity on Wikidata
+  try {
+    const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(cleanName)}&language=fr&type=item&format=json&limit=6`;
+    const searchRes = await fetchHttp(searchUrl, 'json');
+    const entities = searchRes?.search || [];
+
+    // Find the best entity matching an actor or director
+    let targetEntityId: string | null = null;
+    for (const ent of entities) {
+      const desc = String(ent?.description || '').toLowerCase();
+      if (
+        desc.includes('actor') ||
+        desc.includes('acteur') ||
+        desc.includes('actrice') ||
+        desc.includes('director') ||
+        desc.includes('réalisat') ||
+        desc.includes('cinéaste') ||
+        desc.includes('film') ||
+        desc.includes('comédien')
+      ) {
+        targetEntityId = ent.id;
+        break;
+      }
+    }
+
+    if (!targetEntityId && entities.length > 0) {
+      targetEntityId = entities[0].id;
+    }
+
+    // 2. Query SPARQL for films where this person is cast member (P161) and/or director (P57)
+    if (targetEntityId) {
+      let roleCondition = '';
+      if (role === 'director') {
+        roleCondition = `?item wdt:P57 wd:${targetEntityId} .`;
+      } else if (role === 'actor') {
+        roleCondition = `?item wdt:P161 wd:${targetEntityId} .`;
+      } else {
+        roleCondition = `{ ?item wdt:P161 wd:${targetEntityId} } UNION { ?item wdt:P57 wd:${targetEntityId} } .`;
+      }
+
+      const sparql = `SELECT DISTINCT ?itemLabel WHERE { ${roleCondition} SERVICE wikibase:label { bd:serviceParam wikibase:language "fr,en". } } LIMIT 150`;
+      const sparqlUrl = `https://query.wikidata.org/sparql?query=${encodeURIComponent(sparql)}&format=json`;
+      const sparqlRes = await fetchHttp(sparqlUrl, 'json');
+      const bindings = sparqlRes?.results?.bindings || [];
+
+      for (const b of bindings) {
+        const raw = (b?.itemLabel?.value || '').trim();
+        // Ignore raw Q-identifiers if no label exists
+        if (raw && !raw.match(/^Q\d+$/)) {
+          titles.add(raw);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`Wikidata SPARQL failed for ${cleanName}:`, err);
+  }
+
+  // 3. Fallback: Wikipedia French Parse if Wikidata produced few or no items
+  if (titles.size < 3) {
+    try {
+      const wikiTitle = cleanName.replace(/\s+/g, '_');
+      const frUrl = `https://fr.wikipedia.org/w/api.php?action=parse&page=Filmographie_de_${encodeURIComponent(wikiTitle)}&prop=links&format=json`;
+      const frRes = await fetchHttp(frUrl, 'json');
+      const links = frRes?.parse?.links || [];
+      for (const l of links) {
+        const name = (l['*'] || '').trim();
+        // Filter out non-film encyclopedia articles
+        if (
+          name &&
+          !name.includes(':') &&
+          !name.toLowerCase().includes('catégorie') &&
+          !name.toLowerCase().includes('liste') &&
+          !name.toLowerCase().includes('box-office') &&
+          !name.toLowerCase().includes('festival') &&
+          !name.toLowerCase().includes('césar') &&
+          !name.toLowerCase().includes('oscar') &&
+          !name.toLowerCase().includes('presse') &&
+          !name.toLowerCase().includes('journal')
+        ) {
+          const clean = name.replace(/\s*\([^)]*\)/g, '').trim();
+          if (clean.length >= 2) {
+            titles.add(clean);
+          }
+        }
+      }
+    } catch {
+      // ignore fallback error
+    }
+  }
+
+  const result = Array.from(titles);
+  personFilmographyCache.set(cacheKey, result);
+  return result;
+}
+
+// Backward-compatible alias for actor filmography
+export async function fetchActorFilmography(actorName: string): Promise<string[]> {
+  return fetchPersonFilmography(actorName, 'actor');
+}
+
+// Cross-reference a person's films (actor or director) with the user's VOD playlist
 export function matchMoviesInPlaylist(
-  actorName: string,
+  personName: string,
   filmTitles: string[],
   vodChannels: Channel[]
 ): Channel[] {
-  const normActor = normalizeMovieTitle(actorName);
-  const actorTokens = normActor.split(/\s+/).filter((t) => t.length >= 3);
+  const normPerson = normalizeMovieTitle(personName);
+  const personTokens = normPerson.split(/\s+/).filter((t) => t.length >= 3);
 
   const normalizedFilms = filmTitles
-    .map((f) => normalizeMovieTitle(f))
-    .filter((f) => f.length >= 3);
+    .map((f) => extractCleanMovieTitle(f))
+    .filter((f) => f.length >= 2);
 
   const matched = new Map<string, Channel>();
 
   for (const ch of vodChannels) {
-    const chNorm = normalizeMovieTitle(ch.name);
+    const chClean = extractCleanMovieTitle(ch.name);
+    const chRawNorm = normalizeMovieTitle(ch.name);
 
-    // 1. Direct match if the channel title mentions the actor
-    if (actorTokens.length >= 2 && actorTokens.every((t) => chNorm.includes(t))) {
+    // 1. Direct match if the movie title mentions the actor/director explicitly
+    if (personTokens.length >= 2 && personTokens.every((t) => chRawNorm.includes(t))) {
       matched.set(ch.id, ch);
       continue;
     }
 
-    // 2. Match film titles from the actor's filmography against the channel title
-    for (const fNorm of normalizedFilms) {
-      if (
-        chNorm === fNorm ||
-        chNorm.includes(` ${fNorm} `) ||
-        chNorm.startsWith(`${fNorm} `) ||
-        chNorm.endsWith(` ${fNorm}`)
-      ) {
+    // 2. Match against official filmography with strict word boundaries
+    for (const f of normalizedFilms) {
+      if (f.length < 2) continue;
+
+      // Exact title match (e.g. "asterix aux jeux olympiques" === "asterix aux jeux olympiques")
+      if (chClean === f) {
         matched.set(ch.id, ch);
         break;
       }
-      if (fNorm.length >= 5 && chNorm.includes(fNorm)) {
-        matched.set(ch.id, ch);
-        break;
+
+      const fWords = f.split(' ');
+      // Multi-word title (2+ words, e.g. "le gitan", "mort d un pourri")
+      if (fWords.length >= 2 && f.length >= 5) {
+        if (
+          chClean.startsWith(`${f} `) ||
+          chClean.endsWith(` ${f}`) ||
+          chClean.includes(` ${f} `)
+        ) {
+          matched.set(ch.id, ch);
+          break;
+        }
+      } else if (f.length >= 7) {
+        // Single distinct word of at least 7 characters (e.g. "armaguedon", "carambolages", "inception")
+        if (
+          chClean === f ||
+          chClean.startsWith(`${f} `) ||
+          chClean.endsWith(` ${f}`) ||
+          chClean.includes(` ${f} `)
+        ) {
+          matched.set(ch.id, ch);
+          break;
+        }
       }
     }
   }
@@ -872,6 +989,174 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
   }
 
   return channels;
+}
+
+// Search cache for Xtream catalogs
+let xtreamSeriesCache: { credKey: string; data: any[]; timestamp: number } | null = null;
+let xtreamVodCache: { credKey: string; data: any[]; timestamp: number } | null = null;
+
+export async function searchXtreamCatalog(params: {
+  serverUrl: string;
+  username: string;
+  password: string;
+  query: string;
+}): Promise<Channel[]> {
+  const { serverUrl, username, password, query } = params;
+  const cleanQ = query.trim().toLowerCase();
+  if (!cleanQ || cleanQ.length < 2) return [];
+
+  const normQ = normalizeMovieTitle(cleanQ);
+  let server = serverUrl.trim().replace(/\/+$/, '');
+  if (!server.startsWith('http://') && !server.startsWith('https://')) {
+    server = 'http://' + server;
+  }
+  const cleanUser = decodeURIComponent(username.trim());
+  const cleanPass = decodeURIComponent(password.trim());
+  const encUser = encodeURIComponent(cleanUser);
+  const encPass = encodeURIComponent(cleanPass);
+  const credKey = `${server}_${cleanUser}`;
+
+  const results: Channel[] = [];
+  const now = Date.now();
+
+  // 1. Search in SERIES (action=get_series)
+  try {
+    let seriesList =
+      xtreamSeriesCache &&
+      xtreamSeriesCache.credKey === credKey &&
+      now - xtreamSeriesCache.timestamp < 300000
+        ? xtreamSeriesCache.data
+        : null;
+
+    if (!seriesList) {
+      const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_series`;
+      const res = await fetchHttp(url, 'json');
+      seriesList = toArray(res);
+      xtreamSeriesCache = { credKey, data: seriesList, timestamp: now };
+    }
+
+    for (const s of seriesList) {
+      const sName = String(s.name || '').trim();
+      if (normalizeMovieTitle(sName).includes(normQ)) {
+        const seriesId = s.series_id || s.id;
+        results.push({
+          id: `ch_xtream_series_${seriesId}`,
+          num: Number(s.num) || results.length + 1,
+          name: sName,
+          logo: s.cover || s.stream_icon || '',
+          stream_url: `${server}/series/${encUser}/${encPass}/${seriesId}.mp4`,
+          stream_type: 'series',
+          group_id: `grp_series_${s.category_id || 'all'}`,
+          group_name: 'Séries',
+          epg_id: String(seriesId),
+          is_favorite: false,
+          is_hidden: false,
+          custom_order: Number(s.num) || results.length + 1,
+          resolution: detectResolution(sName),
+        });
+        if (results.length >= 40) break;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed searching series in Xtream catalog:', err);
+  }
+
+  // 2. Search in VOD FILMS (action=get_vod_streams)
+  try {
+    let vodList =
+      xtreamVodCache &&
+      xtreamVodCache.credKey === credKey &&
+      now - xtreamVodCache.timestamp < 300000
+        ? xtreamVodCache.data
+        : null;
+
+    if (!vodList) {
+      const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_vod_streams`;
+      const res = await fetchHttp(url, 'json');
+      vodList = toArray(res);
+      xtreamVodCache = { credKey, data: vodList, timestamp: now };
+    }
+
+    for (const m of vodList) {
+      const mName = String(m.name || '').trim();
+      if (normalizeMovieTitle(mName).includes(normQ)) {
+        const streamId = m.stream_id || m.id;
+        const ext = m.container_extension || 'mp4';
+        results.push({
+          id: `ch_xtream_vod_${streamId}`,
+          num: Number(m.num) || results.length + 1,
+          name: mName,
+          logo: m.stream_icon || m.cover || '',
+          stream_url: `${server}/movie/${encUser}/${encPass}/${streamId}.${ext}`,
+          stream_type: 'vod',
+          group_id: `grp_vod_${m.category_id || 'all'}`,
+          group_name: 'Films VOD',
+          epg_id: String(streamId),
+          is_favorite: false,
+          is_hidden: false,
+          custom_order: Number(m.num) || results.length + 1,
+          resolution: detectResolution(mName),
+        });
+        if (results.length >= 80) break;
+      }
+    }
+  } catch (err) {
+    console.warn('Failed searching VOD in Xtream catalog:', err);
+  }
+
+  return results;
+}
+
+export async function getAllVodChannels(
+  serverUrl: string,
+  username: string,
+  password: string
+): Promise<Channel[]> {
+  let server = serverUrl.trim().replace(/\/+$/, '');
+  if (!server.startsWith('http://') && !server.startsWith('https://')) {
+    server = 'http://' + server;
+  }
+  const cleanUser = decodeURIComponent(username.trim());
+  const cleanPass = decodeURIComponent(password.trim());
+  const encUser = encodeURIComponent(cleanUser);
+  const encPass = encodeURIComponent(cleanPass);
+  const credKey = `${server}_${cleanUser}`;
+  const now = Date.now();
+
+  let vodList =
+    xtreamVodCache &&
+    xtreamVodCache.credKey === credKey &&
+    now - xtreamVodCache.timestamp < 600000
+      ? xtreamVodCache.data
+      : null;
+
+  if (!vodList) {
+    const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_vod_streams`;
+    const res = await fetchHttp(url, 'json');
+    vodList = toArray(res);
+    xtreamVodCache = { credKey, data: vodList, timestamp: now };
+  }
+
+  return vodList.map((m: any, i: number) => {
+    const streamId = m.stream_id || m.id || i + 1;
+    const ext = m.container_extension || 'mp4';
+    const mName = String(m.name || `Film ${i + 1}`).trim();
+    return {
+      id: `ch_xtream_vod_${streamId}`,
+      num: Number(m.num) || i + 1,
+      name: mName,
+      logo: m.stream_icon || m.cover || '',
+      stream_url: `${server}/movie/${encUser}/${encPass}/${streamId}.${ext}`,
+      stream_type: 'vod' as const,
+      group_id: `grp_vod_${m.category_id || 'all'}`,
+      group_name: 'Films VOD',
+      epg_id: String(streamId),
+      is_favorite: false,
+      is_hidden: false,
+      custom_order: Number(m.num) || i + 1,
+      resolution: detectResolution(mName),
+    };
+  });
 }
 
 export interface XtreamSyncParams {

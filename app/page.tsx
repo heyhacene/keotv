@@ -160,7 +160,7 @@ export default function KeoTVHome() {
   const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
 
   useEffect(() => {
-    checkForAppUpdate(27).then((info) => {
+    checkForAppUpdate(28).then((info) => {
       if (info && info.hasUpdate) {
         setAppUpdateInfo(info);
       }
@@ -171,6 +171,8 @@ export default function KeoTVHome() {
     getSetting('parental_hide_adult', false).then((hd) => setParentalHideAdult(Boolean(hd)));
   }, []);
 
+  const categoryLoadTokenRef = useRef<number>(0);
+
   // Channel loader for the selected category from IndexedDB with multi-tier lookup & on-demand fetch
   const loadCategoryChannels = useCallback(
     async (cat: Category | null, sortMode: 'playlist' | 'alpha' | 'num' = channelSort) => {
@@ -179,6 +181,7 @@ export default function KeoTVHome() {
         return;
       }
 
+      const token = ++categoryLoadTokenRef.current;
       setIsLoadingCategory(true);
       setCategoryError(null);
       try {
@@ -194,6 +197,7 @@ export default function KeoTVHome() {
 
           // Tier 5: ON-DEMAND FETCH FROM XTREAM SERVER (if local database has 0 items for this category)
           if (rawList.length === 0 && cat.id !== 'fav') {
+            if (categoryLoadTokenRef.current !== token) return;
             const currentPlaylists = await db.playlists.toArray();
             let activePl = currentPlaylists.find(
               (p) => p.type === 'xtream' && p.server_url && p.username && p.password
@@ -207,6 +211,7 @@ export default function KeoTVHome() {
             }
 
             if (activePl && activePl.server_url && activePl.username && activePl.password) {
+              if (categoryLoadTokenRef.current !== token) return;
               const cleanRawCatId = cat.id.replace(/^grp_(?:live_|vod_|series_)?/, '').trim();
               const catType: 'live' | 'vod' | 'series' = cat.id.startsWith('grp_vod_')
                 ? 'vod'
@@ -223,6 +228,8 @@ export default function KeoTVHome() {
                   streamType: catType,
                 });
 
+                if (categoryLoadTokenRef.current !== token) return;
+
                 if (onDemandStreams.length > 0) {
                   try {
                     await db.channels.bulkPut(onDemandStreams);
@@ -238,12 +245,15 @@ export default function KeoTVHome() {
                   rawList = onDemandStreams;
                 }
               } catch (onDemandErr: any) {
+                if (categoryLoadTokenRef.current !== token) return;
                 console.warn('On-demand stream fetch error for category', cat.id, onDemandErr);
                 setCategoryError(`Erreur serveur IPTV : ${onDemandErr?.message || onDemandErr}`);
               }
             }
           }
         }
+
+        if (categoryLoadTokenRef.current !== token) return;
 
         // Apply channel sort
         let sorted = [...rawList];
@@ -263,12 +273,14 @@ export default function KeoTVHome() {
           setActiveChannel((prev) => prev || sorted[0]);
         }
       } catch (err) {
+        if (categoryLoadTokenRef.current !== token) return;
         console.error('Error loading channels for category:', cat.id, err);
         setChannels([]);
       } finally {
-        setIsLoadingCategory(false);
+        if (categoryLoadTokenRef.current === token) {
+          setIsLoadingCategory(false);
+        }
       }
-
     },
     [channelSort]
   );
@@ -281,6 +293,34 @@ export default function KeoTVHome() {
     try {
       const loadedKeys = (await db.channels.orderBy('group_id').uniqueKeys()) as string[];
       const skip = new Set<string>(loadedKeys.map((k) => String(k)));
+
+      // Pre-fetch all series in one fast call if not yet loaded locally
+      const localSeriesCount = await db.channels.where('stream_type').equals('series').count();
+      if (localSeriesCount === 0 && pl.server_url && pl.username && pl.password) {
+        try {
+          const allSeries = await fetchCategoryStreamsOnDemand({
+            serverUrl: pl.server_url,
+            username: pl.username,
+            password: pl.password,
+            streamType: 'series',
+          });
+          if (allSeries.length > 0 && bgLoadTokenRef.current === token) {
+            await db.channels.bulkPut(allSeries);
+            const countsByGroup = new Map<string, number>();
+            for (const s of allSeries) {
+              countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
+            }
+            for (const [gid, cnt] of countsByGroup.entries()) {
+              await db.categories.update(gid, { count: cnt });
+            }
+            setCategories((prev) =>
+              prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
+            );
+          }
+        } catch (seriesErr) {
+          console.warn('Background series pre-fetch error:', seriesErr);
+        }
+      }
 
       await loadAllLiveCategories({
         serverUrl: pl.server_url,
@@ -1115,6 +1155,25 @@ export default function KeoTVHome() {
     }
     loadCategoryChannels(cat, channelSort);
   };
+
+  // Category change debounce when navigating categories list (prevents queuing dozens of requests when scrolling down)
+  const categoryDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (activePane !== 'categories') return;
+    if (categoryDebounceRef.current) clearTimeout(categoryDebounceRef.current);
+
+    categoryDebounceRef.current = setTimeout(() => {
+      const cat = sortedCategories[focusedCategoryIndex];
+      if (cat && cat.id !== selectedCategory?.id) {
+        handleSelectCategory(cat, focusedCategoryIndex, false);
+      }
+    }, 280);
+
+    return () => {
+      if (categoryDebounceRef.current) clearTimeout(categoryDebounceRef.current);
+    };
+  }, [focusedCategoryIndex, activePane, sortedCategories, selectedCategory]);
 
   // Parental & Category manager handlers
   const handleUpdateParentalPin = async (newPin: string) => {
@@ -2201,7 +2260,7 @@ export default function KeoTVHome() {
         onResyncPlaylist={handleResyncPlaylist}
         onEditPlaylist={handleOpenEditPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={27}
+        currentBuildNumber={28}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
@@ -2284,6 +2343,7 @@ export default function KeoTVHome() {
         onSelectMovie={(movie) => handleSelectChannel(movie, false)}
         onSelectSeries={(series) => handleSelectChannel(series, false)}
         onToggleFavorite={handleToggleFavorite}
+        serverCreds={activeXtreamCreds}
       />
 
       {/* Category Manager Modal */}
