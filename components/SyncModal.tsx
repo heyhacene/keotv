@@ -23,6 +23,35 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   const [isSyncing, setIsSyncing] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
+  const inputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => inputRef.current?.focus(), 150);
+    }
+  }, [isOpen]);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isBack =
+        e.key === 'Escape' ||
+        e.key === 'Backspace' ||
+        e.key === 'GoBack' ||
+        e.key === 'Back' ||
+        (e as any).keyCode === 27 ||
+        (e as any).keyCode === 4;
+
+      if (isBack) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleCopy = () => {
@@ -67,7 +96,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+            title="Fermer (Retour)"
           >
             <X className="w-5 h-5" />
           </button>
@@ -91,7 +121,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
               </span>
               <button
                 onClick={handleCopy}
-                className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-semibold text-white flex items-center space-x-1.5 transition"
+                className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-semibold text-white flex items-center space-x-1.5 transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
               >
                 {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                 <span>{copied ? 'Copié !' : 'Copier'}</span>
@@ -109,16 +139,17 @@ export const SyncModal: React.FC<SyncModalProps> = ({
             </label>
             <div className="flex space-x-2">
               <input
+                ref={inputRef}
                 type="text"
                 placeholder="Ex: KEO-9123"
                 value={inputCode}
                 onChange={(e) => setInputCode(e.target.value.toUpperCase())}
-                className="flex-1 bg-tv-card border border-tv-border rounded-xl px-3.5 py-2.5 text-sm font-mono tracking-wider text-white placeholder-slate-600 focus:outline-none focus:border-tv-accent"
+                className="flex-1 bg-tv-card border border-tv-border rounded-xl px-3.5 py-2.5 text-sm font-mono tracking-wider text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
               />
               <button
                 type="submit"
                 disabled={isSyncing || !inputCode.trim()}
-                className="px-4 py-2.5 bg-tv-focus hover:bg-sky-500 text-white font-bold rounded-xl text-xs shadow-lg transition flex items-center space-x-1.5 disabled:opacity-50"
+                className="px-4 py-2.5 bg-tv-focus hover:bg-sky-500 text-white font-bold rounded-xl text-xs shadow-lg transition flex items-center space-x-1.5 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
               >
                 <span>Synchroniser</span>
                 <ArrowRight className="w-4 h-4" />

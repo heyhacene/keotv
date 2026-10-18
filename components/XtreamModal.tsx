@@ -30,6 +30,35 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({ isOpen, onClose, onSav
   const [progressMessage, setProgressMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
+  const firstInputRef = React.useRef<HTMLInputElement | null>(null);
+
+  React.useEffect(() => {
+    if (isOpen) {
+      setTimeout(() => firstInputRef.current?.focus(), 150);
+    }
+  }, [isOpen]);
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isBack =
+        e.key === 'Escape' ||
+        e.key === 'Backspace' ||
+        e.key === 'GoBack' ||
+        e.key === 'Back' ||
+        (e as any).keyCode === 27 ||
+        (e as any).keyCode === 4;
+
+      if (isBack) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -87,7 +116,8 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({ isOpen, onClose, onSav
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition"
+            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+            title="Fermer (Retour)"
           >
             <X className="w-5 h-5" />
           </button>
@@ -98,7 +128,7 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({ isOpen, onClose, onSav
           <button
             type="button"
             onClick={() => setTab('xtream')}
-            className={`flex-1 py-3 text-sm font-semibold border-b-2 transition ${
+            className={`flex-1 py-3 text-sm font-semibold border-b-2 transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
               tab === 'xtream'
                 ? 'border-tv-accent text-tv-accent bg-tv-accent/5'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -109,7 +139,7 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({ isOpen, onClose, onSav
           <button
             type="button"
             onClick={() => setTab('m3u')}
-            className={`flex-1 py-3 text-sm font-semibold border-b-2 transition ${
+            className={`flex-1 py-3 text-sm font-semibold border-b-2 transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
               tab === 'm3u'
                 ? 'border-tv-accent text-tv-accent bg-tv-accent/5'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -133,11 +163,12 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({ isOpen, onClose, onSav
               Nom de la Playlist
             </label>
             <input
+              ref={firstInputRef}
               type="text"
               placeholder="Ex: Abonnement Premium"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              className="w-full bg-tv-card border border-tv-border rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-tv-accent focus:ring-1 focus:ring-tv-accent"
+              className="w-full bg-tv-card border border-tv-border rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
             />
           </div>
 

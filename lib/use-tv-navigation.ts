@@ -4,6 +4,7 @@ import { useEffect, useCallback, useRef } from 'react';
 import { NavigationPane } from '@/types/iptv';
 
 export interface TVNavOptions {
+  enabled?: boolean;
   activePane: NavigationPane;
   setActivePane: (pane: NavigationPane) => void;
   channelCount: number;
@@ -25,6 +26,7 @@ export interface TVNavOptions {
 }
 
 export function useTVNavigation({
+  enabled = true,
   activePane,
   setActivePane,
   channelCount,
@@ -49,6 +51,7 @@ export function useTVNavigation({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      if (enabled === false) return;
       const keyCode = (e as any).keyCode || 0;
       const key = e.key || '';
 
@@ -261,10 +264,11 @@ export function useTVNavigation({
   );
 
   useEffect(() => {
+    if (enabled === false) return;
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       if (numberTimerRef.current) clearTimeout(numberTimerRef.current);
     };
-  }, [handleKeyDown]);
+  }, [enabled, handleKeyDown]);
 }

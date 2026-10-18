@@ -1,17 +1,17 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   X,
   Settings as SettingsIcon,
-  PlusCircle,
-  RefreshCw,
-  Heart,
-  MessageSquare,
-  ShieldCheck,
-  Download,
   Server,
+  RefreshCw,
   Sliders,
+  ShieldCheck,
+  Heart,
+  Download,
+  PlusCircle,
+  MessageSquare,
   ExternalLink,
   Trash2,
   AlertTriangle,
@@ -39,6 +39,14 @@ interface SettingsModalProps {
   onChannelSortChange?: (sort: 'playlist' | 'alpha' | 'num') => void;
 }
 
+const TABS: Array<{ id: 'playlists' | 'sync' | 'update' | 'player' | 'feedback'; label: string; icon: any }> = [
+  { id: 'playlists', label: 'Playlists & Abonnements', icon: Server },
+  { id: 'sync', label: 'Identification & Synchro', icon: RefreshCw },
+  { id: 'update', label: 'Mise à jour', icon: Download },
+  { id: 'player', label: 'Affichage & Tri', icon: Sliders },
+  { id: 'feedback', label: 'Avis & Dons', icon: Heart },
+];
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
   onClose,
@@ -50,7 +58,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onRestoreDemoPlaylist,
   onResyncPlaylist,
   isResyncing = false,
-  currentBuildNumber = 15,
+  currentBuildNumber = 17,
   categorySort = 'playlist',
   onCategorySortChange,
   channelSort = 'playlist',
@@ -70,6 +78,216 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
+
+  // TV Remote Navigation states
+  const [focusArea, setFocusArea] = useState<'tabs' | 'content'>('tabs');
+  const [selectedTabNavIndex, setSelectedTabNavIndex] = useState<number>(0); // 0..4 = tabs, 5 = close button
+  const [contentFocusIndex, setContentFocusIndex] = useState<number>(0);
+  const modalBodyRef = useRef<HTMLDivElement | null>(null);
+
+  // Helper to fetch all focusable interactive elements inside the active tab content
+  const getContentFocusableElements = useCallback((): HTMLElement[] => {
+    if (!modalBodyRef.current) return [];
+    return Array.from(
+      modalBodyRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href]:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex="0"]'
+      )
+    );
+  }, []);
+
+  // When opening, reset TV focus directly onto the first tab
+  useEffect(() => {
+    if (isOpen) {
+      setFocusArea('tabs');
+      setSelectedTabNavIndex(0);
+      setContentFocusIndex(0);
+      const timer = setTimeout(() => {
+        document.getElementById('settings-tab-0')?.focus();
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isOpen]);
+
+  // Dedicated TV Remote D-Pad Navigation inside the Settings Modal
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const keyCode = (e as any).keyCode || 0;
+      const key = e.key || '';
+
+      const isEnter =
+        key === 'Enter' ||
+        key === 'Select' ||
+        key === 'Ok' ||
+        keyCode === 13 ||
+        keyCode === 23 || // Android DPAD_CENTER
+        keyCode === 66;
+
+      const isUp =
+        key === 'ArrowUp' ||
+        key === 'Up' ||
+        keyCode === 38 ||
+        keyCode === 19;   // Android DPAD_UP
+
+      const isDown =
+        key === 'ArrowDown' ||
+        key === 'Down' ||
+        keyCode === 40 ||
+        keyCode === 20;   // Android DPAD_DOWN
+
+      const isLeft =
+        key === 'ArrowLeft' ||
+        key === 'Left' ||
+        keyCode === 37 ||
+        keyCode === 21;   // Android DPAD_LEFT
+
+      const isRight =
+        key === 'ArrowRight' ||
+        key === 'Right' ||
+        keyCode === 39 ||
+        keyCode === 22;   // Android DPAD_RIGHT
+
+      const isBack =
+        key === 'Escape' ||
+        key === 'Backspace' ||
+        key === 'GoBack' ||
+        key === 'Back' ||
+        keyCode === 27 ||
+        keyCode === 4;    // Android BACK
+
+      // Close modal on remote Back
+      if (isBack) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+        return;
+      }
+
+      // --- SECTION 1: TOP TABS NAVIGATION ---
+      if (focusArea === 'tabs') {
+        if (isLeft) {
+          e.preventDefault();
+          setSelectedTabNavIndex((prev) => {
+            const next = prev > 0 ? prev - 1 : 5;
+            if (next < 5) setActiveTab(TABS[next].id);
+            const target = document.getElementById(`settings-tab-${next}`);
+            target?.focus();
+            return next;
+          });
+          return;
+        }
+
+        if (isRight) {
+          e.preventDefault();
+          setSelectedTabNavIndex((prev) => {
+            const next = prev < 5 ? prev + 1 : 0;
+            if (next < 5) setActiveTab(TABS[next].id);
+            const target = document.getElementById(`settings-tab-${next}`);
+            target?.focus();
+            return next;
+          });
+          return;
+        }
+
+        if (isDown) {
+          e.preventDefault();
+          const items = getContentFocusableElements();
+          if (items.length > 0) {
+            setFocusArea('content');
+            setContentFocusIndex(0);
+            items[0].focus();
+            items[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }
+          return;
+        }
+
+        if (isEnter) {
+          if (selectedTabNavIndex === 5) {
+            e.preventDefault();
+            onClose();
+          } else {
+            e.preventDefault();
+            const items = getContentFocusableElements();
+            if (items.length > 0) {
+              setFocusArea('content');
+              setContentFocusIndex(0);
+              items[0].focus();
+              items[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+          }
+          return;
+        }
+      }
+
+      // --- SECTION 2: CONTENT AREA NAVIGATION ---
+      if (focusArea === 'content') {
+        const items = getContentFocusableElements();
+        if (items.length === 0) {
+          if (isUp) {
+            e.preventDefault();
+            setFocusArea('tabs');
+            document.getElementById(`settings-tab-${selectedTabNavIndex}`)?.focus();
+          }
+          return;
+        }
+
+        if (isDown) {
+          e.preventDefault();
+          setContentFocusIndex((prev) => {
+            const next = Math.min(items.length - 1, prev + 1);
+            items[next]?.focus();
+            items[next]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return next;
+          });
+          return;
+        }
+
+        if (isUp) {
+          e.preventDefault();
+          if (contentFocusIndex === 0) {
+            // Return to top tabs
+            setFocusArea('tabs');
+            document.getElementById(`settings-tab-${selectedTabNavIndex}`)?.focus();
+          } else {
+            setContentFocusIndex((prev) => {
+              const next = Math.max(0, prev - 1);
+              items[next]?.focus();
+              items[next]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              return next;
+            });
+          }
+          return;
+        }
+
+        if (isLeft || isRight) {
+          // Allow horizontal navigation between side-by-side buttons
+          e.preventDefault();
+          setContentFocusIndex((prev) => {
+            const next = isLeft ? Math.max(0, prev - 1) : Math.min(items.length - 1, prev + 1);
+            items[next]?.focus();
+            items[next]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            return next;
+          });
+          return;
+        }
+
+        if (isEnter) {
+          const current = items[contentFocusIndex];
+          if (current && current.tagName !== 'INPUT' && current.tagName !== 'TEXTAREA') {
+            e.preventDefault();
+            current.click();
+          }
+          return;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true);
+    };
+  }, [isOpen, focusArea, selectedTabNavIndex, contentFocusIndex, getContentFocusableElements, onClose]);
 
   if (!isOpen) return null;
 
@@ -130,8 +348,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
           <button
+            id="settings-tab-5"
             onClick={onClose}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition"
+            className={`p-1.5 rounded-xl transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
+              focusArea === 'tabs' && selectedTabNavIndex === 5
+                ? 'bg-rose-500/20 text-white ring-2 ring-tv-accent'
+                : 'text-slate-400 hover:text-white hover:bg-white/10'
+            }`}
+            title="Fermer les paramètres (Retour)"
           >
             <X className="w-5 h-5" />
           </button>
@@ -139,69 +363,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Navigation Tabs */}
         <div className="flex border-b border-tv-border bg-black/20 overflow-x-auto scrollbar-none flex-shrink-0">
-          <button
-            onClick={() => setActiveTab('playlists')}
-            className={`flex items-center space-x-2 px-4 py-3 text-xs font-semibold whitespace-nowrap border-b-2 transition ${
-              activeTab === 'playlists'
-                ? 'border-tv-accent text-tv-accent bg-tv-accent/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Server className="w-4 h-4" />
-            <span>Playlists & Abonnements</span>
-          </button>
+          {TABS.map((tab, idx) => {
+            const Icon = tab.icon;
+            const isTabActive = activeTab === tab.id;
+            const isTabFocused = focusArea === 'tabs' && selectedTabNavIndex === idx;
 
-          <button
-            onClick={() => setActiveTab('sync')}
-            className={`flex items-center space-x-2 px-4 py-3 text-xs font-semibold whitespace-nowrap border-b-2 transition ${
-              activeTab === 'sync'
-                ? 'border-tv-accent text-tv-accent bg-tv-accent/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <RefreshCw className="w-4 h-4" />
-            <span>Identification & Synchro</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('update')}
-            className={`flex items-center space-x-2 px-4 py-3 text-xs font-semibold whitespace-nowrap border-b-2 transition ${
-              activeTab === 'update'
-                ? 'border-tv-accent text-tv-accent bg-tv-accent/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Download className="w-4 h-4" />
-            <span>Mise à jour</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('player')}
-            className={`flex items-center space-x-2 px-4 py-3 text-xs font-semibold whitespace-nowrap border-b-2 transition ${
-              activeTab === 'player'
-                ? 'border-tv-accent text-tv-accent bg-tv-accent/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Sliders className="w-4 h-4" />
-            <span>Affichage & Tri</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('feedback')}
-            className={`flex items-center space-x-2 px-4 py-3 text-xs font-semibold whitespace-nowrap border-b-2 transition ${
-              activeTab === 'feedback'
-                ? 'border-rose-400 text-rose-400 bg-rose-500/5'
-                : 'border-transparent text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            <Heart className="w-4 h-4 text-rose-400" />
-            <span>Avis & Dons</span>
-          </button>
+            return (
+              <button
+                key={tab.id}
+                id={`settings-tab-${idx}`}
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  setSelectedTabNavIndex(idx);
+                  setFocusArea('tabs');
+                }}
+                className={`flex items-center space-x-2 px-4 py-3 text-xs font-semibold whitespace-nowrap border-b-2 transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
+                  isTabFocused
+                    ? 'bg-tv-focus text-white border-tv-accent ring-2 ring-tv-accent scale-[1.02]'
+                    : isTabActive
+                    ? 'border-tv-accent text-tv-accent bg-tv-accent/5'
+                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
 
         {/* Tab Content */}
-        <div className="p-6 overflow-y-auto space-y-6 flex-1">
+        <div ref={modalBodyRef} className="p-6 overflow-y-auto space-y-6 flex-1">
           {/* ============================================================== */}
           {/* TAB 1: PLAYLISTS & ABONNEMENTS                                 */}
           {/* ============================================================== */}
@@ -219,7 +411,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     onClose();
                     onOpenXtreamModal();
                   }}
-                  className="px-4 py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 shadow-lg flex-shrink-0"
+                  className="px-4 py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 shadow-lg flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                 >
                   <PlusCircle className="w-4 h-4" />
                   <span>Ajouter une Playlist</span>
@@ -235,7 +427,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </p>
                     <button
                       onClick={onRestoreDemoPlaylist}
-                      className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold transition"
+                      className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                     >
                       Restaurer la playlist de test gratuite
                     </button>
@@ -266,13 +458,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               onDeletePlaylist(pl.id);
                               setDeletingId(null);
                             }}
-                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold shadow-md transition"
+                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold shadow-md transition focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-tv-surface"
                           >
                             Confirmer
                           </button>
                           <button
                             onClick={() => setDeletingId(null)}
-                            className="px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-slate-300 rounded-lg text-xs transition"
+                            className="px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-slate-300 rounded-lg text-xs transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                           >
                             Annuler
                           </button>
@@ -283,7 +475,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <button
                               onClick={() => onResyncPlaylist(pl)}
                               disabled={isResyncing}
-                              className="p-2 text-slate-400 hover:text-tv-accent hover:bg-sky-500/10 rounded-lg transition disabled:opacity-50"
+                              className="p-2 text-slate-400 hover:text-tv-accent hover:bg-sky-500/10 rounded-lg transition disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                               title="Re-synchroniser et recharger les chaînes"
                             >
                               <RefreshCw className={`w-4 h-4 ${isResyncing ? 'animate-spin text-tv-accent' : ''}`} />
@@ -291,7 +483,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           )}
                           <button
                             onClick={() => setDeletingId(pl.id)}
-                            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition"
+                            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-tv-surface"
                             title="Supprimer cette playlist"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -331,7 +523,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     onClose();
                     onOpenSyncModal();
                   }}
-                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition"
+                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                 >
                   Gérer la synchro
                 </button>
@@ -355,7 +547,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-slate-300">Version installée</span>
                   <span className="text-xs font-mono font-bold text-tv-accent">
-                    v1.0.0 (Build {process.env.NEXT_PUBLIC_BUILD_NUMBER || currentBuildNumber || 5})
+                    v1.0.0 (Build {process.env.NEXT_PUBLIC_BUILD_NUMBER || currentBuildNumber || 17})
                   </span>
                 </div>
 
@@ -370,18 +562,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     onClick={handleCheckUpdate}
                     disabled={checkingUpdate}
-                    className="flex-1 py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 disabled:opacity-50"
+                    className="flex-1 py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                   >
                     <RefreshCw className={`w-4 h-4 ${checkingUpdate ? 'animate-spin' : ''}`} />
                     <span>{checkingUpdate ? 'Vérification...' : 'Vérifier les mises à jour'}</span>
                   </button>
 
                   <a
-                    href="https://tinyurl.com/keotv-apk"
-                    className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 text-center"
+                    href="https://tinyurl.com/keo-apk"
+                    className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Télécharger l&apos;APK (Build 15)</span>
+                    <span>Télécharger l&apos;APK (Build 17)</span>
                   </a>
                 </div>
 
@@ -410,7 +602,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {/* ============================================================== */}
-          {/* TAB 4: LECTEUR                                                 */}
+          {/* TAB 4: AFFICHAGE ET TRI                                        */}
           {/* ============================================================== */}
           {activeTab === 'player' && (
             <div className="space-y-4">
@@ -433,7 +625,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => onCategorySortChange?.('playlist')}
-                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center ${
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
                       categorySort === 'playlist'
                         ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
                         : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
@@ -444,24 +636,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => onCategorySortChange?.('alpha')}
-                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center ${
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
                       categorySort === 'alpha'
                         ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
                         : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
                     }`}
                   >
-                    Alphabétique (A-Z)
+                    Alphabétique (A - Z)
                   </button>
                   <button
                     type="button"
                     onClick={() => onCategorySortChange?.('count')}
-                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center ${
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
                       categorySort === 'count'
                         ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
                         : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
                     }`}
                   >
-                    Par Nb Chaînes
+                    Par Nbr de Chaînes
                   </button>
                 </div>
               </div>
@@ -470,15 +662,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="p-3.5 bg-tv-card/60 rounded-xl border border-tv-border space-y-2">
                 <div className="flex items-center justify-between">
                   <div>
-                    <span className="text-xs font-bold text-white block">Tri des Chaînes dans chaque groupe</span>
-                    <span className="text-[11px] text-slate-400 block">Ordre d&apos;apparition des chaînes</span>
+                    <span className="text-xs font-bold text-white block">Tri des Chaînes & Flux</span>
+                    <span className="text-[11px] text-slate-400 block">Classement au sein de chaque bouquet</span>
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-1.5 pt-1">
                   <button
                     type="button"
                     onClick={() => onChannelSortChange?.('playlist')}
-                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center ${
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
                       channelSort === 'playlist'
                         ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
                         : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
@@ -489,18 +681,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => onChannelSortChange?.('alpha')}
-                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center ${
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
                       channelSort === 'alpha'
                         ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
                         : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
                     }`}
                   >
-                    Alphabétique (A-Z)
+                    Alphabétique (A - Z)
                   </button>
                   <button
                     type="button"
                     onClick={() => onChannelSortChange?.('num')}
-                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center ${
+                    className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
                       channelSort === 'num'
                         ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
                         : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
@@ -572,7 +764,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           key={item.id}
                           type="button"
                           onClick={() => setFeedbackCategory(item.id as any)}
-                          className={`py-1.5 px-2 rounded-lg text-xs font-medium border text-center transition ${
+                          className={`py-1.5 px-2 rounded-lg text-xs font-medium border text-center transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
                             feedbackCategory === item.id
                               ? 'bg-tv-focus border-tv-accent text-white font-bold'
                               : 'bg-black/30 border-tv-border text-slate-400 hover:text-white'
@@ -590,7 +782,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       placeholder="Décrivez votre suggestion ou le souci rencontré..."
                       value={feedbackMessage}
                       onChange={(e) => setFeedbackMessage(e.target.value)}
-                      className="w-full bg-black/40 border border-tv-border rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-tv-accent"
+                      className="w-full bg-black/40 border border-tv-border rounded-xl p-3 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                     />
 
                     {/* Contact email (optional) */}
@@ -599,7 +791,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       placeholder="Votre adresse email (facultatif si vous souhaitez une réponse)"
                       value={feedbackEmail}
                       onChange={(e) => setFeedbackEmail(e.target.value)}
-                      className="w-full bg-black/40 border border-tv-border rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-tv-accent"
+                      className="w-full bg-black/40 border border-tv-border rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                     />
 
                     {feedbackError && (
@@ -609,7 +801,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <button
                       type="submit"
                       disabled={feedbackSubmitting || !feedbackMessage.trim()}
-                      className="w-full py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 shadow-lg disabled:opacity-50"
+                      className="w-full py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 shadow-lg disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                     >
                       <Send className="w-3.5 h-3.5" />
                       <span>{feedbackSubmitting ? 'Envoi en cours...' : 'Envoyer mon message'}</span>
@@ -631,7 +823,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   href="https://github.com/sponsors/heyhacene"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center space-x-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-lg"
+                  className="inline-flex items-center space-x-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-lg focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-tv-surface"
                 >
                   <Heart className="w-4 h-4 fill-white" />
                   <span>Faire un don / Soutenir</span>
@@ -646,7 +838,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <span className="text-[11px] text-slate-500 font-mono">KeoTV IPTV • v1.0.0 (Build {currentBuildNumber})</span>
           <button
             onClick={onClose}
-            className="px-4 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold transition"
+            className="px-4 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
           >
             Fermer
           </button>

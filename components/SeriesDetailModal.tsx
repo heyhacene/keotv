@@ -88,6 +88,27 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
     alert('La lecture des épisodes nécessite l’application Android KeoTV.');
   };
 
+  // Remote control Back key handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isBack =
+        e.key === 'Escape' ||
+        e.key === 'Backspace' ||
+        e.key === 'GoBack' ||
+        e.key === 'Back' ||
+        (e as any).keyCode === 27 ||
+        (e as any).keyCode === 4;
+
+      if (isBack) {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onClose]);
+
   const cover = details?.cover || series.logo;
 
   return (
@@ -96,7 +117,7 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
       <div className="flex items-center space-x-3 px-4 py-3 bg-tv-surface border-b border-tv-border flex-shrink-0">
         <button
           onClick={onClose}
-          className="p-2 rounded-xl bg-tv-card hover:bg-tv-cardHover text-slate-200 hover:text-white transition flex items-center space-x-2 border border-tv-border shadow-sm"
+          className="p-2 rounded-xl bg-tv-card hover:bg-tv-cardHover text-slate-200 hover:text-white transition flex items-center space-x-2 border border-tv-border shadow-sm focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
           title="Retour aux séries"
         >
           <ArrowLeft className="w-5 h-5 text-tv-accent" />
@@ -187,7 +208,7 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
                 <div key={season.season} className="rounded-2xl border border-tv-border bg-tv-card/60 backdrop-blur-sm overflow-hidden shadow-lg transition">
                   <button
                     onClick={() => setOpenSeason(isOpen ? null : season.season)}
-                    className="w-full flex items-center justify-between p-4 text-left hover:bg-tv-cardHover transition"
+                    className="w-full flex items-center justify-between p-4 text-left hover:bg-tv-cardHover transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-bg"
                   >
                     <span className="text-sm sm:text-base font-bold text-white flex items-center space-x-2">
                       <span>{season.name}</span>
@@ -210,7 +231,7 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
                         <button
                           key={ep.id}
                           onClick={() => playEpisode(ep)}
-                          className="w-full flex items-center space-x-3 sm:space-x-4 p-3.5 sm:p-4 text-left hover:bg-tv-focus/20 transition group"
+                          className="w-full flex items-center space-x-3 sm:space-x-4 p-3.5 sm:p-4 text-left hover:bg-tv-focus/20 transition group focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-bg"
                         >
                           <span className="w-10 h-10 rounded-xl bg-tv-focus/80 group-hover:bg-tv-focus group-hover:scale-105 flex items-center justify-center flex-shrink-0 shadow transition">
                             <Play className="w-4 h-4 text-white fill-white ml-0.5" />

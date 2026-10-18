@@ -1004,8 +1004,17 @@ export default function KeoTVHome() {
     };
   }, [handleAndroidBack]);
 
+  const isAnyModalOpen =
+    isSettingsModalOpen ||
+    isSyncModalOpen ||
+    isCategoryModalOpen ||
+    isXtreamModalOpen ||
+    Boolean(selectedMovieForDetails) ||
+    Boolean(selectedSeriesForDetails);
+
   // Register remote control D-Pad keyboard events with hierarchical back handler
   useTVNavigation({
+    enabled: !isAnyModalOpen,
     activePane,
     setActivePane,
     channelCount: filteredChannels.length,
@@ -1652,7 +1661,7 @@ export default function KeoTVHome() {
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
         onResyncPlaylist={handleResyncPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={17}
+        currentBuildNumber={18}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
