@@ -247,6 +247,71 @@ export async function resolveFirstEpisodeUrl(
   return null;
 }
 
+// Detect audio languages and subtitles from stream title and server metadata
+export function detectAudioAndSubtitles(title: string, rawInfo?: any): {
+  audio: string[];
+  subtitles: string[];
+} {
+  const audio = new Set<string>();
+  const subtitles = new Set<string>();
+
+  const upper = (title || '').toUpperCase();
+
+  // Parse explicit fields from Xtream info if present
+  if (rawInfo?.audio) {
+    const rawAudio = String(rawInfo.audio);
+    for (const a of rawAudio.split(/[,;\/|]/)) {
+      const clean = a.trim();
+      if (clean) audio.add(clean);
+    }
+  }
+  if (rawInfo?.subtitles) {
+    const rawSubs = String(rawInfo.subtitles);
+    for (const s of rawSubs.split(/[,;\/|]/)) {
+      const clean = s.trim();
+      if (clean) subtitles.add(clean);
+    }
+  }
+
+  // Detect from title flags
+  if (upper.includes('VOSTFR') || upper.includes('VOST')) {
+    subtitles.add('Français (VOSTFR)');
+    if (audio.size === 0) audio.add('Version Originale (VO)');
+  }
+  if (upper.includes('MULTI')) {
+    audio.add('Français (VF)');
+    audio.add('Version Originale (VO)');
+  }
+  if (upper.includes('VF') || upper.includes('TRUEFRENCH') || upper.includes('FRENCH') || upper.includes('VFF') || upper.includes('QC')) {
+    audio.add('Français (VF)');
+  }
+  if (upper.includes('VO') && !upper.includes('VOST')) {
+    audio.add('Version Originale (VO)');
+  }
+  if (upper.includes('EN') || upper.includes('ENG') || upper.includes('ENGLISH')) {
+    audio.add('Anglais (Audio)');
+  }
+  if (upper.includes('AR') || upper.includes('ARABIC')) {
+    audio.add('Arabe (Audio)');
+  }
+  if (upper.includes('ES') || upper.includes('SPANISH')) {
+    audio.add('Espagnol (Audio)');
+  }
+
+  // Sensible defaults
+  if (audio.size === 0) {
+    audio.add('Français (VF)');
+  }
+  if (subtitles.size === 0 && (upper.includes('VOSTFR') || upper.includes('MULTI'))) {
+    subtitles.add('Français');
+  }
+
+  return {
+    audio: Array.from(audio),
+    subtitles: Array.from(subtitles),
+  };
+}
+
 export interface SeriesEpisode {
   id: string;
   season: number;
@@ -271,6 +336,8 @@ export interface SeriesDetails {
   genre?: string;
   year?: string;
   rating?: string;
+  audioLanguages?: string[];
+  subtitles?: string[];
   seasons: SeriesSeason[];
 }
 
@@ -330,6 +397,8 @@ export async function fetchSeriesInfo(
     });
   }
 
+  const langInfo = detectAudioAndSubtitles(info.name || '', info);
+
   return {
     name: info.name ? String(info.name) : '',
     cover: info.cover ? String(info.cover) : undefined,
@@ -337,8 +406,214 @@ export async function fetchSeriesInfo(
     genre: info.genre ? String(info.genre) : undefined,
     year: info.releaseDate ? String(info.releaseDate) : info.release_date ? String(info.release_date) : undefined,
     rating: info.rating ? String(info.rating) : undefined,
+    audioLanguages: langInfo.audio,
+    subtitles: langInfo.subtitles,
     seasons,
   };
+}
+
+export interface MovieDetails {
+  id: string;
+  streamId: string;
+  name: string;
+  originalName?: string;
+  cover?: string;
+  backdrop?: string;
+  plot?: string;
+  genre?: string;
+  year?: string;
+  rating?: string;
+  duration?: string;
+  director?: string;
+  actors: string[];
+  audioLanguages: string[];
+  subtitles: string[];
+  streamUrl: string;
+}
+
+// Fetch complete movie details from Xtream API (get_vod_info)
+export async function fetchVodInfo(
+  serverUrl: string,
+  username: string,
+  password: string,
+  vodId: string | number,
+  fallbackChannel?: Channel
+): Promise<MovieDetails> {
+  let server = serverUrl.trim().replace(/\/+$/, '');
+  if (!server.startsWith('http://') && !server.startsWith('https://')) {
+    server = 'http://' + server;
+  }
+  const cleanUser = decodeURIComponent(username.trim());
+  const cleanPass = decodeURIComponent(password.trim());
+  const encUser = encodeURIComponent(cleanUser);
+  const encPass = encodeURIComponent(cleanPass);
+
+  const cleanVodId = String(vodId).replace(/^ch_xtream_(?:vod_)?/, '');
+  const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_vod_info&vod_id=${cleanVodId}`;
+
+  let data: any = null;
+  try {
+    data = await fetchHttp(url, 'json');
+  } catch (err) {
+    console.warn('Failed to fetch get_vod_info from server:', err);
+  }
+
+  const info = data?.info || {};
+  const movieData = data?.movie_data || {};
+
+  // Formats duration
+  let formattedDuration: string | undefined = undefined;
+  if (info.duration_secs && Number(info.duration_secs) > 0) {
+    const totalMin = Math.round(Number(info.duration_secs) / 60);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    formattedDuration = h > 0 ? `${h}h ${m < 10 ? '0' : ''}${m}m` : `${m} min`;
+  } else if (info.episode_run_time && Number(info.episode_run_time) > 0) {
+    const totalMin = Number(info.episode_run_time);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    formattedDuration = h > 0 ? `${h}h ${m < 10 ? '0' : ''}${m}m` : `${m} min`;
+  } else if (info.duration) {
+    formattedDuration = String(info.duration);
+  }
+
+  // Parse actors list
+  const rawActors = info.actors || info.cast || '';
+  const actorsList: string[] = [];
+  if (typeof rawActors === 'string') {
+    for (const a of rawActors.split(/[,;\/|]/)) {
+      const clean = a.trim();
+      if (clean && clean.length > 1 && !actorsList.includes(clean)) {
+        actorsList.push(clean);
+      }
+    }
+  } else if (Array.isArray(rawActors)) {
+    for (const a of rawActors) {
+      const str = typeof a === 'string' ? a.trim() : (a?.name || '').trim();
+      if (str && !actorsList.includes(str)) {
+        actorsList.push(str);
+      }
+    }
+  }
+
+  const movieName = info.name || movieData.name || fallbackChannel?.name || 'Film';
+  const lang = detectAudioAndSubtitles(movieName, info);
+
+  const ext = movieData.container_extension || 'mp4';
+  const streamUrl = fallbackChannel?.stream_url || `${server}/movie/${encUser}/${encPass}/${cleanVodId}.${ext}`;
+
+  let backdrop = '';
+  if (Array.isArray(info.backdrop_path) && info.backdrop_path.length > 0) {
+    backdrop = String(info.backdrop_path[0]);
+  } else if (typeof info.backdrop_path === 'string') {
+    backdrop = info.backdrop_path;
+  }
+
+  return {
+    id: fallbackChannel?.id || `ch_xtream_vod_${cleanVodId}`,
+    streamId: cleanVodId,
+    name: movieName,
+    originalName: info.o_name ? String(info.o_name) : undefined,
+    cover: info.cover_big || info.movie_image || fallbackChannel?.logo,
+    backdrop: backdrop || undefined,
+    plot: info.plot || info.description || undefined,
+    genre: info.genre ? String(info.genre) : undefined,
+    year: info.releasedate ? String(info.releasedate).slice(0, 4) : (movieData.year ? String(movieData.year) : undefined),
+    rating: info.rating ? String(info.rating).slice(0, 3) : undefined,
+    duration: formattedDuration,
+    director: info.director ? String(info.director) : undefined,
+    actors: actorsList,
+    audioLanguages: lang.audio,
+    subtitles: lang.subtitles,
+    streamUrl,
+  };
+}
+
+// Fetch actor filmography in French from Wikidata SPARQL
+export async function fetchActorFilmography(actorName: string): Promise<string[]> {
+  const cleanName = actorName.trim();
+  if (!cleanName || cleanName.length < 2) return [];
+
+  const escapedName = cleanName.replace(/"/g, '\\"');
+  const sparql = `SELECT DISTINCT ?filmLabel WHERE {
+    ?actor ?label "${escapedName}"@en .
+    ?film wdt:P161 ?actor .
+    SERVICE wikibase:label { bd:serviceParam wikibase:language "fr,en". }
+  } LIMIT 50`;
+
+  const url = `https://query.wikidata.org/sparql?query=${encodeURIComponent(sparql)}&format=json`;
+
+  try {
+    const res = await fetchHttp(url, 'json');
+    const bindings = res?.results?.bindings || [];
+    const titles = new Set<string>();
+
+    for (const b of bindings) {
+      const val = b?.filmLabel?.value;
+      if (val && !val.startsWith('Q') && val.length > 1) {
+        titles.add(val.trim());
+      }
+    }
+    return Array.from(titles);
+  } catch (err) {
+    console.warn(`Could not fetch filmography for actor ${actorName}:`, err);
+    return [];
+  }
+}
+
+// Helper to normalize strings for search and matching
+export function normalizeMovieTitle(str: string): string {
+  return (str || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+// Cross-reference an actor's films with the user's local playlist VOD items
+export function matchMoviesInPlaylist(
+  actorName: string,
+  filmTitles: string[],
+  vodChannels: Channel[]
+): Channel[] {
+  const normActor = normalizeMovieTitle(actorName);
+  const actorTokens = normActor.split(/\s+/).filter((t) => t.length >= 3);
+
+  const normalizedFilms = filmTitles
+    .map((f) => normalizeMovieTitle(f))
+    .filter((f) => f.length >= 3);
+
+  const matched = new Map<string, Channel>();
+
+  for (const ch of vodChannels) {
+    const chNorm = normalizeMovieTitle(ch.name);
+
+    // 1. Direct match if the channel title mentions the actor
+    if (actorTokens.length >= 2 && actorTokens.every((t) => chNorm.includes(t))) {
+      matched.set(ch.id, ch);
+      continue;
+    }
+
+    // 2. Match film titles from the actor's filmography against the channel title
+    for (const fNorm of normalizedFilms) {
+      if (
+        chNorm === fNorm ||
+        chNorm.includes(` ${fNorm} `) ||
+        chNorm.startsWith(`${fNorm} `) ||
+        chNorm.endsWith(` ${fNorm}`)
+      ) {
+        matched.set(ch.id, ch);
+        break;
+      }
+      if (fNorm.length >= 5 && chNorm.includes(fNorm)) {
+        matched.set(ch.id, ch);
+        break;
+      }
+    }
+  }
+
+  return Array.from(matched.values());
 }
 
 // Resolve ALL episodes (every season, in order) of a series so the native player can zap between them

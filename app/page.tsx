@@ -14,6 +14,7 @@ import { SyncModal } from '@/components/SyncModal';
 import { CategoryDrawerModal } from '@/components/CategoryDrawerModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { SeriesDetailModal } from '@/components/SeriesDetailModal';
+import { MovieDetailModal } from '@/components/MovieDetailModal';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
 import {
   syncXtreamPlaylist,
@@ -73,6 +74,8 @@ export default function KeoTVHome() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [selectedSeriesForDetails, setSelectedSeriesForDetails] = useState<Channel | null>(null);
   const [seriesServerCreds, setSeriesServerCreds] = useState<{ serverUrl: string; username: string; password: string } | null>(null);
+  const [selectedMovieForDetails, setSelectedMovieForDetails] = useState<Channel | null>(null);
+  const [movieServerCreds, setMovieServerCreds] = useState<{ serverUrl: string; username: string; password: string } | null>(null);
 
   // Channel loader for the selected category from IndexedDB with multi-tier lookup & on-demand fetch
   const loadCategoryChannels = useCallback(
@@ -687,7 +690,41 @@ export default function KeoTVHome() {
     [selectedSeriesForDetails]
   );
 
-  // Channel Selection: opens Series Details for series, or native player for live TV / VOD movies
+  // Play a movie chosen from the movie detail page
+  const handlePlayMovie = useCallback(
+    async (movieToPlay: Channel) => {
+      if (isNativePlayerAvailable()) {
+        try {
+          const playlist = filteredChannels.length > 0 ? filteredChannels : [movieToPlay];
+          const startIndex = Math.max(0, playlist.findIndex((c) => c.id === movieToPlay.id));
+          await NativePlayer.play({
+            urls: playlist.map((c) => c.stream_url),
+            titles: playlist.map((c) => c.name),
+            index: startIndex,
+            userAgent: NATIVE_PLAYER_USER_AGENT,
+            isLive: false,
+          });
+        } catch (err: any) {
+          console.error('Native player movie error:', err);
+          alert(`Lecture impossible : ${err?.message || err}`);
+        }
+        return;
+      }
+
+      // Browser fallback
+      setActiveChannel(movieToPlay);
+      setIsStopped(false);
+      setIsFullscreen(true);
+      setSelectedMovieForDetails(null);
+    },
+    [filteredChannels]
+  );
+
+  const handleSelectAnotherMovie = useCallback((anotherMovie: Channel) => {
+    setSelectedMovieForDetails(anotherMovie);
+  }, []);
+
+  // Channel Selection: opens Series Details for series, Movie Details for films, or native player for live TV
   const handleSelectChannel = useCallback(
     async (target: Channel | number, forceFullscreen: boolean = false) => {
       const targetChannel = typeof target === 'number' ? filteredChannels[target] : target;
@@ -726,7 +763,34 @@ export default function KeoTVHome() {
         return;
       }
 
-      // ---- Native Android player (Live TV & VOD Films: reliable IPTV playback, no CORS, custom User-Agent) ----
+      // ---- FILMS (VOD): A click on a movie opens its dedicated sheet before playback! ----
+      if (targetChannel.stream_type === 'vod' || activeSection === 'vod') {
+        let serverUrl = '';
+        let username = '';
+        let password = '';
+        const pl = (await db.playlists.toArray()).find((p) => p.type === 'xtream' && p.username && p.password);
+        if (pl) {
+          serverUrl = pl.server_url;
+          username = pl.username || '';
+          password = pl.password || '';
+        } else {
+          const saved = await getSetting<any>('last_xtream_config', null);
+          if (saved?.server_url && saved?.username && saved?.password) {
+            serverUrl = saved.server_url;
+            username = saved.username;
+            password = saved.password;
+          }
+        }
+        setSelectedMovieForDetails(targetChannel);
+        setMovieServerCreds({
+          serverUrl: serverUrl || targetChannel.stream_url,
+          username: username || '',
+          password: password || '',
+        });
+        return;
+      }
+
+      // ---- Native Android player (Live TV: reliable IPTV playback, no CORS, custom User-Agent) ----
       if (isNativePlayerAvailable()) {
         try {
           const playlist = filteredChannels.length > 0 ? filteredChannels : [targetChannel];
@@ -815,7 +879,13 @@ export default function KeoTVHome() {
   // ANDROID HIERARCHICAL BACK BUTTON & DOUBLE-PRESS TO EXIT
   // ==============================================================
   const handleAndroidBack = useCallback(() => {
-    // 0. Series details modal -> close series page and return to series list
+    // 0. Movie details modal -> close movie page and return to movie catalog
+    if (selectedMovieForDetails) {
+      setSelectedMovieForDetails(null);
+      return;
+    }
+
+    // 0b. Series details modal -> close series page and return to series list
     if (selectedSeriesForDetails) {
       setSelectedSeriesForDetails(null);
       return;
@@ -1533,7 +1603,7 @@ export default function KeoTVHome() {
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
         onResyncPlaylist={handleResyncPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={14}
+        currentBuildNumber={15}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
@@ -1573,6 +1643,19 @@ export default function KeoTVHome() {
           password={seriesServerCreds.password}
           onClose={() => setSelectedSeriesForDetails(null)}
           onPlayEpisode={handlePlaySeriesEpisode}
+        />
+      )}
+
+      {/* Movie Detail Modal (Intermediate sheet before playback + Actor filmography) */}
+      {selectedMovieForDetails && movieServerCreds && (
+        <MovieDetailModal
+          movie={selectedMovieForDetails}
+          serverUrl={movieServerCreds.serverUrl}
+          username={movieServerCreds.username}
+          password={movieServerCreds.password}
+          onClose={() => setSelectedMovieForDetails(null)}
+          onPlay={handlePlayMovie}
+          onSelectAnotherMovie={handleSelectAnotherMovie}
         />
       )}
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { ArrowLeft, Loader2, Play, AlertCircle, ChevronDown, ChevronRight, Film } from 'lucide-react';
+import { ArrowLeft, Loader2, Play, AlertCircle, ChevronDown, ChevronRight, Film, Volume2, MessageSquare } from 'lucide-react';
 import { Channel } from '@/types/iptv';
 import { fetchSeriesInfo, SeriesDetails, SeriesEpisode } from '@/lib/iptv-service';
 import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
@@ -134,6 +134,18 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
                 {details && details.seasons.length > 0 && (
                   <span className="bg-sky-500/20 text-sky-300 px-2.5 py-0.5 rounded-lg border border-sky-500/30 font-semibold">
                     {details.seasons.length} saison{details.seasons.length > 1 ? 's' : ''}
+                  </span>
+                )}
+                {details?.audioLanguages && details.audioLanguages.length > 0 && (
+                  <span className="bg-emerald-500/15 text-emerald-300 px-2.5 py-0.5 rounded-lg border border-emerald-500/30 font-medium flex items-center space-x-1">
+                    <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Audio : {details.audioLanguages.join(', ')}</span>
+                  </span>
+                )}
+                {details?.subtitles && details.subtitles.length > 0 && (
+                  <span className="bg-purple-500/15 text-purple-300 px-2.5 py-0.5 rounded-lg border border-purple-500/30 font-medium flex items-center space-x-1">
+                    <MessageSquare className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Sous-titres : {details.subtitles.join(', ')}</span>
                   </span>
                 )}
               </div>

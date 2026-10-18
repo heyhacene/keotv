@@ -185,10 +185,11 @@ jobs:
             ### 📺 KeoTV v1.0.0 (Build ${{ github.run_number }})
             Cliquez sur le fichier **KeoTV-Build-${{ github.run_number }}.apk** ci-dessous pour installer ou mettre à jour directement votre application.
 
-            #### 🚀 Nouveautés & Correctifs Majeurs :
-            - **Page dédiée pour les Séries (Saisons & Épisodes)** : Un clic sur une série ouvre désormais sa fiche complète avec affiche, résumé, accordéons de chaque saison et la liste de tous les épisodes.
-            - **Choix et lecture par épisode** : Lancement direct de n'importe quel épisode, avec passage automatique ou zapping à l'épisode suivant dans le lecteur natif.
-            - **Bouton Retour hiérarchique** : La touche Retour ferme la fiche de la série et revient à la liste des séries.
+            #### 🚀 Nouveautés & Correctifs Majeurs (Build 15) :
+            - **Fiche détaillée pour les Films (intermédiaire avant lecture)** : Un clic sur un film ouvre désormais sa fiche complète avec image de fond, affiche, note IMDb, durée, réalisateur, synopsis en français, pistes audio et sous-titres, et grand bouton "Lancer le film".
+            - **Distribution & Filmographie croisée avec votre Playlist** : Cliquez sur n'importe quel acteur de la distribution pour voir immédiatement tous ses autres films disponibles dans votre playlist IPTV personnelle !
+            - **Langues Audio et Sous-titres (Séries & Films)** : Détection et affichage clair des langues disponibles (Français VF, VOSTFR, Multilingue, VO, etc.).
+            - **Raccourci Downloader Android TV** : Tapez `tinyurl.com/keotv-apk` dans la barre URL de l'application Downloader sur votre télévision.
             - **Mise à jour directe sans désinstallation** : Signature cryptographique officielle permanente (`versionCode ${{ github.run_number }}`).
           files: |
             KeoTV.apk

@@ -50,7 +50,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onRestoreDemoPlaylist,
   onResyncPlaylist,
   isResyncing = false,
-  currentBuildNumber = 11,
+  currentBuildNumber = 15,
   categorySort = 'playlist',
   onCategorySortChange,
   channelSort = 'playlist',
@@ -377,12 +377,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </button>
 
                   <a
-                    href="https://tinyurl.com/keotv-app"
+                    href="https://tinyurl.com/keotv-apk"
                     className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 text-center"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Télécharger la dernière APK</span>
+                    <span>Télécharger l&apos;APK (Build 15)</span>
                   </a>
+                </div>
+
+                <div className="p-3 bg-sky-950/40 rounded-xl text-xs text-slate-300 border border-sky-500/20 space-y-1">
+                  <p className="font-semibold text-tv-accent">📺 Installation rapide sur Android TV / Fire TV :</p>
+                  <p className="text-[11px] text-slate-300">
+                    Ouvrez l&apos;application <strong className="text-white">Downloader</strong> sur votre téléviseur et tapez simplement :
+                  </p>
+                  <p className="font-mono text-center py-1 text-sm bg-black/50 rounded-lg text-amber-300 font-bold tracking-wide">
+                    tinyurl.com/keotv-apk
+                  </p>
                 </div>
 
                 {updateStatus && (
