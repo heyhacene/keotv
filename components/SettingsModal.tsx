@@ -385,13 +385,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </a>
                 </div>
 
-                <div className="p-3 bg-sky-950/40 rounded-xl text-xs text-slate-300 border border-sky-500/20 space-y-1">
+                <div className="p-3 bg-sky-950/40 rounded-xl text-xs text-slate-300 border border-sky-500/20 space-y-1.5">
                   <p className="font-semibold text-tv-accent">📺 Installation rapide sur Android TV / Fire TV :</p>
                   <p className="text-[11px] text-slate-300">
-                    Ouvrez l&apos;application <strong className="text-white">Downloader</strong> sur votre téléviseur et tapez simplement :
+                    Ouvrez l&apos;application <strong className="text-white">Downloader</strong> sur votre téléviseur et tapez le code court :
                   </p>
-                  <p className="font-mono text-center py-1 text-sm bg-black/50 rounded-lg text-amber-300 font-bold tracking-wide">
-                    tinyurl.com/keotv-apk
+                  <div className="flex items-center justify-center space-x-2 py-1">
+                    <span className="font-mono text-base sm:text-lg bg-black/60 px-4 py-1 rounded-xl text-amber-300 font-black tracking-widest border border-amber-500/30 shadow-inner">
+                      4317787
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 text-center">
+                    Ou l&apos;adresse URL directe : <span className="text-slate-200 font-mono">tinyurl.com/keo-apk</span>
                   </p>
                 </div>
 

@@ -2,6 +2,15 @@
 
 **KeoTV** est un lecteur IPTV moderne, ultra-léger et ultra-fluide inspiré de l'ergonomie de référence de **TiviMate**, conçu pour fonctionner nativement sur **Android TV** (via télécommande D-Pad) et sur **Smartphones/Tablettes Android** (via écran tactile).
 
+## 📥 Installation sur Android TV & Fire TV
+
+Pour installer rapidement KeoTV sur votre télévision sans câble :
+1. Installez l'application gratuite **Downloader** depuis le Google Play Store ou l'Amazon Appstore.
+2. Ouvrez **Downloader** et entrez le **code court à 7 chiffres** :
+   > ### **`4317787`**
+   *(Ou l'adresse directe : `tinyurl.com/keo-apk`)*
+3. Le téléchargement et l'installation de la dernière version débutent automatiquement !
+
 ---
 
 ## ✨ Points forts & Fonctionnalités
