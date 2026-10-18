@@ -115,10 +115,22 @@ jobs:
 
           # Générer le Splash Screen officiel KeoTV en haute résolution
           rsvg-convert -w 512 -h 512 public/icon.svg -o android/app/src/main/res/drawable/splash.png
-          for dir in android/app/src/main/res/drawable-land-* android/app/src/main/res/drawable-port-*; do
-            if [ -d "$dir" ]; then
-              cp android/app/src/main/res/drawable/splash.png "$dir/splash.png"
-            fi
+
+          # Remplacer TOUS les splash.png dans tous les sous-dossiers res (drawable, drawable-land, drawable-port, etc.)
+          find android/app/src/main/res -name "*splash*.png" -exec cp android/app/src/main/res/drawable/splash.png {} \;
+
+          # Supprimer les éventuels fichiers XML splash (layer-list Capacitor qui prévalent sur les PNG)
+          find android/app/src/main/res -name "*splash*.xml" -delete || true
+
+          # Garantir la présence de splash.png dans drawable-land (TV) et drawable-port
+          mkdir -p android/app/src/main/res/drawable-land android/app/src/main/res/drawable-port
+          cp android/app/src/main/res/drawable/splash.png android/app/src/main/res/drawable-land/splash.png
+          cp android/app/src/main/res/drawable/splash.png android/app/src/main/res/drawable-port/splash.png
+
+          # Définir le fond de splash Android (values et values-v31) en noir OLED (#080c14)
+          for f in $(find android/app/src/main/res/values* -name "styles.xml" -o -name "colors.xml"); do
+            sed -i 's/<color name="splashBackground">.*<\/color>/<color name="splashBackground">#080c14<\/color>/g' "$f" || true
+            sed -i 's/<item name="android:windowSplashScreenBackground">.*<\/item>/<item name="android:windowSplashScreenBackground">#080c14<\/item>/g' "$f" || true
           done
 
           # Supprimer le dossier anydpi-v26 pour éviter que l'icône adaptative par défaut de Capacitor masque notre icône

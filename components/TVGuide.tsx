@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useMemo } from 'react';
 import { Channel, Category, EpgProgram, NavigationPane } from '@/types/iptv';
-import { Star, Tv, Trophy, Film, Globe, Compass, Sparkles, Clock, Radio, Info, ArrowUpDown, Search } from 'lucide-react';
+import { Star, Tv, Trophy, Film, Globe, Compass, Clock, Radio, Info, Search } from 'lucide-react';
 import { LiveVideoPlayer } from './LiveVideoPlayer';
 
 interface TVGuideProps {
@@ -30,6 +30,201 @@ interface TVGuideProps {
   onOpenSearch?: () => void;
 }
 
+// Helper for category icons
+function renderCategoryIcon(iconName?: string) {
+  switch (iconName) {
+    case 'Star':
+      return <Star className="w-4 h-4 text-amber-400 flex-shrink-0" />;
+    case 'Trophy':
+      return <Trophy className="w-4 h-4 text-rose-400 flex-shrink-0" />;
+    case 'Film':
+      return <Film className="w-4 h-4 text-purple-400 flex-shrink-0" />;
+    case 'Globe':
+      return <Globe className="w-4 h-4 text-emerald-400 flex-shrink-0" />;
+    case 'Compass':
+      return <Compass className="w-4 h-4 text-indigo-400 flex-shrink-0" />;
+    default:
+      return <Tv className="w-4 h-4 text-sky-400 flex-shrink-0" />;
+  }
+}
+
+// ----------------------------------------------------------------------
+// MEMOIZED CATEGORY ROW: ZERO RE-RENDERS FOR UNTOUCHED CATEGORIES
+// ----------------------------------------------------------------------
+interface CategoryRowProps {
+  category: Category;
+  index: number;
+  isFocused: boolean;
+  isSelected: boolean;
+  onSelect: (cat: Category, index: number) => void;
+}
+
+const CategoryRow = React.memo<CategoryRowProps>(
+  ({ category, index, isFocused, isSelected, onSelect }) => {
+    return (
+      <button
+        type="button"
+        id={`category-item-${index}`}
+        onClick={() => onSelect(category, index)}
+        className={`flex items-center justify-between px-3 py-2.5 mx-2 my-0.5 rounded-xl text-left text-sm border cursor-pointer select-none ${
+          isFocused
+            ? 'bg-tv-focus border-tv-accent text-white font-black ring-2 ring-tv-accent ring-offset-1 ring-offset-tv-bg z-10'
+            : isSelected
+            ? 'bg-tv-card/90 text-tv-accent font-bold border-l-4 border-tv-accent pl-2.5 shadow-sm'
+            : 'text-slate-300 hover:bg-tv-cardHover/70 border-transparent hover:text-white'
+        }`}
+      >
+        <div className="flex items-center space-x-2.5 min-w-0">
+          {renderCategoryIcon(category.icon)}
+          <span className="truncate">{category.name}</span>
+        </div>
+        <span
+          className={`text-[11px] px-1.5 py-0.5 rounded-full font-mono flex-shrink-0 ${
+            isFocused
+              ? 'bg-black/30 text-white font-bold'
+              : isSelected
+              ? 'bg-tv-accent/20 text-tv-accent font-bold'
+              : 'bg-slate-800/80 text-slate-400'
+          }`}
+        >
+          {category.count}
+        </span>
+      </button>
+    );
+  },
+  (prev, next) => {
+    return (
+      prev.isFocused === next.isFocused &&
+      prev.isSelected === next.isSelected &&
+      prev.category.id === next.category.id &&
+      prev.category.count === next.category.count &&
+      prev.category.name === next.category.name
+    );
+  }
+);
+CategoryRow.displayName = 'CategoryRow';
+
+// ----------------------------------------------------------------------
+// MEMOIZED CHANNEL ROW: 60 FPS INSTANT HIGHLIGHT ON REMOTE DPAD
+// ----------------------------------------------------------------------
+interface ChannelRowProps {
+  channel: Channel;
+  index: number;
+  isFocused: boolean;
+  isActive: boolean;
+  onSelect: (channel: Channel, index: number) => void;
+  onToggleFavorite: (channel: Channel) => void;
+}
+
+const ChannelRow = React.memo<ChannelRowProps>(
+  ({ channel, index, isFocused, isActive, onSelect, onToggleFavorite }) => {
+    return (
+      <div
+        id={`channel-item-${index}`}
+        onClick={() => onSelect(channel, index)}
+        className={`flex items-center justify-between px-3.5 py-2 mx-2 my-0.5 rounded-xl cursor-pointer border select-none ${
+          isFocused
+            ? 'bg-tv-focus border-tv-accent text-white font-bold ring-2 ring-tv-accent ring-offset-1 ring-offset-tv-bg z-10'
+            : isActive
+            ? 'bg-tv-card border-tv-accent/50 text-slate-100'
+            : 'bg-tv-card/40 border-transparent hover:bg-tv-cardHover/50 text-slate-300'
+        }`}
+      >
+        {/* Number, Logo & Name */}
+        <div className="flex items-center space-x-3 min-w-0 flex-1">
+          <span
+            className={`text-xs font-mono font-bold w-6 text-right flex-shrink-0 ${
+              isFocused ? 'text-white font-black' : 'text-slate-500'
+            }`}
+          >
+            {channel.num}
+          </span>
+          <div
+            className={`${
+              channel.stream_type === 'vod' || channel.stream_type === 'series' ? 'w-9 h-13' : 'w-9 h-9'
+            } rounded-lg bg-black/40 border border-white/5 flex items-center justify-center flex-shrink-0 overflow-hidden`}
+          >
+            {channel.logo ? (
+              <img
+                src={channel.logo}
+                alt={channel.name}
+                loading="lazy"
+                className={`w-full h-full ${
+                  channel.stream_type === 'vod' || channel.stream_type === 'series'
+                    ? 'object-cover'
+                    : 'object-contain p-1'
+                }`}
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
+              />
+            ) : (
+              <span className="text-[11px] font-bold text-slate-400">
+                {channel.name.slice(0, 3)}
+              </span>
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center space-x-2">
+              <h4 className="text-sm font-semibold truncate text-white">
+                {channel.name}
+              </h4>
+              {channel.resolution && (
+                <span className="text-[9px] bg-sky-500/10 text-tv-accent border border-sky-500/20 px-1 rounded font-bold font-mono flex-shrink-0">
+                  {channel.resolution}
+                </span>
+              )}
+            </div>
+            <p className="text-[11px] text-slate-400 truncate mt-0.5">
+              {channel.id === 'ch_tf1'
+                ? 'Le Journal de 20h & Météo'
+                : channel.id === 'ch_cplus'
+                ? 'Oppenheimer (2023) - Exclusivité 4K'
+                : channel.id === 'ch_beinsport1'
+                ? 'UEFA Champions League : Match en Direct'
+                : 'Programme en direct HD'}
+            </p>
+          </div>
+        </div>
+
+        {/* Favorite Star */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorite(channel);
+          }}
+          className={`p-1.5 rounded-lg flex-shrink-0 ${
+            channel.is_favorite
+              ? 'text-amber-400 hover:text-amber-300'
+              : isFocused
+              ? 'text-white/60 hover:text-white'
+              : 'text-slate-600 hover:text-slate-400'
+          }`}
+          title={channel.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+        >
+          <Star className={`w-4 h-4 ${channel.is_favorite ? 'fill-amber-400' : ''}`} />
+        </button>
+      </div>
+    );
+  },
+  (prev, next) => {
+    return (
+      prev.isFocused === next.isFocused &&
+      prev.isActive === next.isActive &&
+      prev.channel.id === next.channel.id &&
+      prev.channel.num === next.channel.num &&
+      prev.channel.name === next.channel.name &&
+      prev.channel.is_favorite === next.channel.is_favorite &&
+      prev.channel.logo === next.channel.logo
+    );
+  }
+);
+ChannelRow.displayName = 'ChannelRow';
+
+// ----------------------------------------------------------------------
+// MAIN TVGUIDE COMPONENT WITH VIRTUALIZED WINDOWING & INSTANT SCROLL
+// ----------------------------------------------------------------------
 export const TVGuide: React.FC<TVGuideProps> = ({
   categories,
   channels,
@@ -55,55 +250,56 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
 
-  // Auto-scroll focused channel into view
+  // INSTANT AUTO-SCROLL (behavior: 'auto' prevents the 500ms smooth animation stutter on Android TV)
   useEffect(() => {
     if (activePane === 'channels') {
       const el = document.getElementById(`channel-item-${focusedChannelIndex}`);
       if (el) {
         el.scrollIntoView({
-          behavior: 'smooth',
+          behavior: 'auto',
           block: 'nearest',
         });
       }
     }
   }, [focusedChannelIndex, activePane]);
 
-  // Auto-scroll focused category into view
   useEffect(() => {
     if (activePane === 'categories') {
       const el = document.getElementById(`category-item-${focusedCategoryIndex}`);
       if (el) {
         el.scrollIntoView({
-          behavior: 'smooth',
+          behavior: 'auto',
           block: 'nearest',
         });
       }
     }
   }, [focusedCategoryIndex, activePane]);
 
-  const getCategoryIcon = (iconName?: string) => {
-    switch (iconName) {
-      case 'Star':
-        return <Star className="w-4 h-4 text-amber-400" />;
-      case 'Trophy':
-        return <Trophy className="w-4 h-4 text-rose-400" />;
-      case 'Film':
-        return <Film className="w-4 h-4 text-purple-400" />;
-      case 'Globe':
-        return <Globe className="w-4 h-4 text-emerald-400" />;
-      case 'Compass':
-        return <Compass className="w-4 h-4 text-indigo-400" />;
-      default:
-        return <Tv className="w-4 h-4 text-sky-400" />;
-    }
-  };
+  // VIRTUALIZED WINDOWING FOR LARGE CHANNEL LISTS
+  // Limits active DOM elements to at most 60 rows around the focused item for maximum performance
+  const ROW_HEIGHT = 54;
+  const WINDOW_PAD_TOP = 25;
+  const WINDOW_PAD_BOTTOM = 35;
+
+  const totalChannels = channels.length;
+  const shouldWindow = totalChannels > 70;
+
+  const startIndex = shouldWindow ? Math.max(0, focusedChannelIndex - WINDOW_PAD_TOP) : 0;
+  const endIndex = shouldWindow ? Math.min(totalChannels, focusedChannelIndex + WINDOW_PAD_BOTTOM) : totalChannels;
+
+  const visibleChannels = useMemo(() => {
+    return shouldWindow ? channels.slice(startIndex, endIndex) : channels;
+  }, [channels, shouldWindow, startIndex, endIndex]);
+
+  const topSpacerHeight = shouldWindow ? startIndex * ROW_HEIGHT : 0;
+  const bottomSpacerHeight = shouldWindow ? (totalChannels - endIndex) * ROW_HEIGHT : 0;
 
   return (
     <div className="flex-1 flex overflow-hidden bg-tv-bg text-slate-100 select-none">
       {/* 1. CATEGORIES COLUMN */}
       <div
         ref={categoryListRef}
-        className={`w-56 xl:w-64 border-r border-tv-border flex flex-col py-2.5 overflow-y-auto overflow-x-hidden flex-shrink-0 transition-colors ${
+        className={`w-56 xl:w-64 border-r border-tv-border flex flex-col py-2.5 overflow-y-auto overflow-x-hidden flex-shrink-0 ${
           activePane === 'categories' ? 'bg-tv-surface/90' : 'bg-tv-surface/40'
         }`}
       >
@@ -117,8 +313,9 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             </span>
             {onOpenSearch && (
               <button
+                type="button"
                 onClick={onOpenSearch}
-                className="p-1 px-2 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-300 hover:text-white flex items-center space-x-1 text-[10px] font-bold transition focus:outline-none"
+                className="p-1 px-2 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-300 hover:text-white flex items-center space-x-1 text-[10px] font-bold focus:outline-none"
                 title="Rechercher"
               >
                 <Search className="w-3 h-3 text-tv-accent" />
@@ -129,8 +326,9 @@ export const TVGuide: React.FC<TVGuideProps> = ({
           {onCategorySortChange && (
             <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-md border border-white/5 text-[10px]">
               <button
+                type="button"
                 onClick={() => onCategorySortChange('playlist')}
-                className={`flex-1 py-0.5 rounded font-semibold transition text-center ${
+                className={`flex-1 py-0.5 rounded font-semibold text-center ${
                   categorySort === 'playlist' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
                 }`}
                 title="Ordre Playlist par défaut"
@@ -138,8 +336,9 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 Playlist
               </button>
               <button
+                type="button"
                 onClick={() => onCategorySortChange('alpha')}
-                className={`flex-1 py-0.5 rounded font-semibold transition text-center ${
+                className={`flex-1 py-0.5 rounded font-semibold text-center ${
                   categorySort === 'alpha' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
                 }`}
                 title="Ordre alphabétique"
@@ -147,8 +346,9 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 A-Z
               </button>
               <button
+                type="button"
                 onClick={() => onCategorySortChange('count')}
-                className={`flex-1 py-0.5 rounded font-semibold transition text-center ${
+                className={`flex-1 py-0.5 rounded font-semibold text-center ${
                   categorySort === 'count' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
                 }`}
                 title="Trier par nombre de chaînes"
@@ -159,47 +359,22 @@ export const TVGuide: React.FC<TVGuideProps> = ({
           )}
         </div>
 
-        {categories.map((cat, idx) => {
-          const isFocused = activePane === 'categories' && focusedCategoryIndex === idx;
-          const isSelected = selectedCategory?.id === cat.id;
-
-          return (
-            <button
-              key={cat.id}
-              id={`category-item-${idx}`}
-              onClick={() => onSelectCategory(cat, idx, true)}
-              className={`flex items-center justify-between px-3 py-2.5 mx-2 my-0.5 rounded-lg text-left text-sm transition-all duration-150 relative ${
-                isFocused
-                  ? 'bg-tv-focus text-white font-black shadow-tv-focus scale-[1.02] ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg z-10'
-                  : isSelected
-                  ? 'bg-tv-card/90 text-tv-accent font-bold border-l-4 border-tv-accent pl-2.5 shadow-sm'
-                  : 'text-slate-300 hover:bg-tv-cardHover/70 border-l-4 border-transparent'
-              }`}
-            >
-              <div className="flex items-center space-x-2.5 min-w-0">
-                {getCategoryIcon(cat.icon)}
-                <span className="truncate">{cat.name}</span>
-              </div>
-              <span
-                className={`text-[11px] px-1.5 py-0.5 rounded-full font-mono ${
-                  isFocused
-                    ? 'bg-black/30 text-white font-bold'
-                    : isSelected
-                    ? 'bg-tv-accent/20 text-tv-accent font-bold'
-                    : 'bg-slate-800/80 text-slate-400'
-                }`}
-              >
-                {cat.count}
-              </span>
-            </button>
-          );
-        })}
+        {categories.map((cat, idx) => (
+          <CategoryRow
+            key={cat.id}
+            category={cat}
+            index={idx}
+            isFocused={activePane === 'categories' && focusedCategoryIndex === idx}
+            isSelected={selectedCategory?.id === cat.id}
+            onSelect={(c, i) => onSelectCategory(c, i, true)}
+          />
+        ))}
       </div>
 
       {/* 2. CHANNELS LIST COLUMN */}
       <div
         ref={channelListRef}
-        className={`flex-1 min-w-[280px] border-r border-tv-border flex flex-col py-2.5 overflow-y-auto overflow-x-hidden transition-colors ${
+        className={`flex-1 min-w-[280px] border-r border-tv-border flex flex-col py-2.5 overflow-y-auto overflow-x-hidden ${
           activePane === 'channels' ? 'bg-tv-bg' : 'bg-tv-bg/80'
         }`}
       >
@@ -215,8 +390,9 @@ export const TVGuide: React.FC<TVGuideProps> = ({
           {onChannelSortChange && (
             <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-md border border-white/5 text-[10px] flex-shrink-0">
               <button
+                type="button"
                 onClick={() => onChannelSortChange('playlist')}
-                className={`px-2 py-0.5 rounded font-semibold transition ${
+                className={`px-2 py-0.5 rounded font-semibold ${
                   channelSort === 'playlist' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
                 }`}
                 title="Ordre de la playlist par défaut"
@@ -224,8 +400,9 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 Playlist
               </button>
               <button
+                type="button"
                 onClick={() => onChannelSortChange('alpha')}
-                className={`px-2 py-0.5 rounded font-semibold transition ${
+                className={`px-2 py-0.5 rounded font-semibold ${
                   channelSort === 'alpha' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
                 }`}
                 title="Alphabétique A à Z"
@@ -233,8 +410,9 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 A-Z
               </button>
               <button
+                type="button"
                 onClick={() => onChannelSortChange('num')}
-                className={`px-2 py-0.5 rounded font-semibold transition ${
+                className={`px-2 py-0.5 rounded font-semibold ${
                   channelSort === 'num' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
                 }`}
                 title="Numéro de chaîne"
@@ -251,89 +429,31 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             <p className="text-sm">Aucune chaîne dans ce groupe.</p>
           </div>
         ) : (
-          channels.map((ch, idx) => {
-            const isFocused = activePane === 'channels' && focusedChannelIndex === idx;
-            const isActive = activeChannel?.id === ch.id;
+          <div className="flex flex-col">
+            {topSpacerHeight > 0 && (
+              <div style={{ height: topSpacerHeight }} className="flex-shrink-0" />
+            )}
+            {visibleChannels.map((ch, relIdx) => {
+              const realIdx = startIndex + relIdx;
+              const isFocused = activePane === 'channels' && focusedChannelIndex === realIdx;
+              const isActive = activeChannel?.id === ch.id;
 
-            return (
-              <div
-                key={ch.id}
-                id={`channel-item-${idx}`}
-                onClick={() => onSelectChannel(ch, idx)}
-                className={`group flex items-center justify-between px-3.5 py-2.5 mx-2.5 my-0.5 rounded-xl cursor-pointer transition-all duration-150 border ${
-                  isFocused
-                    ? 'bg-tv-focus border-tv-accent text-white shadow-xl shadow-sky-500/25 scale-[1.02] ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg'
-                    : isActive
-                    ? 'bg-tv-card border-tv-accent/50 text-slate-100'
-                    : 'bg-tv-card/40 border-transparent hover:bg-tv-cardHover/50 text-slate-300'
-                }`}
-              >
-                {/* Number & Logo & Info */}
-                <div className="flex items-center space-x-3 min-w-0 flex-1">
-                  <span
-                    className={`text-xs font-mono font-bold w-6 text-right flex-shrink-0 ${
-                      isFocused ? 'text-white font-black' : 'text-slate-500'
-                    }`}
-                  >
-                    {ch.num}
-                  </span>
-                  <div className={`${ch.stream_type === 'vod' || ch.stream_type === 'series' ? 'w-10 h-14' : 'w-10 h-10'} rounded-lg bg-black/40 border border-white/5 flex items-center justify-center flex-shrink-0 overflow-hidden`}>
-                    {ch.logo ? (
-                      <img
-                        src={ch.logo}
-                        alt={ch.name}
-                        className={`w-full h-full ${ch.stream_type === 'vod' || ch.stream_type === 'series' ? 'object-cover' : 'object-contain p-1'}`}
-                        onError={(e) => {
-                          (e.target as HTMLElement).style.display = 'none';
-                        }}
-                      />
-                    ) : (
-                      <span className="text-xs font-bold text-slate-400">
-                        {ch.name.slice(0, 3)}
-                      </span>
-                    )}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center space-x-2">
-                      <h4 className="text-sm font-semibold truncate text-white">
-                        {ch.name}
-                      </h4>
-                      {ch.resolution && (
-                        <span className="text-[9px] bg-sky-500/10 text-tv-accent border border-sky-500/20 px-1 rounded font-bold font-mono">
-                          {ch.resolution}
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-slate-400 truncate mt-0.5">
-                      {ch.id === 'ch_tf1'
-                        ? 'Le Journal de 20h & Météo'
-                        : ch.id === 'ch_cplus'
-                        ? 'Oppenheimer (2023) - Exclusivité 4K'
-                        : ch.id === 'ch_beinsport1'
-                        ? 'UEFA Champions League : Match en Direct'
-                        : 'Programme en direct HD'}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Favorite Star */}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleFavorite(ch);
-                  }}
-                  className={`p-1.5 rounded-lg transition-colors flex-shrink-0 ${
-                    ch.is_favorite
-                      ? 'text-amber-400 hover:text-amber-300'
-                      : 'text-slate-600 hover:text-slate-400 opacity-0 group-hover:opacity-100'
-                  }`}
-                  title={ch.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-                >
-                  <Star className={`w-4 h-4 ${ch.is_favorite ? 'fill-amber-400' : ''}`} />
-                </button>
-              </div>
-            );
-          })
+              return (
+                <ChannelRow
+                  key={ch.id}
+                  channel={ch}
+                  index={realIdx}
+                  isFocused={isFocused}
+                  isActive={isActive}
+                  onSelect={onSelectChannel}
+                  onToggleFavorite={onToggleFavorite}
+                />
+              );
+            })}
+            {bottomSpacerHeight > 0 && (
+              <div style={{ height: bottomSpacerHeight }} className="flex-shrink-0" />
+            )}
+          </div>
         )}
       </div>
 
@@ -407,6 +527,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             )}
 
             <button
+              type="button"
               onClick={onToggleFullscreen}
               className="w-full py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition shadow-lg mt-auto"
             >

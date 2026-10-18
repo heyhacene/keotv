@@ -120,7 +120,7 @@ export default function KeoTVHome() {
   const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
 
   useEffect(() => {
-    checkForAppUpdate(24).then((info) => {
+    checkForAppUpdate(25).then((info) => {
       if (info && info.hasUpdate) {
         setAppUpdateInfo(info);
       }
@@ -819,14 +819,18 @@ export default function KeoTVHome() {
   // Filtered channels for currently active category
   const filteredChannels = channels;
 
-  // Update EPG info whenever focused channel changes
+  // Update EPG info whenever focused channel changes (debounced by 80ms for ultra-fluid DPAD navigation)
   useEffect(() => {
     const focusedChannel = filteredChannels[focusedChannelIndex];
-    if (focusedChannel) {
+    if (!focusedChannel) return;
+
+    const timer = setTimeout(() => {
       const epg = getMockEpgForChannel(focusedChannel.id);
       setCurrentEpg(epg.current);
       setNextEpg(epg.next);
-    }
+    }, 80);
+
+    return () => clearTimeout(timer);
   }, [focusedChannelIndex, filteredChannels]);
 
   // Play an episode chosen from the series detail page
@@ -1955,7 +1959,7 @@ export default function KeoTVHome() {
         onResyncPlaylist={handleResyncPlaylist}
         onEditPlaylist={handleOpenEditPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={24}
+        currentBuildNumber={25}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
