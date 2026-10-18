@@ -79,7 +79,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onResyncPlaylist,
   onEditPlaylist,
   isResyncing = false,
-  currentBuildNumber = 25,
+  currentBuildNumber = CURRENT_BUILD_NUMBER,
   categorySort = 'playlist',
   onCategorySortChange,
   channelSort = 'playlist',
@@ -409,35 +409,41 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-2xl bg-tv-surface border border-tv-border rounded-2xl shadow-2xl overflow-hidden text-slate-100 flex flex-col max-h-[85vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-tv-border bg-tv-card/60 flex-shrink-0">
-          <div className="flex items-center space-x-2.5">
-            <div className="p-2 rounded-xl bg-tv-focus/20 border border-tv-focus/30">
-              <SettingsIcon className="w-5 h-5 text-tv-accent" />
+    <div className="fixed inset-0 z-50 bg-[#080c14] text-slate-100 flex flex-col w-full h-full animate-in fade-in duration-150 select-none">
+      <div className="w-full h-full bg-[#080c14] text-slate-100 flex flex-col">
+        {/* Full-Screen TV Header */}
+        <div className="flex items-center justify-between px-8 md:px-12 py-5 border-b border-tv-border/80 bg-tv-card/80 flex-shrink-0">
+          <div className="flex items-center space-x-4">
+            <div className="p-3 rounded-2xl bg-tv-focus/20 border border-tv-focus/40 shadow-xl">
+              <SettingsIcon className="w-7 h-7 text-tv-accent" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-white">Paramètres KeoTV</h2>
-              <p className="text-xs text-slate-400">Playlists, synchronisation, mises à jour & retours</p>
+              <div className="flex items-center space-x-3">
+                <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-wide">Paramètres KeoTV</h2>
+                <span className="px-3 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-sky-500/15 text-tv-accent border border-sky-500/30">
+                  v1.0.0 (Build {currentBuildNumber})
+                </span>
+              </div>
+              <p className="text-xs text-slate-400 mt-1">Playlists, synchronisation cloud, interface TV, contrôles parentaux & mises à jour</p>
             </div>
           </div>
           <button
             id={`settings-tab-${TABS.length}`}
             onClick={onClose}
-            className={`p-1.5 rounded-xl transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
+            className={`px-5 py-2.5 rounded-xl transition flex items-center space-x-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
               focusArea === 'tabs' && selectedTabNavIndex === TABS.length
-                ? 'bg-rose-500/20 text-white ring-2 ring-tv-accent'
-                : 'text-slate-400 hover:text-white hover:bg-white/10'
+                ? 'bg-rose-500 text-white ring-2 ring-tv-accent scale-105 shadow-xl'
+                : 'bg-white/10 text-slate-300 hover:text-white hover:bg-white/15'
             }`}
-            title="Fermer les paramètres (Retour)"
+            title="Fermer les paramètres (Touche Retour)"
           >
-            <X className="w-5 h-5" />
+            <X className="w-4 h-4" />
+            <span>Fermer (Retour)</span>
           </button>
         </div>
 
-        {/* Navigation Tabs */}
-        <div className="flex border-b border-tv-border bg-black/20 overflow-x-auto scrollbar-none flex-shrink-0">
+        {/* Full-Width Navigation Tabs */}
+        <div className="flex border-b border-tv-border/80 bg-black/40 px-8 md:px-12 overflow-x-auto scrollbar-none flex-shrink-0">
           {TABS.map((tab, idx) => {
             const Icon = tab.icon;
             const isTabActive = activeTab === tab.id;
@@ -452,12 +458,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   setSelectedTabNavIndex(idx);
                   setFocusArea('tabs');
                 }}
-                className={`flex items-center space-x-2 px-4 py-3 text-xs font-semibold whitespace-nowrap border-b-2 transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
+                className={`flex items-center space-x-3 px-6 py-4 text-xs font-bold tracking-wider uppercase border-b-2 transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
                   isTabFocused
-                    ? 'bg-tv-focus text-white border-tv-accent ring-2 ring-tv-accent scale-[1.02]'
+                    ? 'bg-tv-focus text-white border-tv-accent ring-2 ring-tv-accent scale-[1.02] shadow-lg'
                     : isTabActive
-                    ? 'border-tv-accent text-tv-accent bg-tv-accent/5'
-                    : 'border-transparent text-slate-400 hover:text-slate-200'
+                    ? 'border-tv-accent text-tv-accent bg-tv-accent/10'
+                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
                 }`}
               >
                 <Icon className="w-4 h-4" />
@@ -467,8 +473,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           })}
         </div>
 
-        {/* Tab Content */}
-        <div ref={modalBodyRef} className="p-6 overflow-y-auto space-y-6 flex-1">
+        {/* Tab Content (Spacious, full screen height with elegant max-w) */}
+        <div ref={modalBodyRef} className="flex-1 overflow-y-auto px-8 md:px-12 py-8 max-w-5xl mx-auto w-full space-y-6">
           {/* ============================================================== */}
           {/* TAB 1: PLAYLISTS & ABONNEMENTS                                 */}
           {/* ============================================================== */}

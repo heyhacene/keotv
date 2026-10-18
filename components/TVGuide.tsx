@@ -404,16 +404,14 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             serverCreds.password,
             rawId
           );
-          if (res?.info) {
+          if (res && (res.name || res.plot || (res.seasons && res.seasons.length > 0))) {
             loaded = {
-              title: res.info.name || focusedChannel.name,
-              plot: res.info.plot,
-              cover: res.info.cover || focusedChannel.logo,
-              genre: res.info.genre,
-              releaseDate: res.info.releaseDate,
-              rating: res.info.rating,
-              cast: res.info.cast,
-              director: res.info.director,
+              title: res.name || focusedChannel.name,
+              plot: res.plot || '',
+              cover: res.cover || focusedChannel.logo,
+              genre: res.genre,
+              releaseDate: res.year,
+              rating: res.rating,
               seasonsCount: res.seasons?.length || 0,
               type: 'series',
             };
@@ -427,17 +425,17 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             rawId,
             focusedChannel
           );
-          if (res?.info) {
+          if (res && (res.name || res.plot || res.director)) {
             loaded = {
-              title: res.info.name || focusedChannel.name,
-              plot: res.info.plot,
-              cover: res.info.cover || focusedChannel.logo,
-              genre: res.info.genre,
-              releaseDate: res.info.releaseDate,
-              rating: res.info.rating,
-              duration: res.info.duration,
-              cast: res.info.cast,
-              director: res.info.director,
+              title: res.name || focusedChannel.name,
+              plot: res.plot || '',
+              cover: res.cover || focusedChannel.logo,
+              genre: res.genre,
+              releaseDate: res.year,
+              rating: res.rating,
+              duration: res.duration,
+              cast: Array.isArray(res.actors) ? res.actors.join(', ') : '',
+              director: res.director,
               type: 'vod',
             };
           }

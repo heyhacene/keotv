@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { CURRENT_BUILD_NUMBER } from '@/lib/update-service';
 
 interface SplashScreenProps {
   isVisible: boolean;
@@ -9,6 +10,11 @@ interface SplashScreenProps {
 
 export const SplashScreen: React.FC<SplashScreenProps> = ({ isVisible, isFading }) => {
   if (!isVisible) return null;
+
+  const buildNumber =
+    typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_BUILD_NUMBER
+      ? process.env.NEXT_PUBLIC_BUILD_NUMBER
+      : CURRENT_BUILD_NUMBER;
 
   return (
     <div
@@ -120,6 +126,13 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ isVisible, isFading 
         <div className="w-36 h-1 bg-slate-800/80 rounded-full overflow-hidden relative">
           <div className="absolute top-0 bottom-0 left-0 right-0 bg-gradient-to-r from-transparent via-tv-accent to-transparent animate-pulse" />
         </div>
+      </div>
+
+      {/* Build Number Watermark at the bottom */}
+      <div className="absolute bottom-6 left-0 right-0 text-center pointer-events-none">
+        <span className="text-[11px] font-mono font-medium text-slate-500/80 tracking-widest uppercase">
+          KeoTV v1.0.0 • Build {buildNumber}
+        </span>
       </div>
     </div>
   );

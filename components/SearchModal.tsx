@@ -37,6 +37,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   const [activeFilter, setActiveFilter] = useState<SearchFilterType>('all');
   const [results, setResults] = useState<Channel[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [isRemoteSearching, setIsRemoteSearching] = useState(false);
   const [contextMenuItem, setContextMenuItem] = useState<Channel | null>(null);
 
   // Cached index for sub-10ms instantaneous search without disk I/O on every keystroke
@@ -77,102 +78,107 @@ export const SearchModal: React.FC<SearchModalProps> = ({
       setQuery('');
       setResults([]);
       setContextMenuItem(null);
-      cachedIndexRef.current = null; // Immediately reclaim RAM for low-memory Android TV devices
+      cachedIndexRef.current = null; // Reclaim RAM for low-memory TV boxes
     }
   }, [isOpen]);
 
-  // Fast instant local search + Xtream Catalog search
+  // Fast instant local search (0ms) + non-blocking background remote search
   useEffect(() => {
     if (!isOpen) return;
     const trimmed = query.trim().toLowerCase();
     if (!trimmed || trimmed.length < 2) {
       setResults([]);
       setIsSearching(false);
+      setIsRemoteSearching(false);
       return;
     }
 
-    setIsSearching(true);
-    let cancelled = false;
+    const normalized = trimmed.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-    const timer = setTimeout(async () => {
-      try {
-        const normalized = trimmed.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-        let pool = cachedIndexRef.current;
-        if (!pool) {
-          const allChannels = await db.channels.toArray();
-          pool = allChannels.map((c) => ({
-            channel: c,
-            nameNorm: (c.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
-          }));
-          cachedIndexRef.current = pool;
+    // 1. INSTANT LOCAL SEARCH (0ms delay)
+    let pool = cachedIndexRef.current;
+    if (pool) {
+      const matched: Channel[] = [];
+      for (let i = 0; i < pool.length; i++) {
+        if (pool[i].nameNorm.includes(normalized)) {
+          matched.push(pool[i].channel);
+          if (matched.length >= 80) break;
         }
-
-        if (cancelled) return;
-
+      }
+      setResults(matched);
+      setFocusedResultIndex(0);
+      setIsSearching(false);
+    } else {
+      setIsSearching(true);
+      db.channels.toArray().then((all) => {
+        pool = all.map((c) => ({
+          channel: c,
+          nameNorm: (c.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+        }));
+        cachedIndexRef.current = pool;
         const matched: Channel[] = [];
-        const seenIds = new Set<string>();
-
-        // 1. Instant local search from IndexedDB
         for (let i = 0; i < pool.length; i++) {
           if (pool[i].nameNorm.includes(normalized)) {
             matched.push(pool[i].channel);
-            seenIds.add(pool[i].channel.id);
             if (matched.length >= 80) break;
           }
         }
-
-        setResults([...matched]);
+        setResults(matched);
         setFocusedResultIndex(0);
+        setIsSearching(false);
+      }).catch(() => setIsSearching(false));
+    }
 
-        // 2. Query Xtream server catalog for Films & Séries matching query
-        if (serverCreds?.serverUrl && serverCreds.username && serverCreds.password) {
-          try {
-            const remoteMatches = await searchXtreamCatalog({
-              serverUrl: serverCreds.serverUrl,
-              username: serverCreds.username,
-              password: serverCreds.password,
-              query: trimmed,
-            });
+    // 2. BACKGROUND REMOTE CATALOG QUERY (Non-blocking, max 3.5s timeout)
+    if (!serverCreds?.serverUrl || !serverCreds.username || !serverCreds.password) {
+      return;
+    }
 
-            if (!cancelled && remoteMatches.length > 0) {
-              const newItems: Channel[] = [];
-              for (const rm of remoteMatches) {
-                if (!seenIds.has(rm.id)) {
-                  seenIds.add(rm.id);
-                  matched.push(rm);
-                  newItems.push(rm);
-                }
-              }
+    let cancelled = false;
+    const remoteTimer = setTimeout(async () => {
+      setIsRemoteSearching(true);
+      try {
+        const remoteMatches = await searchXtreamCatalog({
+          serverUrl: serverCreds.serverUrl,
+          username: serverCreds.username,
+          password: serverCreds.password,
+          query: trimmed,
+        });
 
-              if (newItems.length > 0) {
-                setResults([...matched]);
-                // Save newly discovered items to local database for instant future lookups
-                db.channels.bulkPut(newItems).catch(() => {});
-                if (cachedIndexRef.current) {
-                  for (const ni of newItems) {
-                    cachedIndexRef.current.push({
-                      channel: ni,
-                      nameNorm: (ni.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
-                    });
-                  }
-                }
+        if (!cancelled && remoteMatches.length > 0) {
+          setResults((prev) => {
+            const seen = new Set(prev.map((p) => p.id));
+            const newItems: Channel[] = [];
+            for (const rm of remoteMatches) {
+              if (!seen.has(rm.id)) {
+                seen.add(rm.id);
+                newItems.push(rm);
               }
             }
-          } catch (serverErr) {
-            console.warn('Remote search error:', serverErr);
-          }
+            if (newItems.length === 0) return prev;
+            // Save newly discovered items to local database for instant future lookups
+            db.channels.bulkPut(newItems).catch(() => {});
+            if (cachedIndexRef.current) {
+              for (const ni of newItems) {
+                cachedIndexRef.current.push({
+                  channel: ni,
+                  nameNorm: (ni.name || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''),
+                });
+              }
+            }
+            return [...prev, ...newItems];
+          });
         }
       } catch (err) {
-        console.warn('Search query error:', err);
+        console.warn('Background remote search notice:', err);
       } finally {
-        if (!cancelled) setIsSearching(false);
+        if (!cancelled) setIsRemoteSearching(false);
       }
-    }, 150);
+    }, 280);
 
     return () => {
       cancelled = true;
-      clearTimeout(timer);
+      clearTimeout(remoteTimer);
     };
   }, [query, isOpen, serverCreds]);
 
@@ -395,6 +401,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               placeholder="Rechercher une chaîne, un film, une série..."
               className="w-full bg-black/60 border-2 border-tv-border focus:border-tv-accent text-white pl-12 pr-10 py-3.5 rounded-2xl text-base sm:text-lg font-medium placeholder-slate-500 focus:outline-none transition shadow-inner"
             />
+            {isRemoteSearching && (
+              <div className="absolute right-12 top-1/2 -translate-y-1/2 flex items-center space-x-1.5 text-xs text-tv-accent font-medium pointer-events-none">
+                <Loader2 className="w-4 h-4 animate-spin text-tv-accent" />
+              </div>
+            )}
             {query && (
               <button
                 type="button"
@@ -460,16 +471,8 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
         {/* Results Area */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-          {/* Loading Indicator */}
-          {isSearching && (
-            <div className="py-20 flex flex-col items-center justify-center space-y-3">
-              <Loader2 className="w-8 h-8 animate-spin text-tv-accent" />
-              <p className="text-xs text-slate-400">Recherche instantanée en cours...</p>
-            </div>
-          )}
-
           {/* Initial State: Prompt to Search */}
-          {!isSearching && query.length < 2 && (
+          {query.length < 2 && (
             <div className="py-24 flex flex-col items-center justify-center text-center space-y-3 max-w-sm mx-auto">
               <div className="w-16 h-16 rounded-2xl bg-tv-card border border-tv-border flex items-center justify-center text-tv-accent shadow-lg">
                 <Search className="w-8 h-8" />
@@ -482,16 +485,25 @@ export const SearchModal: React.FC<SearchModalProps> = ({
             </div>
           )}
 
-          {/* Empty state: No results found */}
-          {!isSearching && query.length >= 2 && filteredResults.length === 0 && (
-            <div className="py-20 flex flex-col items-center justify-center text-center space-y-2 max-w-sm mx-auto">
-              <p className="text-sm font-semibold text-slate-300">Aucun résultat trouvé pour « {query} »</p>
-              <p className="text-xs text-slate-400">Vérifiez l&apos;orthographe ou essayez un mot plus court.</p>
+          {/* Empty state or searching state when no results yet */}
+          {query.length >= 2 && filteredResults.length === 0 && (
+            <div className="py-20 flex flex-col items-center justify-center text-center space-y-3 max-w-sm mx-auto">
+              {isSearching || isRemoteSearching ? (
+                <>
+                  <Loader2 className="w-8 h-8 animate-spin text-tv-accent" />
+                  <p className="text-xs text-slate-400">Recherche dans vos bouquets & catalogue distant...</p>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm font-semibold text-slate-300">Aucun résultat trouvé pour « {query} »</p>
+                  <p className="text-xs text-slate-400">Vérifiez l&apos;orthographe ou essayez un mot plus court.</p>
+                </>
+              )}
             </div>
           )}
 
-          {/* Grid of Results */}
-          {!isSearching && filteredResults.length > 0 && (
+          {/* Grid of Results (Displayed immediately with 0ms delay!) */}
+          {filteredResults.length > 0 && (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3 sm:gap-4">
               {filteredResults.map((item, idx) => {
                 const isFocused = focusArea === 'results' && focusedResultIndex === idx;

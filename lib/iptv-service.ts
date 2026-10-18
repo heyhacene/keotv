@@ -258,8 +258,8 @@ export interface FetchCategoryStreamsParams {
   serverUrl: string;
   username: string;
   password: string;
-  categoryId: string;
-  categoryName: string;
+  categoryId?: string;
+  categoryName?: string;
   streamType: 'live' | 'vod' | 'series';
 }
 
@@ -457,7 +457,7 @@ export async function fetchSeriesInfo(
   return {
     name: info.name ? String(info.name) : '',
     cover: info.cover ? String(info.cover) : undefined,
-    plot: info.plot ? String(info.plot) : undefined,
+    plot: info.plot ? String(info.plot) : info.description ? String(info.description) : undefined,
     genre: info.genre ? String(info.genre) : undefined,
     year: info.releaseDate ? String(info.releaseDate) : info.release_date ? String(info.release_date) : undefined,
     rating: info.rating ? String(info.rating) : undefined,
@@ -929,7 +929,7 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
   const cleanPass = decodeURIComponent(params.password.trim());
   const username = encodeURIComponent(cleanUser);
   const password = encodeURIComponent(cleanPass);
-  const rawCatId = params.categoryId.trim();
+  const rawCatId = params.categoryId ? String(params.categoryId).trim() : '';
   const catName = params.categoryName || 'Bouquet';
   const type = params.streamType;
 
@@ -937,7 +937,10 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
   if (type === 'vod') action = 'get_vod_streams';
   if (type === 'series') action = 'get_series';
 
-  const url = `${server}/player_api.php?username=${username}&password=${password}&action=${action}&category_id=${rawCatId}`;
+  let url = `${server}/player_api.php?username=${username}&password=${password}&action=${action}`;
+  if (rawCatId) {
+    url += `&category_id=${encodeURIComponent(rawCatId)}`;
+  }
 
   const res = await fetchHttp(url, 'json');
   const items = toArray(res);
@@ -968,6 +971,7 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
       ? `Série ${i + 1}`
       : `Chaîne ${i + 1}`;
     const logo = item.stream_icon || item.cover || '';
+    const itemCatId = item.category_id ? String(item.category_id).trim() : rawCatId;
 
     // Prefix group_id with stream type to prevent any primary key collisions
     channels.push({
@@ -977,7 +981,7 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
       logo: logo ? String(logo).trim() : '',
       stream_url: streamUrl,
       stream_type: type,
-      group_id: `grp_${type}_${rawCatId}`,
+      group_id: `grp_${type}_${itemCatId || 'all'}`,
       group_name: catName,
       epg_id: item.epg_channel_id ? String(item.epg_channel_id).trim() : (type === 'series' ? String(streamId) : undefined),
       is_favorite: false,
@@ -989,6 +993,103 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
   }
 
   return channels;
+}
+
+// Fetch all TV series in catalog in one lightweight (~1-2MB) call
+export async function fetchAllSeriesCatalog(params: {
+  serverUrl: string;
+  username: string;
+  password: string;
+}): Promise<Channel[]> {
+  let server = params.serverUrl.trim().replace(/\/+$/, '');
+  if (!server.startsWith('http://') && !server.startsWith('https://')) {
+    server = 'http://' + server;
+  }
+  const cleanUser = decodeURIComponent(params.username.trim());
+  const cleanPass = decodeURIComponent(params.password.trim());
+  const username = encodeURIComponent(cleanUser);
+  const password = encodeURIComponent(cleanPass);
+
+  const url = `${server}/player_api.php?username=${username}&password=${password}&action=get_series`;
+  const res = await fetchHttp(url, 'json');
+  const items = toArray(res);
+  const channels: Channel[] = [];
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item) continue;
+    const seriesId = item.series_id || item.id || (i + 1);
+    const itemName = String(item.name || `Série ${i + 1}`).trim();
+    const logo = item.cover || item.stream_icon || '';
+    const catId = item.category_id ? String(item.category_id).trim() : 'all';
+
+    channels.push({
+      id: `ch_xtream_series_${seriesId}`,
+      num: typeof item.num === 'number' && item.num > 0 ? item.num : i + 1,
+      name: itemName,
+      logo: logo ? String(logo).trim() : '',
+      stream_url: `${server}/series/${username}/${password}/${seriesId}.mp4`,
+      stream_type: 'series',
+      group_id: `grp_series_${catId}`,
+      group_name: 'Séries',
+      epg_id: String(seriesId),
+      is_favorite: false,
+      is_hidden: false,
+      custom_order: i + 1,
+      resolution: detectResolution(itemName),
+      is_separator: false,
+    });
+  }
+
+  return channels;
+}
+
+// Background progressive loader for VOD categories (safe chunks of 2 with pauses to avoid OOM)
+export async function loadAllVodCategories(params: {
+  serverUrl: string;
+  username: string;
+  password: string;
+  categories: Category[];
+  skipCategoryIds?: Set<string>;
+  onCategoryLoaded: (cat: Category, channels: Channel[]) => Promise<void> | void;
+  onProgress?: (done: number, total: number) => void;
+  shouldAbort?: () => boolean;
+}): Promise<void> {
+  const vodCats = params.categories.filter(
+    (c) => c.id.startsWith('grp_vod_') && !(params.skipCategoryIds && params.skipCategoryIds.has(c.id))
+  );
+  const total = vodCats.length;
+  if (total === 0) return;
+  let done = 0;
+  let cursor = 0;
+  const CONCURRENCY = 2;
+
+  const worker = async () => {
+    while (cursor < vodCats.length) {
+      if (params.shouldAbort && params.shouldAbort()) return;
+      const cat = vodCats[cursor++];
+      try {
+        const streams = await fetchCategoryStreamsOnDemand({
+          serverUrl: params.serverUrl,
+          username: params.username,
+          password: params.password,
+          categoryId: cat.id.replace(/^grp_vod_/, ''),
+          categoryName: cat.name,
+          streamType: 'vod',
+        });
+        if (params.shouldAbort && params.shouldAbort()) return;
+        await params.onCategoryLoaded(cat, streams);
+      } catch (err) {
+        console.warn('Background VOD load failed for category', cat.id, err);
+      }
+      done++;
+      params.onProgress?.(done, total);
+      // Small 100ms breathing room to keep Android TV UI 100% smooth
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  };
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 }
 
 // Search cache for Xtream catalogs
@@ -1019,7 +1120,7 @@ export async function searchXtreamCatalog(params: {
   const results: Channel[] = [];
   const now = Date.now();
 
-  // 1. Search in SERIES (action=get_series)
+  // 1. Search in SERIES (Fast & Lightweight, max 3.5s timeout)
   try {
     let seriesList =
       xtreamSeriesCache &&
@@ -1029,79 +1130,44 @@ export async function searchXtreamCatalog(params: {
         : null;
 
     if (!seriesList) {
-      const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_series`;
-      const res = await fetchHttp(url, 'json');
-      seriesList = toArray(res);
+      const fetchPromise = (async () => {
+        const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_series`;
+        const res = await fetchHttp(url, 'json');
+        return toArray(res);
+      })();
+      const timeoutPromise = new Promise<any[]>((_, reject) =>
+        setTimeout(() => reject(new Error('Series search timeout')), 3500)
+      );
+      seriesList = await Promise.race([fetchPromise, timeoutPromise]);
       xtreamSeriesCache = { credKey, data: seriesList, timestamp: now };
     }
 
-    for (const s of seriesList) {
-      const sName = String(s.name || '').trim();
-      if (normalizeMovieTitle(sName).includes(normQ)) {
-        const seriesId = s.series_id || s.id;
-        results.push({
-          id: `ch_xtream_series_${seriesId}`,
-          num: Number(s.num) || results.length + 1,
-          name: sName,
-          logo: s.cover || s.stream_icon || '',
-          stream_url: `${server}/series/${encUser}/${encPass}/${seriesId}.mp4`,
-          stream_type: 'series',
-          group_id: `grp_series_${s.category_id || 'all'}`,
-          group_name: 'Séries',
-          epg_id: String(seriesId),
-          is_favorite: false,
-          is_hidden: false,
-          custom_order: Number(s.num) || results.length + 1,
-          resolution: detectResolution(sName),
-        });
-        if (results.length >= 40) break;
+    if (Array.isArray(seriesList)) {
+      for (const s of seriesList) {
+        const sName = String(s.name || '').trim();
+        if (normalizeMovieTitle(sName).includes(normQ)) {
+          const seriesId = s.series_id || s.id;
+          results.push({
+            id: `ch_xtream_series_${seriesId}`,
+            num: Number(s.num) || results.length + 1,
+            name: sName,
+            logo: s.cover || s.stream_icon || '',
+            stream_url: `${server}/series/${encUser}/${encPass}/${seriesId}.mp4`,
+            stream_type: 'series',
+            group_id: `grp_series_${s.category_id || 'all'}`,
+            group_name: 'Séries',
+            epg_id: String(seriesId),
+            is_favorite: false,
+            is_hidden: false,
+            custom_order: Number(s.num) || results.length + 1,
+            resolution: detectResolution(sName),
+          });
+          if (results.length >= 40) break;
+        }
       }
     }
   } catch (err) {
-    console.warn('Failed searching series in Xtream catalog:', err);
-  }
-
-  // 2. Search in VOD FILMS (action=get_vod_streams)
-  try {
-    let vodList =
-      xtreamVodCache &&
-      xtreamVodCache.credKey === credKey &&
-      now - xtreamVodCache.timestamp < 300000
-        ? xtreamVodCache.data
-        : null;
-
-    if (!vodList) {
-      const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_vod_streams`;
-      const res = await fetchHttp(url, 'json');
-      vodList = toArray(res);
-      xtreamVodCache = { credKey, data: vodList, timestamp: now };
-    }
-
-    for (const m of vodList) {
-      const mName = String(m.name || '').trim();
-      if (normalizeMovieTitle(mName).includes(normQ)) {
-        const streamId = m.stream_id || m.id;
-        const ext = m.container_extension || 'mp4';
-        results.push({
-          id: `ch_xtream_vod_${streamId}`,
-          num: Number(m.num) || results.length + 1,
-          name: mName,
-          logo: m.stream_icon || m.cover || '',
-          stream_url: `${server}/movie/${encUser}/${encPass}/${streamId}.${ext}`,
-          stream_type: 'vod',
-          group_id: `grp_vod_${m.category_id || 'all'}`,
-          group_name: 'Films VOD',
-          epg_id: String(streamId),
-          is_favorite: false,
-          is_hidden: false,
-          custom_order: Number(m.num) || results.length + 1,
-          resolution: detectResolution(mName),
-        });
-        if (results.length >= 80) break;
-      }
-    }
-  } catch (err) {
-    console.warn('Failed searching VOD in Xtream catalog:', err);
+    console.warn('Series remote search notice:', err);
   }
 
   return results;
@@ -1112,6 +1178,14 @@ export async function getAllVodChannels(
   username: string,
   password: string
 ): Promise<Channel[]> {
+  // Check local database first: avoids downloading 40MB if VODs are already in Dexie
+  try {
+    const localVods = await db.channels.where('stream_type').equals('vod').toArray();
+    if (localVods.length > 50) {
+      return localVods;
+    }
+  } catch {}
+
   let server = serverUrl.trim().replace(/\/+$/, '');
   if (!server.startsWith('http://') && !server.startsWith('https://')) {
     server = 'http://' + server;
@@ -1131,10 +1205,14 @@ export async function getAllVodChannels(
       : null;
 
   if (!vodList) {
-    const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_vod_streams`;
-    const res = await fetchHttp(url, 'json');
-    vodList = toArray(res);
-    xtreamVodCache = { credKey, data: vodList, timestamp: now };
+    try {
+      const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_vod_streams`;
+      const res = await fetchHttp(url, 'json');
+      vodList = toArray(res);
+      xtreamVodCache = { credKey, data: vodList, timestamp: now };
+    } catch {
+      return [];
+    }
   }
 
   return vodList.map((m: any, i: number) => {

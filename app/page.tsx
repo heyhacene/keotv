@@ -21,7 +21,7 @@ import { SplashScreen } from '@/components/SplashScreen';
 import { ContextMenuModal } from '@/components/ContextMenuModal';
 import { CategoryManagerModal } from '@/components/CategoryManagerModal';
 import { ParentalPinModal } from '@/components/ParentalPinModal';
-import { checkForAppUpdate, AppUpdateInfo } from '@/lib/update-service';
+import { checkForAppUpdate, AppUpdateInfo, CURRENT_BUILD_NUMBER } from '@/lib/update-service';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
 import {
   syncXtreamPlaylist,
@@ -29,6 +29,8 @@ import {
   fetchCategoryStreamsOnDemand,
   resolveSeriesEpisodes,
   loadAllLiveCategories,
+  loadAllVodCategories,
+  fetchAllSeriesCatalog,
   SeriesEpisode,
   isSeparatorChannel,
 } from '@/lib/iptv-service';
@@ -160,7 +162,7 @@ export default function KeoTVHome() {
   const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
 
   useEffect(() => {
-    checkForAppUpdate(28).then((info) => {
+    checkForAppUpdate(CURRENT_BUILD_NUMBER).then((info) => {
       if (info && info.hasUpdate) {
         setAppUpdateInfo(info);
       }
@@ -294,15 +296,14 @@ export default function KeoTVHome() {
       const loadedKeys = (await db.channels.orderBy('group_id').uniqueKeys()) as string[];
       const skip = new Set<string>(loadedKeys.map((k) => String(k)));
 
-      // Pre-fetch all series in one fast call if not yet loaded locally
+      // 1. Pre-fetch all series in one fast call if not yet loaded locally
       const localSeriesCount = await db.channels.where('stream_type').equals('series').count();
       if (localSeriesCount === 0 && pl.server_url && pl.username && pl.password) {
         try {
-          const allSeries = await fetchCategoryStreamsOnDemand({
+          const allSeries = await fetchAllSeriesCatalog({
             serverUrl: pl.server_url,
             username: pl.username,
             password: pl.password,
-            streamType: 'series',
           });
           if (allSeries.length > 0 && bgLoadTokenRef.current === token) {
             await db.channels.bulkPut(allSeries);
@@ -322,6 +323,7 @@ export default function KeoTVHome() {
         }
       }
 
+      // 2. Load live categories progressively (3 by 3)
       await loadAllLiveCategories({
         serverUrl: pl.server_url,
         username: pl.username,
@@ -343,7 +345,34 @@ export default function KeoTVHome() {
         },
         onProgress: (done, total) => {
           if (bgLoadTokenRef.current === token) {
-            setBgLoadStatus(`Chargement de votre playlist : ${done}/${total} bouquets TV`);
+            setBgLoadStatus(`Synchronisation : ${done}/${total} bouquets TV`);
+          }
+        },
+      });
+
+      // 3. Load VOD categories progressively in the background (2 by 2, safe memory footprint)
+      await loadAllVodCategories({
+        serverUrl: pl.server_url,
+        username: pl.username,
+        password: pl.password,
+        categories: cats,
+        skipCategoryIds: skip,
+        shouldAbort: () => bgLoadTokenRef.current !== token,
+        onCategoryLoaded: async (cat, streams) => {
+          if (streams.length === 0) return;
+          try {
+            await db.channels.bulkPut(streams);
+          } catch {
+            for (const s of streams) {
+              try { await db.channels.put(s); } catch {}
+            }
+          }
+          await db.categories.update(cat.id, { count: streams.length });
+          setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, count: streams.length } : c)));
+        },
+        onProgress: (done, total) => {
+          if (bgLoadTokenRef.current === token) {
+            setBgLoadStatus(`Synchronisation films : ${done}/${total} catégories VOD`);
           }
         },
       });
@@ -2260,7 +2289,7 @@ export default function KeoTVHome() {
         onResyncPlaylist={handleResyncPlaylist}
         onEditPlaylist={handleOpenEditPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={28}
+        currentBuildNumber={CURRENT_BUILD_NUMBER}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
