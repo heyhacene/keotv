@@ -4,6 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { Channel, EpgProgram } from '@/types/iptv';
 import { Maximize2, Minimize2, Volume2, VolumeX, Radio, Clock, Sparkles, Square, Play } from 'lucide-react';
+import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
 
 interface LiveVideoPlayerProps {
   channel: Channel | null;
@@ -35,8 +36,27 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   const [streamError, setStreamError] = useState<string | null>(null);
   const osdTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // On Android the stream is played by the native ExoPlayer (opened full screen), not by hls.js
+  const [nativeMode, setNativeMode] = useState<boolean>(false);
+  useEffect(() => {
+    setNativeMode(isNativePlayerAvailable());
+  }, []);
+
+  const openNativePlayer = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (!channel) return;
+    NativePlayer.play({
+      urls: [channel.stream_url],
+      titles: [channel.name],
+      index: 0,
+      userAgent: NATIVE_PLAYER_USER_AGENT,
+      isLive: channel.stream_type === 'live',
+    }).catch((err: any) => alert(`Lecture impossible : ${err?.message || err}`));
+  };
+
   // Stop or start stream when channel changes or isStopped changes
   useEffect(() => {
+    if (nativeMode) return;
     if (!channel || !videoRef.current) return;
 
     if (isStopped) {
@@ -144,7 +164,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
         hlsRef.current = null;
       }
     };
-  }, [channel, isStopped]);
+  }, [channel, isStopped, nativeMode]);
 
   const toggleStopPlay = (e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -200,6 +220,20 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
         autoPlay
         muted={isMuted}
       />
+
+      {/* Native player launcher (Android) */}
+      {nativeMode && (
+        <div
+          onClick={openNativePlayer}
+          className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-tv-surface text-center p-4 select-none cursor-pointer"
+        >
+          <div className="w-14 h-14 rounded-full bg-tv-focus flex items-center justify-center mb-2 shadow-xl">
+            <Play className="w-7 h-7 text-white fill-white" />
+          </div>
+          <h3 className="text-sm font-bold text-white line-clamp-2">{channel?.name || 'Aucune chaîne'}</h3>
+          <p className="text-[11px] text-slate-400 mt-1">Touchez pour lancer la lecture</p>
+        </div>
+      )}
 
       {/* Stopped resting screen */}
       {isStopped && (

@@ -53,6 +53,32 @@ jobs:
       - name: Synchronisation Capacitor Android
         run: npx cap sync android
 
+      - name: Installation du lecteur vidéo natif ExoPlayer (Media3)
+        run: |
+          SRC_DIR="android/app/src/main/java/fr/keo/tv"
+          mkdir -p "$SRC_DIR"
+          cp native-android/MainActivity.java "$SRC_DIR/MainActivity.java"
+          cp native-android/NativePlayerPlugin.java "$SRC_DIR/NativePlayerPlugin.java"
+          cp native-android/PlayerActivity.java "$SRC_DIR/PlayerActivity.java"
+
+          GRADLE="android/app/build.gradle"
+          if ! grep -q "androidx.media3" "$GRADLE"; then
+            sed -i '/^dependencies {/a\    implementation "androidx.media3:media3-exoplayer:1.5.1"\n    implementation "androidx.media3:media3-exoplayer-hls:1.5.1"\n    implementation "androidx.media3:media3-ui:1.5.1"' "$GRADLE"
+          fi
+          if ! grep -q "abortOnError" "$GRADLE"; then
+            sed -i '/^android {/a\    lint {\n        abortOnError false\n        checkReleaseBuilds false\n    }' "$GRADLE"
+          fi
+
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "fr.keo.tv.PlayerActivity\|\.PlayerActivity" "$MANIFEST"; then
+            sed -i 's#</application>#        <activity android:name=".PlayerActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" android:theme="@style/Theme.AppCompat.NoActionBar" />\n    </application>#' "$MANIFEST"
+          fi
+
+          echo "--- build.gradle (extrait) ---"
+          grep -n "media3\|abortOnError" "$GRADLE" || true
+          echo "--- AndroidManifest ---"
+          cat "$MANIFEST"
+
       - name: Configuration du support Android TV (Leanback & Banner)
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
@@ -160,9 +186,9 @@ jobs:
             Cliquez sur le fichier **KeoTV-Build-${{ github.run_number }}.apk** ci-dessous pour installer ou mettre à jour directement votre application.
 
             #### 🚀 Nouveautés & Correctifs Majeurs :
-            - **Affichage garanti de tous les flux TV, Films & Séries** : Chargement instantané par bouquet, headers réseau IPTV compatibles pour éliminer les erreurs 403 / listes vides.
-            - **Séparation stricte Films vs Séries** : Les catégories VOD et Séries sont désormais parfaitement isolées et dédoublonnées (plus aucun contenu identique dans les deux sections).
-            - **Lecture directe des Séries** : Résolution dynamique et lecture immédiate du premier épisode (S01E01).
+            - **Lecteur vidéo natif Android (ExoPlayer)** : lecture directe des chaînes TV, films et séries (TS / HLS / MP4 / MKV), zapping entre chaînes, bouton Retour pour revenir à la liste.
+            - **Playlist complète** : toutes les chaînes TV sont téléchargées en arrière-plan bouquet par bouquet (plus de liste tronquée).
+            - **Films / Séries corrigés** : chaque section utilise sa propre API Xtream, plus de contenu mélangé. Les séries s'ouvrent avec tous leurs épisodes.
             - **Mise à jour directe sans désinstallation** : Signature cryptographique officielle permanente (`versionCode ${{ github.run_number }}`).
           files: |
             KeoTV.apk

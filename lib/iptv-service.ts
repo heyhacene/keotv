@@ -247,13 +247,83 @@ export async function resolveFirstEpisodeUrl(
   return null;
 }
 
-export interface FetchCategoryStreamsParams {
+// Resolve ALL episodes (every season, in order) of a series so the native player can zap between them
+export async function resolveSeriesEpisodes(
+  serverUrl: string,
+  username: string,
+  password: string,
+  seriesId: string | number
+): Promise<{ title: string; url: string }[]> {
+  let server = serverUrl.trim().replace(/\/+$/, '');
+  if (!server.startsWith('http://') && !server.startsWith('https://')) {
+    server = 'http://' + server;
+  }
+  const encUser = encodeURIComponent(decodeURIComponent(username.trim()));
+  const encPass = encodeURIComponent(decodeURIComponent(password.trim()));
+  const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_series_info&series_id=${seriesId}`;
+
+  const data = await fetchHttp(url, 'json');
+  const result: { title: string; url: string }[] = [];
+  if (data && data.episodes) {
+    const seasonKeys = Object.keys(data.episodes).sort((a, b) => Number(a) - Number(b));
+    for (const sk of seasonKeys) {
+      const epList = toArray<any>(data.episodes[sk]);
+      for (const ep of epList) {
+        const epId = ep?.id || ep?.stream_id;
+        if (!epId) continue;
+        const ext = ep.container_extension || 'mp4';
+        const epNum = ep.episode_num ?? '';
+        const title = ep.title ? String(ep.title) : `Saison ${sk} - Épisode ${epNum}`;
+        result.push({ title, url: `${server}/series/${encUser}/${encPass}/${epId}.${ext}` });
+      }
+    }
+  }
+  return result;
+}
+
+// Background loader: downloads every live bouquet one by one (small requests) so the full
+// playlist ends up in the local database with real counts.
+export async function loadAllLiveCategories(params: {
   serverUrl: string;
   username: string;
   password: string;
-  categoryId: string;
-  categoryName: string;
-  streamType: 'live' | 'vod' | 'series';
+  categories: Category[];
+  skipCategoryIds?: Set<string>;
+  onCategoryLoaded: (cat: Category, channels: Channel[]) => Promise<void> | void;
+  onProgress?: (done: number, total: number) => void;
+  shouldAbort?: () => boolean;
+}): Promise<void> {
+  const liveCats = params.categories.filter(
+    (c) => c.id.startsWith('grp_live_') && !(params.skipCategoryIds && params.skipCategoryIds.has(c.id))
+  );
+  const total = liveCats.length;
+  let done = 0;
+  let cursor = 0;
+  const CONCURRENCY = 3;
+
+  const worker = async () => {
+    while (cursor < liveCats.length) {
+      if (params.shouldAbort && params.shouldAbort()) return;
+      const cat = liveCats[cursor++];
+      try {
+        const streams = await fetchCategoryStreamsOnDemand({
+          serverUrl: params.serverUrl,
+          username: params.username,
+          password: params.password,
+          categoryId: cat.id.replace(/^grp_live_/, ''),
+          categoryName: cat.name,
+          streamType: 'live',
+        });
+        await params.onCategoryLoaded(cat, streams);
+      } catch (err) {
+        console.warn('Background load failed for category', cat.id, err);
+      }
+      done++;
+      params.onProgress?.(done, total);
+    }
+  };
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, () => worker()));
 }
 
 // On-demand category fetcher: fetches streams for a specific category in ~200ms
@@ -404,7 +474,10 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     console.warn('Could not fetch series categories:', err);
   }
 
-  // 3. Classify and strictly partition categories so Films and Séries never overlap!
+  // 3. Build categories. Each category keeps the namespace of the API it came from:
+  //    get_live_categories -> grp_live_<id>, get_vod_categories -> grp_vod_<id>,
+  //    get_series_categories -> grp_series_<id>. The id prefix is what decides which API
+  //    action is used later to fetch streams, so we NEVER re-classify by keywords.
   const categories: Category[] = [];
   let orderIndex = 0;
 
@@ -419,104 +492,36 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     icon: 'Star',
   });
 
-  // 1. LIVE CATEGORIES
-  const seenLiveCatIds = new Set<string>();
-  for (let i = 0; i < rawLiveCategories.length; i++) {
-    const rawCat = rawLiveCategories[i];
-    if (!rawCat || rawCat.category_id === undefined || rawCat.category_id === null) continue;
-    const catIdStr = String(rawCat.category_id).trim();
-    if (seenLiveCatIds.has(catIdStr)) continue;
-    seenLiveCatIds.add(catIdStr);
-
-    const catName = rawCat.category_name ? String(rawCat.category_name).trim() : `Bouquet ${catIdStr}`;
-    categories.push({
-      id: `grp_live_${catIdStr}`,
-      name: catName,
-      type: 'live',
-      count: 0,
-      is_hidden: false,
-      custom_order: orderIndex++,
-      icon: detectCategoryIcon(catName),
-    });
-  }
-
-  // 2. VOD (FILMS) vs SÉRIES: Clean separation without duplicates
-  const seenVodCatIds = new Set<string>();
-  const seenSeriesCatIds = new Set<string>();
-  let vodOrderIndex = 10000;
-  let seriesOrderIndex = 20000;
-
-  // Scan rawVodCategories
-  for (let i = 0; i < rawVodCategories.length; i++) {
-    const rawCat = rawVodCategories[i];
-    if (!rawCat || rawCat.category_id === undefined || rawCat.category_id === null) continue;
-    const catIdStr = String(rawCat.category_id).trim();
-    const catName = rawCat.category_name ? String(rawCat.category_name).trim() : `Films ${catIdStr}`;
-
-    if (isSeriesCategory(catName)) {
-      if (!seenSeriesCatIds.has(catIdStr)) {
-        seenSeriesCatIds.add(catIdStr);
-        categories.push({
-          id: `grp_series_${catIdStr}`,
-          name: catName,
-          type: 'series',
-          count: 0,
-          is_hidden: false,
-          custom_order: seriesOrderIndex++,
-          icon: 'Film',
-        });
-      }
-    } else {
-      if (!seenVodCatIds.has(catIdStr)) {
-        seenVodCatIds.add(catIdStr);
-        categories.push({
-          id: `grp_vod_${catIdStr}`,
-          name: catName,
-          type: 'vod',
-          count: 0,
-          is_hidden: false,
-          custom_order: vodOrderIndex++,
-          icon: 'Film',
-        });
-      }
+  const pushCategories = (
+    raw: any[],
+    kind: 'live' | 'vod' | 'series',
+    fallbackLabel: string,
+    startOrder: number
+  ) => {
+    const seen = new Set<string>();
+    let order = startOrder;
+    for (let i = 0; i < raw.length; i++) {
+      const rawCat = raw[i];
+      if (!rawCat || rawCat.category_id === undefined || rawCat.category_id === null) continue;
+      const catIdStr = String(rawCat.category_id).trim();
+      if (seen.has(catIdStr)) continue;
+      seen.add(catIdStr);
+      const catName = rawCat.category_name ? String(rawCat.category_name).trim() : `${fallbackLabel} ${catIdStr}`;
+      categories.push({
+        id: `grp_${kind}_${catIdStr}`,
+        name: catName,
+        type: kind,
+        count: 0,
+        is_hidden: false,
+        custom_order: order++,
+        icon: kind === 'live' ? detectCategoryIcon(catName) : 'Film',
+      });
     }
-  }
+  };
 
-  // Scan rawSeriesCategories
-  for (let i = 0; i < rawSeriesCategories.length; i++) {
-    const rawCat = rawSeriesCategories[i];
-    if (!rawCat || rawCat.category_id === undefined || rawCat.category_id === null) continue;
-    const catIdStr = String(rawCat.category_id).trim();
-    const catName = rawCat.category_name ? String(rawCat.category_name).trim() : `Séries ${catIdStr}`;
-
-    if (isFilmCategory(catName) && !isSeriesCategory(catName)) {
-      if (!seenVodCatIds.has(catIdStr)) {
-        seenVodCatIds.add(catIdStr);
-        categories.push({
-          id: `grp_vod_${catIdStr}`,
-          name: catName,
-          type: 'vod',
-          count: 0,
-          is_hidden: false,
-          custom_order: vodOrderIndex++,
-          icon: 'Film',
-        });
-      }
-    } else {
-      if (!seenSeriesCatIds.has(catIdStr)) {
-        seenSeriesCatIds.add(catIdStr);
-        categories.push({
-          id: `grp_series_${catIdStr}`,
-          name: catName,
-          type: 'series',
-          count: 0,
-          is_hidden: false,
-          custom_order: seriesOrderIndex++,
-          icon: 'Film',
-        });
-      }
-    }
-  }
+  pushCategories(rawLiveCategories, 'live', 'Bouquet', orderIndex);
+  pushCategories(rawVodCategories, 'vod', 'Films', 10000);
+  pushCategories(rawSeriesCategories, 'series', 'Séries', 20000);
 
   // 4. Pre-fetch the channels for the FIRST live category immediately so playback starts instantly
   onProgress?.('Étape 3/3 : Préparation du flux en direct...');

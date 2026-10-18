@@ -18,10 +18,10 @@ import {
   syncXtreamPlaylist,
   parseM3UPlaylist,
   fetchCategoryStreamsOnDemand,
-  isSeriesCategory,
-  isFilmCategory,
-  resolveFirstEpisodeUrl,
+  resolveSeriesEpisodes,
+  loadAllLiveCategories,
 } from '@/lib/iptv-service';
+import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
 
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
@@ -61,6 +61,9 @@ export default function KeoTVHome() {
   const [activeSection, setActiveSection] = useState<'live' | 'vod' | 'series' | 'fav'>('live');
   const [syncCode, setSyncCode] = useState<string>('');
   const [isLoadingCategory, setIsLoadingCategory] = useState<boolean>(false);
+  const [categoryError, setCategoryError] = useState<string | null>(null);
+  const [bgLoadStatus, setBgLoadStatus] = useState<string | null>(null);
+  const bgLoadTokenRef = useRef<number>(0);
 
   const [isXtreamModalOpen, setIsXtreamModalOpen] = useState(false);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -76,6 +79,7 @@ export default function KeoTVHome() {
       }
 
       setIsLoadingCategory(true);
+      setCategoryError(null);
       try {
         let rawList: Channel[] = [];
         if (cat.id === 'fav') {
@@ -84,37 +88,8 @@ export default function KeoTVHome() {
           // Tier 1: exact group_id indexed match (e.g. grp_live_123, grp_vod_456, grp_series_789)
           rawList = await db.channels.where('group_id').equals(cat.id).toArray();
 
-          // Tier 2: alternate group_id prefix (strip or match numeric id)
-          if (rawList.length === 0) {
-            const rawCatNum = cat.id.replace(/^grp_(?:live_|vod_|series_)?/, '').trim().toLowerCase();
-            rawList = await db.channels.filter((c) => {
-              const cGrpNum = (c.group_id || '').replace(/^grp_(?:live_|vod_|series_)?/, '').trim().toLowerCase();
-              return Boolean(cGrpNum && cGrpNum === rawCatNum);
-            }).toArray();
-          }
-
-          // Tier 3: exact group_name match
-          if (rawList.length === 0 && cat.name) {
-            const cleanName = cat.name.trim().toLowerCase();
-            rawList = await db.channels.filter((c) => 
-              Boolean(c.group_name && c.group_name.trim().toLowerCase() === cleanName)
-            ).toArray();
-          }
-
-          // Tier 4: universal memory fallback across all channels in Dexie with category type safety
-          if (rawList.length === 0 && cat.name) {
-            const all = await db.channels.toArray();
-            const cleanCatName = cat.name.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-
-            rawList = all.filter((c) => {
-              if (cat.type && c.stream_type && cat.type !== c.stream_type) return false;
-              const cGrpName = (c.group_name || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-              if (cGrpName && cleanCatName && (cGrpName === cleanCatName || cGrpName.includes(cleanCatName) || cleanCatName.includes(cGrpName))) {
-                return true;
-              }
-              return false;
-            });
-          }
+          // NOTE: no fuzzy fallbacks here on purpose. Matching by numeric id or by name across
+          // stream types mixed Films / Séries / TV together. The group_id is the single source of truth.
 
           // Tier 5: ON-DEMAND FETCH FROM XTREAM SERVER (if local database has 0 items for this category)
           if (rawList.length === 0 && cat.id !== 'fav') {
@@ -132,7 +107,11 @@ export default function KeoTVHome() {
 
             if (activePl && activePl.server_url && activePl.username && activePl.password) {
               const cleanRawCatId = cat.id.replace(/^grp_(?:live_|vod_|series_)?/, '').trim();
-              const catType = cat.type || 'live';
+              const catType: 'live' | 'vod' | 'series' = cat.id.startsWith('grp_vod_')
+                ? 'vod'
+                : cat.id.startsWith('grp_series_')
+                ? 'series'
+                : 'live';
               try {
                 const onDemandStreams = await fetchCategoryStreamsOnDemand({
                   serverUrl: activePl.server_url,
@@ -157,8 +136,9 @@ export default function KeoTVHome() {
                   );
                   rawList = onDemandStreams;
                 }
-              } catch (onDemandErr) {
+              } catch (onDemandErr: any) {
                 console.warn('On-demand stream fetch error for category', cat.id, onDemandErr);
+                setCategoryError(`Erreur serveur IPTV : ${onDemandErr?.message || onDemandErr}`);
               }
             }
           }
@@ -191,6 +171,55 @@ export default function KeoTVHome() {
     },
     [channelSort]
   );
+
+  // Background download of ALL live bouquets (small requests, 3 at a time) so the full playlist is local
+  const startBackgroundLiveLoad = useCallback(async (pl: PlaylistConfig, cats: Category[]) => {
+    if (pl.type !== 'xtream' || !pl.server_url || !pl.username || !pl.password) return;
+    const token = ++bgLoadTokenRef.current;
+
+    try {
+      const loadedKeys = (await db.channels.orderBy('group_id').uniqueKeys()) as string[];
+      const skip = new Set<string>(loadedKeys.map((k) => String(k)));
+
+      await loadAllLiveCategories({
+        serverUrl: pl.server_url,
+        username: pl.username,
+        password: pl.password,
+        categories: cats,
+        skipCategoryIds: skip,
+        shouldAbort: () => bgLoadTokenRef.current !== token,
+        onCategoryLoaded: async (cat, streams) => {
+          if (streams.length === 0) return;
+          try {
+            await db.channels.bulkPut(streams);
+          } catch {
+            for (const s of streams) {
+              try { await db.channels.put(s); } catch {}
+            }
+          }
+          await db.categories.update(cat.id, { count: streams.length });
+          setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, count: streams.length } : c)));
+        },
+        onProgress: (done, total) => {
+          if (bgLoadTokenRef.current === token) {
+            setBgLoadStatus(`Chargement de votre playlist : ${done}/${total} bouquets TV`);
+          }
+        },
+      });
+
+      if (bgLoadTokenRef.current === token) {
+        const totalChannels = await db.channels.count();
+        await db.playlists.update(pl.id, { channel_count: totalChannels });
+        setPlaylists(await db.playlists.toArray());
+      }
+    } catch (err) {
+      console.warn('Background live load error:', err);
+    } finally {
+      if (bgLoadTokenRef.current === token) {
+        setBgLoadStatus(null);
+      }
+    }
+  }, []);
 
   // Re-synchronize existing playlist and reload all channels safely into Dexie
   const handleResyncPlaylist = useCallback(
@@ -254,6 +283,7 @@ export default function KeoTVHome() {
         setCategories(loadedCats);
         setPlaylists(loadedPlaylists);
         setFavCount(0);
+        startBackgroundLiveLoad(result.playlist, loadedCats);
 
         let firstCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
         if (firstCat) {
@@ -301,21 +331,40 @@ export default function KeoTVHome() {
         setCategorySort(savedCatSort);
         setChannelSort(savedChSort);
 
+        // One-time clean reload: previous builds stored channels under wrong group ids
+        const DATA_VERSION = 13;
+        const savedDataVersion = await getSetting<number>('data_version', 0);
+        let resyncTarget: PlaylistConfig | null = null;
+        if (savedDataVersion < DATA_VERSION) {
+          const existingPls = await db.playlists.toArray();
+          const realPl = existingPls.find((p) => p.type === 'xtream' || (p.type === 'm3u' && p.id !== 'pl_demo_default'));
+          if (realPl) {
+            await db.categories.clear();
+            await db.channels.clear();
+            resyncTarget = realPl;
+          }
+          await setSetting('data_version', DATA_VERSION);
+        }
+
         const allChannels = await db.channels.toArray();
         const chCount = allChannels.length;
         const currentPlaylists = await db.playlists.toArray();
         const plCount = currentPlaylists.length;
 
-        // 1. One-time category repair to ensure strict separation between Films and Séries
+        // Repair categories saved by previous builds: the stream type is always the API namespace
+        // encoded in the id (grp_live_ / grp_vod_ / grp_series_).
         const allDbCats = await db.categories.toArray();
         for (const c of allDbCats) {
-          if (c.id === 'fav' || c.id === 'tnt' || c.id === 'sport' || c.id === 'cinema' || c.id === 'news' || c.id === 'doc') continue;
-          if (c.type === 'vod' && isSeriesCategory(c.name)) {
-            await db.categories.update(c.id, { type: 'series' });
-            c.type = 'series';
-          } else if (c.type === 'series' && isFilmCategory(c.name) && !isSeriesCategory(c.name)) {
-            await db.categories.update(c.id, { type: 'vod' });
-            c.type = 'vod';
+          const expected = c.id.startsWith('grp_vod_')
+            ? 'vod'
+            : c.id.startsWith('grp_series_')
+            ? 'series'
+            : c.id.startsWith('grp_live_')
+            ? 'live'
+            : null;
+          if (expected && c.type !== expected) {
+            await db.categories.update(c.id, { type: expected });
+            c.type = expected;
           }
         }
 
@@ -472,6 +521,16 @@ export default function KeoTVHome() {
           await setSetting('sync_code', code);
         }
         setSyncCode(code);
+
+        if (resyncTarget) {
+          handleResyncPlaylist(resyncTarget);
+        } else {
+          // Make sure the whole live playlist is available locally (resumes an interrupted download)
+          const xtreamPl = (await db.playlists.toArray()).find((p) => p.type === 'xtream');
+          if (xtreamPl) {
+            startBackgroundLiveLoad(xtreamPl, loadedCats);
+          }
+        }
       } catch (err) {
         console.error('Initialization error:', err);
       }
@@ -590,51 +649,79 @@ export default function KeoTVHome() {
     }
   }, [focusedChannelIndex, filteredChannels]);
 
-  // Channel Selection: single tap plays channel in the single player
+  // Channel Selection: opens the native full screen player (ExoPlayer) on Android
   const handleSelectChannel = useCallback(
     async (target: Channel | number, forceFullscreen: boolean = false) => {
       const targetChannel = typeof target === 'number' ? filteredChannels[target] : target;
       if (!targetChannel) return;
 
       setIsStopped(false);
-      let playableChannel = { ...targetChannel };
+      setActiveChannel(targetChannel);
+      const epg = getMockEpgForChannel(targetChannel.id);
+      setCurrentEpg(epg.current);
+      setNextEpg(epg.next);
 
-      // For series streams in Xtream IPTV, the channel object represents a series title (metadata)
-      // We resolve Season 1 Episode 1 dynamically so it plays immediately!
-      if (playableChannel.stream_type === 'series') {
-        let activePl = await db.playlists.toCollection().first();
-        let serverUrl = activePl?.server_url;
-        let username = activePl?.username;
-        let password = activePl?.password;
-
-        if (!serverUrl || !username || !password) {
-          const lastConfig = await getSetting<{ server_url?: string; username?: string; password?: string }>('last_xtream_config', {});
-          if (lastConfig?.server_url && lastConfig?.username && lastConfig?.password) {
-            serverUrl = lastConfig.server_url;
-            username = lastConfig.username;
-            password = lastConfig.password;
+      // ---- Native Android player (reliable IPTV playback: no CORS, TS/HLS/MP4/MKV, custom User-Agent) ----
+      if (isNativePlayerAvailable()) {
+        try {
+          if (targetChannel.stream_type === 'series') {
+            let serverUrl = '';
+            let username = '';
+            let password = '';
+            const pl = (await db.playlists.toArray()).find((p) => p.type === 'xtream' && p.username && p.password);
+            if (pl) {
+              serverUrl = pl.server_url;
+              username = pl.username || '';
+              password = pl.password || '';
+            } else {
+              const saved = await getSetting<any>('last_xtream_config', null);
+              if (saved?.server_url && saved?.username && saved?.password) {
+                serverUrl = saved.server_url;
+                username = saved.username;
+                password = saved.password;
+              }
+            }
+            if (!serverUrl) {
+              alert('Identifiants Xtream introuvables : rechargez votre playlist.');
+              return;
+            }
+            const seriesId = targetChannel.id.replace(/^ch_xtream_series_/, '');
+            const episodes = await resolveSeriesEpisodes(serverUrl, username, password, seriesId);
+            if (episodes.length === 0) {
+              alert(`Aucun épisode disponible pour « ${targetChannel.name} » sur ce serveur.`);
+              return;
+            }
+            await NativePlayer.play({
+              urls: episodes.map((e) => e.url),
+              titles: episodes.map((e) => `${targetChannel.name} — ${e.title}`),
+              index: 0,
+              userAgent: NATIVE_PLAYER_USER_AGENT,
+              isLive: false,
+            });
+            return;
           }
-        }
 
-        if (serverUrl && username && password) {
-          const seriesId = playableChannel.stream_id || playableChannel.id;
-          const resolvedUrl = await resolveFirstEpisodeUrl(serverUrl, username, password, seriesId);
-          if (resolvedUrl) {
-            playableChannel.stream_url = resolvedUrl;
-          }
+          const playlist = filteredChannels.length > 0 ? filteredChannels : [targetChannel];
+          const startIndex = Math.max(0, playlist.findIndex((c) => c.id === targetChannel.id));
+          await NativePlayer.play({
+            urls: playlist.map((c) => c.stream_url),
+            titles: playlist.map((c) => c.name),
+            index: startIndex,
+            userAgent: NATIVE_PLAYER_USER_AGENT,
+            isLive: targetChannel.stream_type === 'live',
+          });
+        } catch (err: any) {
+          console.error('Native player error:', err);
+          alert(`Lecture impossible : ${err?.message || err}`);
         }
+        return;
       }
 
-      if (activeChannel?.id === playableChannel.id && forceFullscreen) {
+      // ---- Browser fallback (hls.js web player) ----
+      if (activeChannel?.id === targetChannel.id && forceFullscreen) {
         setIsFullscreen(true);
-      } else {
-        setActiveChannel(playableChannel);
-        const epg = getMockEpgForChannel(playableChannel.id);
-        setCurrentEpg(epg.current);
-        setNextEpg(epg.next);
-        if (forceFullscreen) {
-          setIsFullscreen(true);
-        }
+      } else if (forceFullscreen) {
+        setIsFullscreen(true);
       }
     },
     [filteredChannels, activeChannel]
@@ -881,6 +968,7 @@ export default function KeoTVHome() {
     setCategories(loadedCats);
     setPlaylists(loadedPlaylists);
     setFavCount(0);
+    startBackgroundLiveLoad(result.playlist, loadedCats);
 
     // Pick first non-fav category with channels (count > 0)
     let firstCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0);
@@ -915,6 +1003,8 @@ export default function KeoTVHome() {
 
   // Delete playlist handler
   const handleDeletePlaylist = async (id: string) => {
+    bgLoadTokenRef.current++;
+    setBgLoadStatus(null);
     await db.playlists.delete(id);
     const remainingPlaylists = await db.playlists.toArray();
     setPlaylists(remainingPlaylists);
@@ -1170,7 +1260,7 @@ export default function KeoTVHome() {
               >
                 {getCategoryIcon(cat.icon)}
                 <span>{cat.name}</span>
-                <span className="text-[10px] opacity-75 font-mono">({cat.count})</span>
+                {cat.count > 0 && <span className="text-[10px] opacity-75 font-mono">({cat.count})</span>}
               </button>
             );
           })}
@@ -1201,7 +1291,9 @@ export default function KeoTVHome() {
                   : 'Aucune chaîne dans ce bouquet'}
               </p>
               <p className="text-xs text-slate-400 max-w-xs">
-                {sortedCategories.length === 0
+                {categoryError
+                  ? categoryError
+                  : sortedCategories.length === 0
                   ? 'Vous pouvez recharger votre playlist pour récupérer tous vos bouquets TV, Films et Séries.'
                   : 'Si vos flux ne sont pas encore apparus en mémoire, vous pouvez les recharger en un clic.'}
               </p>
@@ -1442,6 +1534,13 @@ export default function KeoTVHome() {
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-sky-950/95 text-sky-200 border border-sky-500/50 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-2xl flex items-center space-x-2 backdrop-blur-md animate-fade-in pointer-events-none">
           <RefreshCw className="w-4 h-4 animate-spin text-sky-400" />
           <span>{syncStatusBanner}</span>
+        </div>
+      )}
+
+      {!syncStatusBanner && bgLoadStatus && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-emerald-950/95 text-emerald-200 border border-emerald-500/50 px-4 py-2 rounded-xl text-[11px] font-semibold shadow-2xl flex items-center space-x-2 backdrop-blur-md animate-fade-in pointer-events-none">
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
+          <span>{bgLoadStatus}</span>
         </div>
       )}
 
