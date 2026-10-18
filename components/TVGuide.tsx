@@ -55,10 +55,10 @@ export const TVGuide: React.FC<TVGuideProps> = ({
 
   // Auto-scroll focused channel into view
   useEffect(() => {
-    if (activePane === 'channels' && channelListRef.current) {
-      const activeElement = channelListRef.current.children[focusedChannelIndex] as HTMLElement;
-      if (activeElement) {
-        activeElement.scrollIntoView({
+    if (activePane === 'channels') {
+      const el = document.getElementById(`channel-item-${focusedChannelIndex}`);
+      if (el) {
+        el.scrollIntoView({
           behavior: 'smooth',
           block: 'nearest',
         });
@@ -68,10 +68,10 @@ export const TVGuide: React.FC<TVGuideProps> = ({
 
   // Auto-scroll focused category into view
   useEffect(() => {
-    if (activePane === 'categories' && categoryListRef.current) {
-      const activeElement = categoryListRef.current.children[focusedCategoryIndex] as HTMLElement;
-      if (activeElement) {
-        activeElement.scrollIntoView({
+    if (activePane === 'categories') {
+      const el = document.getElementById(`category-item-${focusedCategoryIndex}`);
+      if (el) {
+        el.scrollIntoView({
           behavior: 'smooth',
           block: 'nearest',
         });
@@ -152,12 +152,13 @@ export const TVGuide: React.FC<TVGuideProps> = ({
           return (
             <button
               key={cat.id}
+              id={`category-item-${idx}`}
               onClick={() => onSelectCategory(cat, idx)}
               className={`flex items-center justify-between px-3 py-2.5 mx-2 my-0.5 rounded-lg text-left text-sm transition-all duration-150 ${
                 isFocused
-                  ? 'bg-tv-focus text-white font-semibold shadow-tv-focus scale-[1.02]'
+                  ? 'bg-tv-focus text-white font-bold shadow-tv-focus scale-[1.02] ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg'
                   : isSelected
-                  ? 'bg-tv-card text-tv-accent font-medium border border-tv-border'
+                  ? 'bg-tv-card text-tv-accent font-semibold border border-tv-border'
                   : 'text-slate-300 hover:bg-tv-cardHover/70'
               }`}
             >
@@ -239,10 +240,11 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             return (
               <div
                 key={ch.id}
+                id={`channel-item-${idx}`}
                 onClick={() => onSelectChannel(ch, idx)}
                 className={`group flex items-center justify-between px-3.5 py-2.5 mx-2.5 my-0.5 rounded-xl cursor-pointer transition-all duration-150 border ${
                   isFocused
-                    ? 'bg-tv-cardHover border-tv-accent text-white shadow-tv-focus scale-[1.01]'
+                    ? 'bg-tv-focus border-tv-accent text-white shadow-xl shadow-sky-500/25 scale-[1.02] ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg'
                     : isActive
                     ? 'bg-tv-card border-tv-accent/50 text-slate-100'
                     : 'bg-tv-card/40 border-transparent hover:bg-tv-cardHover/50 text-slate-300'
@@ -252,7 +254,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 <div className="flex items-center space-x-3 min-w-0 flex-1">
                   <span
                     className={`text-xs font-mono font-bold w-6 text-right flex-shrink-0 ${
-                      isFocused ? 'text-tv-accent' : 'text-slate-500'
+                      isFocused ? 'text-white font-black' : 'text-slate-500'
                     }`}
                   >
                     {ch.num}

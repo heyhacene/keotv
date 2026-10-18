@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useEffect, useCallback, useRef } from 'react';
 import { NavigationPane } from '@/types/iptv';
 
-interface TVNavOptions {
+export interface TVNavOptions {
   activePane: NavigationPane;
   setActivePane: (pane: NavigationPane) => void;
   channelCount: number;
@@ -12,8 +12,12 @@ interface TVNavOptions {
   setFocusedCategoryIndex: (index: number | ((prev: number) => number)) => void;
   focusedChannelIndex: number;
   setFocusedChannelIndex: (index: number | ((prev: number) => number)) => void;
+  focusedMenuIndex: number;
+  setFocusedMenuIndex: (index: number | ((prev: number) => number)) => void;
+  onSelectCategory: (index: number) => void;
   onSelectChannel: (index: number, fullscreen: boolean) => void;
   onToggleFavorite: (channelIndex: number) => void;
+  onSelectMenuItem: (menuIndex: number) => void;
   isFullscreen: boolean;
   setIsFullscreen: (full: boolean) => void;
   onJumpToChannelNumber: (num: number) => void;
@@ -29,8 +33,12 @@ export function useTVNavigation({
   setFocusedCategoryIndex,
   focusedChannelIndex,
   setFocusedChannelIndex,
+  focusedMenuIndex,
+  setFocusedMenuIndex,
+  onSelectCategory,
   onSelectChannel,
   onToggleFavorite,
+  onSelectMenuItem,
   isFullscreen,
   setIsFullscreen,
   onJumpToChannelNumber,
@@ -41,9 +49,12 @@ export function useTVNavigation({
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      const keyCode = (e as any).keyCode || 0;
+      const key = e.key || '';
+
       // Direct Channel Number Input (0-9)
-      if (e.key >= '0' && e.key <= '9') {
-        numberBufferRef.current += e.key;
+      if (key >= '0' && key <= '9') {
+        numberBufferRef.current += key;
         if (numberTimerRef.current) clearTimeout(numberTimerRef.current);
         numberTimerRef.current = setTimeout(() => {
           const channelNum = parseInt(numberBufferRef.current, 10);
@@ -55,9 +66,61 @@ export function useTVNavigation({
         return;
       }
 
+      // Identify key intentions across TV remotes & web browsers
+      const isEnter =
+        key === 'Enter' ||
+        key === 'Select' ||
+        key === 'Ok' ||
+        key === 'Accept' ||
+        keyCode === 13 ||
+        keyCode === 23 || // Android KEYCODE_DPAD_CENTER
+        keyCode === 66;   // Android KEYCODE_ENTER
+
+      const isUp =
+        key === 'ArrowUp' ||
+        key === 'Up' ||
+        keyCode === 38 ||
+        keyCode === 19;   // Android KEYCODE_DPAD_UP
+
+      const isDown =
+        key === 'ArrowDown' ||
+        key === 'Down' ||
+        keyCode === 40 ||
+        keyCode === 20;   // Android KEYCODE_DPAD_DOWN
+
+      const isLeft =
+        key === 'ArrowLeft' ||
+        key === 'Left' ||
+        keyCode === 37 ||
+        keyCode === 21;   // Android KEYCODE_DPAD_LEFT
+
+      const isRight =
+        key === 'ArrowRight' ||
+        key === 'Right' ||
+        keyCode === 39 ||
+        keyCode === 22;   // Android KEYCODE_DPAD_RIGHT
+
+      const isBack =
+        key === 'Escape' ||
+        key === 'Backspace' ||
+        key === 'GoBack' ||
+        key === 'Back' ||
+        keyCode === 27 ||
+        keyCode === 4;    // Android KEYCODE_BACK
+
+      const isFav =
+        key === 'f' ||
+        key === 'F' ||
+        e.code === 'KeyF' ||
+        keyCode === 185;  // PROG_YELLOW on TV remotes
+
+      const isChannelUp = key === 'ChannelUp' || key === 'PageUp' || keyCode === 33 || keyCode === 166;
+      const isChannelDown = key === 'ChannelDown' || key === 'PageDown' || keyCode === 34 || keyCode === 167;
+
       // Favorite toggle key ('f' or Media/Yellow button)
-      if (e.key === 'f' || e.key === 'F' || e.code === 'KeyF') {
+      if (isFav) {
         if (activePane === 'channels' && channelCount > 0) {
+          e.preventDefault();
           onToggleFavorite(focusedChannelIndex);
           return;
         }
@@ -65,7 +128,7 @@ export function useTVNavigation({
 
       // Handle Fullscreen Player Controls
       if (isFullscreen) {
-        if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'GoBack') {
+        if (isBack) {
           e.preventDefault();
           if (onBack) {
             onBack();
@@ -74,19 +137,17 @@ export function useTVNavigation({
           setIsFullscreen(false);
           return;
         }
-        if (e.key === 'ArrowUp') {
+        if (isUp || isChannelUp) {
           e.preventDefault();
-          // Zap to previous channel in fullscreen
           setFocusedChannelIndex((prev) => {
-            const next = prev > 0 ? prev - 1 : channelCount - 1;
+            const next = prev > 0 ? prev - 1 : Math.max(0, channelCount - 1);
             onSelectChannel(next, true);
             return next;
           });
           return;
         }
-        if (e.key === 'ArrowDown') {
+        if (isDown || isChannelDown) {
           e.preventDefault();
-          // Zap to next channel in fullscreen
           setFocusedChannelIndex((prev) => {
             const next = prev < channelCount - 1 ? prev + 1 : 0;
             onSelectChannel(next, true);
@@ -94,79 +155,87 @@ export function useTVNavigation({
           });
           return;
         }
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          // Toggle OSD or exit fullscreen
-          return;
+        return;
+      }
+
+      // TV Guide Navigation
+      if (isUp) {
+        e.preventDefault();
+        if (activePane === 'channels') {
+          setFocusedChannelIndex((prev) => (prev > 0 ? prev - 1 : Math.max(0, channelCount - 1)));
+        } else if (activePane === 'categories') {
+          setFocusedCategoryIndex((prev) => {
+            const next = prev > 0 ? prev - 1 : Math.max(0, categoryCount - 1);
+            onSelectCategory(next);
+            return next;
+          });
+        } else if (activePane === 'menu') {
+          setFocusedMenuIndex((prev) => (prev > 0 ? prev - 1 : 5));
         }
         return;
       }
 
-      // Normal TV Guide Navigation
-      switch (e.key) {
-        case 'ArrowUp':
-          e.preventDefault();
-          if (activePane === 'channels') {
-            setFocusedChannelIndex((prev) => (prev > 0 ? prev - 1 : Math.max(0, channelCount - 1)));
-          } else if (activePane === 'categories') {
-            setFocusedCategoryIndex((prev) => (prev > 0 ? prev - 1 : Math.max(0, categoryCount - 1)));
-          }
-          break;
+      if (isDown) {
+        e.preventDefault();
+        if (activePane === 'channels') {
+          setFocusedChannelIndex((prev) => (prev < channelCount - 1 ? prev + 1 : 0));
+        } else if (activePane === 'categories') {
+          setFocusedCategoryIndex((prev) => {
+            const next = prev < categoryCount - 1 ? prev + 1 : 0;
+            onSelectCategory(next);
+            return next;
+          });
+        } else if (activePane === 'menu') {
+          setFocusedMenuIndex((prev) => (prev < 5 ? prev + 1 : 0));
+        }
+        return;
+      }
 
-        case 'ArrowDown':
-          e.preventDefault();
-          if (activePane === 'channels') {
-            setFocusedChannelIndex((prev) => (prev < channelCount - 1 ? prev + 1 : 0));
-          } else if (activePane === 'categories') {
-            setFocusedCategoryIndex((prev) => (prev < categoryCount - 1 ? prev + 1 : 0));
-          }
-          break;
+      if (isLeft) {
+        e.preventDefault();
+        if (activePane === 'channels') {
+          setActivePane('categories');
+        } else if (activePane === 'categories') {
+          setActivePane('menu');
+        }
+        return;
+      }
 
-        case 'ArrowLeft':
-          e.preventDefault();
-          if (activePane === 'channels') {
-            setActivePane('categories');
-          } else if (activePane === 'categories') {
-            setActivePane('menu');
-          }
-          break;
+      if (isRight) {
+        e.preventDefault();
+        if (activePane === 'menu') {
+          setActivePane('categories');
+        } else if (activePane === 'categories') {
+          setActivePane('channels');
+        }
+        return;
+      }
 
-        case 'ArrowRight':
-          e.preventDefault();
-          if (activePane === 'menu') {
-            setActivePane('categories');
-          } else if (activePane === 'categories') {
-            setActivePane('channels');
-          }
-          break;
+      if (isEnter) {
+        e.preventDefault();
+        if (activePane === 'menu') {
+          onSelectMenuItem(focusedMenuIndex);
+        } else if (activePane === 'categories') {
+          onSelectCategory(focusedCategoryIndex);
+          setActivePane('channels');
+        } else if (activePane === 'channels') {
+          onSelectChannel(focusedChannelIndex, false);
+        }
+        return;
+      }
 
-        case 'Enter':
-        case 'Select':
-          e.preventDefault();
-          if (activePane === 'categories') {
-            setActivePane('channels');
-          } else if (activePane === 'channels') {
-            onSelectChannel(focusedChannelIndex, false);
-          }
-          break;
-
-        case 'Escape':
-        case 'Backspace':
-        case 'GoBack':
-          e.preventDefault();
-          if (onBack) {
-            onBack();
-            return;
-          }
-          if (activePane === 'channels') {
-            setActivePane('categories');
-          } else if (activePane === 'categories') {
-            setActivePane('menu');
-          }
-          break;
-
-        default:
-          break;
+      if (isBack) {
+        e.preventDefault();
+        if (onBack) {
+          onBack();
+          return;
+        }
+        if (activePane === 'channels') {
+          setActivePane('categories');
+        } else if (activePane === 'categories') {
+          setActivePane('menu');
+        }
+        return;
       }
     },
     [
@@ -177,10 +246,14 @@ export function useTVNavigation({
       categoryCount,
       focusedCategoryIndex,
       focusedChannelIndex,
+      focusedMenuIndex,
       setFocusedCategoryIndex,
       setFocusedChannelIndex,
+      setFocusedMenuIndex,
+      onSelectCategory,
       onSelectChannel,
       onToggleFavorite,
+      onSelectMenuItem,
       setIsFullscreen,
       onJumpToChannelNumber,
       onBack,

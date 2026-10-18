@@ -53,6 +53,28 @@ export default function KeoTVHome() {
   const [activePane, setActivePane] = useState<NavigationPane>('channels');
   const [focusedCategoryIndex, setFocusedCategoryIndex] = useState<number>(0);
   const [focusedChannelIndex, setFocusedChannelIndex] = useState<number>(0);
+  const [focusedMenuIndex, setFocusedMenuIndex] = useState<number>(0);
+
+  // Layout mode: true ONLY for smartphones held strictly in vertical portrait mode
+  const [isPortraitMobile, setIsPortraitMobile] = useState<boolean>(false);
+
+  useEffect(() => {
+    const updateLayoutMode = () => {
+      // Android TVs and landscape tablets/monitors are always landscape (e.g. 960x540, 1280x720, 1920x1080).
+      // We only switch to the single-column smartphone layout if the device is strictly in vertical portrait
+      // AND has a narrow width (< 700px).
+      const isPortrait = typeof window !== 'undefined' && window.innerHeight > window.innerWidth && window.innerWidth < 700;
+      setIsPortraitMobile(isPortrait);
+    };
+
+    updateLayoutMode();
+    window.addEventListener('resize', updateLayoutMode);
+    window.addEventListener('orientationchange', updateLayoutMode);
+    return () => {
+      window.removeEventListener('resize', updateLayoutMode);
+      window.removeEventListener('orientationchange', updateLayoutMode);
+    };
+  }, []);
 
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -992,8 +1014,24 @@ export default function KeoTVHome() {
     setFocusedCategoryIndex,
     focusedChannelIndex,
     setFocusedChannelIndex,
+    focusedMenuIndex,
+    setFocusedMenuIndex,
+    onSelectCategory: (idx) => {
+      const cat = sortedCategories[idx];
+      if (cat) {
+        handleSelectCategory(cat, idx);
+      }
+    },
     onSelectChannel: handleSelectChannel,
     onToggleFavorite: (idx) => handleToggleFavorite(idx),
+    onSelectMenuItem: (menuIdx) => {
+      if (menuIdx === 0) handleSelectSection('live');
+      else if (menuIdx === 1) handleSelectSection('vod');
+      else if (menuIdx === 2) handleSelectSection('series');
+      else if (menuIdx === 3) handleSelectSection('fav');
+      else if (menuIdx === 4) setIsSettingsModalOpen(true);
+      else if (menuIdx === 5) setIsSyncModalOpen(true);
+    },
     isFullscreen,
     setIsFullscreen,
     onJumpToChannelNumber: handleJumpToChannelNumber,
@@ -1232,9 +1270,10 @@ export default function KeoTVHome() {
   return (
     <main className="h-screen w-screen flex flex-col bg-tv-bg overflow-hidden font-tv select-none text-slate-100 relative">
       {/* ============================================================== */}
-      {/* 1. MOBILE VIEW (Visible on Portrait / Small Screens < 1024px)  */}
+      {/* 1. MOBILE VIEW (Visible ONLY on Portrait Smartphones < 700px) */}
       {/* ============================================================== */}
-      <div className="flex lg:hidden flex-col h-full w-full bg-tv-bg overflow-hidden">
+      {isPortraitMobile && (
+        <div className="flex flex-col h-full w-full bg-tv-bg overflow-hidden">
         {/* Top Video Player (Expands to fixed inset-0 if isFullscreen is active) */}
         <div
           className={`bg-black flex-shrink-0 transition-all ${
@@ -1541,53 +1580,63 @@ export default function KeoTVHome() {
           </button>
         </div>
       </div>
+      )}
 
       {/* ============================================================== */}
-      {/* 2. TV / LANDSCAPE VIEW (Screens >= 1024px or Android TV 16:9)  */}
+      {/* 2. TV / LANDSCAPE VIEW (Android TV 16:9, Tablets, Monitors)   */}
       {/* ============================================================== */}
-      <div className="hidden lg:flex flex-col h-full w-full">
-        <TopBar
-          currentCategoryName={selectedCategory?.name}
-          onToggleFullscreen={() => setIsFullscreen(true)}
-        />
-
-        <div className="flex-1 flex overflow-hidden">
-          <NavigationSidebar
-            activeSection={activeSection}
-            onSelectSection={(sec) => handleSelectSection(sec as any)}
-            activePane={activePane}
-            onOpenSyncModal={() => setIsSyncModalOpen(true)}
-            onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
-          />
-
-          <TVGuide
-            categories={sortedCategories}
-            channels={filteredChannels}
-            selectedCategory={selectedCategory}
-            focusedCategoryIndex={focusedCategoryIndex}
-            focusedChannelIndex={focusedChannelIndex}
-            activeChannel={activeChannel}
-            currentEpg={currentEpg}
-            nextEpg={nextEpg}
-            activePane={activePane}
-            onSelectCategory={handleSelectCategory}
-            onSelectChannel={(ch, idx) => {
-              setFocusedChannelIndex(idx);
-              handleSelectChannel(idx, false);
-            }}
-            onToggleFavorite={handleToggleFavorite}
-            onOpenSyncModal={() => setIsSyncModalOpen(true)}
-            onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
+      {!isPortraitMobile && (
+        <div className="flex flex-col h-full w-full">
+          <TopBar
+            currentCategoryName={selectedCategory?.name}
             onToggleFullscreen={() => setIsFullscreen(true)}
-            isStopped={isStopped}
-            onTogglePlayStop={() => setIsStopped(!isStopped)}
-            categorySort={categorySort}
-            onCategorySortChange={handleCategorySortChange}
-            channelSort={channelSort}
-            onChannelSortChange={handleChannelSortChange}
           />
+
+          <div className="flex-1 flex overflow-hidden">
+            <NavigationSidebar
+              activeSection={activeSection}
+              onSelectSection={(sec) => handleSelectSection(sec as any)}
+              activePane={activePane}
+              focusedMenuIndex={focusedMenuIndex}
+              onOpenSyncModal={() => setIsSyncModalOpen(true)}
+              onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
+            />
+
+            <TVGuide
+              categories={sortedCategories}
+              channels={filteredChannels}
+              selectedCategory={selectedCategory}
+              focusedCategoryIndex={focusedCategoryIndex}
+              focusedChannelIndex={focusedChannelIndex}
+              activeChannel={activeChannel}
+              currentEpg={currentEpg}
+              nextEpg={nextEpg}
+              activePane={activePane}
+              onSelectCategory={handleSelectCategory}
+              onSelectChannel={(ch, idx) => {
+                setFocusedChannelIndex(idx);
+                handleSelectChannel(idx, false);
+              }}
+              onToggleFavorite={handleToggleFavorite}
+              onOpenSyncModal={() => setIsSyncModalOpen(true)}
+              onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
+              onToggleFullscreen={() => {
+                if (isNativePlayerAvailable() && activeChannel) {
+                  handleSelectChannel(activeChannel, true);
+                } else {
+                  setIsFullscreen(true);
+                }
+              }}
+              isStopped={isStopped}
+              onTogglePlayStop={() => setIsStopped(!isStopped)}
+              categorySort={categorySort}
+              onCategorySortChange={handleCategorySortChange}
+              channelSort={channelSort}
+              onChannelSortChange={handleChannelSortChange}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* ============================================================== */}
       {/* 3. MODALS (Settings Hub, Category Drawer, Xtream & Sync)       */}
@@ -1603,7 +1652,7 @@ export default function KeoTVHome() {
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
         onResyncPlaylist={handleResyncPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={15}
+        currentBuildNumber={17}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}

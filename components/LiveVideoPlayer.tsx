@@ -221,17 +221,26 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
         muted={isMuted}
       />
 
-      {/* Native player launcher (Android) */}
+      {/* Native player launcher (Android TV & Mobile) */}
       {nativeMode && (
         <div
           onClick={openNativePlayer}
-          className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-tv-surface text-center p-4 select-none cursor-pointer"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ' || (e as any).keyCode === 23 || (e as any).keyCode === 13) {
+              e.preventDefault();
+              openNativePlayer();
+            }
+          }}
+          className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-tv-surface text-center p-4 select-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-tv-accent group"
         >
-          <div className="w-14 h-14 rounded-full bg-tv-focus flex items-center justify-center mb-2 shadow-xl">
+          <div className="w-14 h-14 rounded-full bg-tv-focus flex items-center justify-center mb-2 shadow-xl group-hover:scale-110 group-focus:scale-110 transition-transform">
             <Play className="w-7 h-7 text-white fill-white" />
           </div>
           <h3 className="text-sm font-bold text-white line-clamp-2">{channel?.name || 'Aucune chaîne'}</h3>
-          <p className="text-[11px] text-slate-400 mt-1">Touchez pour lancer la lecture</p>
+          <p className="text-[11px] text-slate-300 mt-1">
+            Appuyez sur <span className="text-tv-accent font-bold">OK</span> pour regarder en plein écran
+          </p>
         </div>
       )}
 
