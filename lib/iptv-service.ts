@@ -247,6 +247,100 @@ export async function resolveFirstEpisodeUrl(
   return null;
 }
 
+export interface SeriesEpisode {
+  id: string;
+  season: number;
+  episodeNum: number;
+  title: string;
+  url: string;
+  duration?: string;
+  plot?: string;
+  image?: string;
+}
+
+export interface SeriesSeason {
+  season: number;
+  name: string;
+  episodes: SeriesEpisode[];
+}
+
+export interface SeriesDetails {
+  name: string;
+  cover?: string;
+  plot?: string;
+  genre?: string;
+  year?: string;
+  rating?: string;
+  seasons: SeriesSeason[];
+}
+
+// Fetch a series with its seasons and episodes (get_series_info)
+export async function fetchSeriesInfo(
+  serverUrl: string,
+  username: string,
+  password: string,
+  seriesId: string | number
+): Promise<SeriesDetails> {
+  let server = serverUrl.trim().replace(/\/+$/, '');
+  if (!server.startsWith('http://') && !server.startsWith('https://')) {
+    server = 'http://' + server;
+  }
+  const encUser = encodeURIComponent(decodeURIComponent(username.trim()));
+  const encPass = encodeURIComponent(decodeURIComponent(password.trim()));
+  const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_series_info&series_id=${seriesId}`;
+
+  const data = await fetchHttp(url, 'json');
+  const info = data?.info || {};
+  const seasonMeta = toArray<any>(data?.seasons);
+  const seasons: SeriesSeason[] = [];
+
+  // `episodes` is either { "1": [..], "2": [..] } or an array of arrays
+  const rawEpisodes = data?.episodes;
+  const seasonKeys: string[] = Array.isArray(rawEpisodes)
+    ? rawEpisodes.map((_: any, i: number) => String(i + 1))
+    : Object.keys(rawEpisodes || {});
+  seasonKeys.sort((a, b) => Number(a) - Number(b));
+
+  for (const sk of seasonKeys) {
+    const list = toArray<any>(Array.isArray(rawEpisodes) ? rawEpisodes[Number(sk) - 1] : rawEpisodes[sk]);
+    const episodes: SeriesEpisode[] = [];
+    for (const ep of list) {
+      const epId = ep?.id || ep?.stream_id;
+      if (!epId) continue;
+      const ext = ep.container_extension || 'mp4';
+      const num = Number(ep.episode_num) || episodes.length + 1;
+      episodes.push({
+        id: String(epId),
+        season: Number(sk),
+        episodeNum: num,
+        title: ep.title ? String(ep.title) : `Épisode ${num}`,
+        url: `${server}/series/${encUser}/${encPass}/${epId}.${ext}`,
+        duration: ep.info?.duration ? String(ep.info.duration) : undefined,
+        plot: ep.info?.plot ? String(ep.info.plot) : undefined,
+        image: ep.info?.movie_image ? String(ep.info.movie_image) : undefined,
+      });
+    }
+    if (episodes.length === 0) continue;
+    episodes.sort((a, b) => a.episodeNum - b.episodeNum);
+    const meta = seasonMeta.find((s: any) => String(s?.season_number) === sk);
+    seasons.push({
+      season: Number(sk),
+      name: meta?.name ? String(meta.name) : `Saison ${sk}`,
+      episodes,
+    });
+  }
+
+  return {
+    name: info.name ? String(info.name) : '',
+    cover: info.cover ? String(info.cover) : undefined,
+    plot: info.plot ? String(info.plot) : undefined,
+    genre: info.genre ? String(info.genre) : undefined,
+    year: info.releaseDate ? String(info.releaseDate) : info.release_date ? String(info.release_date) : undefined,
+    rating: info.rating ? String(info.rating) : undefined,
+    seasons,
+  };
+}
+
 // Resolve ALL episodes (every season, in order) of a series so the native player can zap between them
 export async function resolveSeriesEpisodes(
   serverUrl: string,

@@ -186,9 +186,9 @@ jobs:
             Cliquez sur le fichier **KeoTV-Build-${{ github.run_number }}.apk** ci-dessous pour installer ou mettre à jour directement votre application.
 
             #### 🚀 Nouveautés & Correctifs Majeurs :
-            - **Lecteur vidéo natif Android (ExoPlayer)** : lecture directe des chaînes TV, films et séries (TS / HLS / MP4 / MKV), zapping entre chaînes, bouton Retour pour revenir à la liste.
-            - **Playlist complète** : toutes les chaînes TV sont téléchargées en arrière-plan bouquet par bouquet (plus de liste tronquée).
-            - **Films / Séries corrigés** : chaque section utilise sa propre API Xtream, plus de contenu mélangé. Les séries s'ouvrent avec tous leurs épisodes.
+            - **Page dédiée pour les Séries (Saisons & Épisodes)** : Un clic sur une série ouvre désormais sa fiche complète avec affiche, résumé, accordéons de chaque saison et la liste de tous les épisodes.
+            - **Choix et lecture par épisode** : Lancement direct de n'importe quel épisode, avec passage automatique ou zapping à l'épisode suivant dans le lecteur natif.
+            - **Bouton Retour hiérarchique** : La touche Retour ferme la fiche de la série et revient à la liste des séries.
             - **Mise à jour directe sans désinstallation** : Signature cryptographique officielle permanente (`versionCode ${{ github.run_number }}`).
           files: |
             KeoTV.apk

@@ -13,6 +13,7 @@ import { XtreamModal } from '@/components/XtreamModal';
 import { SyncModal } from '@/components/SyncModal';
 import { CategoryDrawerModal } from '@/components/CategoryDrawerModal';
 import { SettingsModal } from '@/components/SettingsModal';
+import { SeriesDetailModal } from '@/components/SeriesDetailModal';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
 import {
   syncXtreamPlaylist,
@@ -20,6 +21,7 @@ import {
   fetchCategoryStreamsOnDemand,
   resolveSeriesEpisodes,
   loadAllLiveCategories,
+  SeriesEpisode,
 } from '@/lib/iptv-service';
 import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
 
@@ -69,6 +71,8 @@ export default function KeoTVHome() {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
+  const [selectedSeriesForDetails, setSelectedSeriesForDetails] = useState<Channel | null>(null);
+  const [seriesServerCreds, setSeriesServerCreds] = useState<{ serverUrl: string; username: string; password: string } | null>(null);
 
   // Channel loader for the selected category from IndexedDB with multi-tier lookup & on-demand fetch
   const loadCategoryChannels = useCallback(
@@ -649,7 +653,41 @@ export default function KeoTVHome() {
     }
   }, [focusedChannelIndex, filteredChannels]);
 
-  // Channel Selection: opens the native full screen player (ExoPlayer) on Android
+  // Play an episode chosen from the series detail page
+  const handlePlaySeriesEpisode = useCallback(
+    async (episode: SeriesEpisode, allEpisodes: SeriesEpisode[]) => {
+      const index = Math.max(0, allEpisodes.findIndex((e) => e.id === episode.id));
+      if (isNativePlayerAvailable()) {
+        try {
+          await NativePlayer.play({
+            urls: allEpisodes.map((e) => e.url),
+            titles: allEpisodes.map((e) => `${selectedSeriesForDetails?.name || 'Série'} — S${String(e.season).padStart(2, '0')}E${String(e.episodeNum).padStart(2, '0')} ${e.title}`),
+            index,
+            userAgent: NATIVE_PLAYER_USER_AGENT,
+            isLive: false,
+          });
+        } catch (err: any) {
+          console.error('Native player episode error:', err);
+          alert(`Lecture impossible : ${err?.message || err}`);
+        }
+      } else {
+        if (selectedSeriesForDetails) {
+          const epChannel: Channel = {
+            ...selectedSeriesForDetails,
+            id: `ch_ep_${episode.id}`,
+            name: `${selectedSeriesForDetails.name} — S${episode.season}E${episode.episodeNum} ${episode.title}`,
+            stream_url: episode.url,
+          };
+          setActiveChannel(epChannel);
+          setIsStopped(false);
+          setIsFullscreen(true);
+        }
+      }
+    },
+    [selectedSeriesForDetails]
+  );
+
+  // Channel Selection: opens Series Details for series, or native player for live TV / VOD movies
   const handleSelectChannel = useCallback(
     async (target: Channel | number, forceFullscreen: boolean = false) => {
       const targetChannel = typeof target === 'number' ? filteredChannels[target] : target;
@@ -661,46 +699,36 @@ export default function KeoTVHome() {
       setCurrentEpg(epg.current);
       setNextEpg(epg.next);
 
-      // ---- Native Android player (reliable IPTV playback: no CORS, TS/HLS/MP4/MKV, custom User-Agent) ----
+      // ---- SÉRIES: A click on a series opens its dedicated page with seasons and all episodes! ----
+      if (targetChannel.stream_type === 'series' || activeSection === 'series') {
+        let serverUrl = '';
+        let username = '';
+        let password = '';
+        const pl = (await db.playlists.toArray()).find((p) => p.type === 'xtream' && p.username && p.password);
+        if (pl) {
+          serverUrl = pl.server_url;
+          username = pl.username || '';
+          password = pl.password || '';
+        } else {
+          const saved = await getSetting<any>('last_xtream_config', null);
+          if (saved?.server_url && saved?.username && saved?.password) {
+            serverUrl = saved.server_url;
+            username = saved.username;
+            password = saved.password;
+          }
+        }
+        if (!serverUrl || !username || !password) {
+          alert('Identifiants Xtream introuvables : rechargez votre playlist.');
+          return;
+        }
+        setSelectedSeriesForDetails(targetChannel);
+        setSeriesServerCreds({ serverUrl, username, password });
+        return;
+      }
+
+      // ---- Native Android player (Live TV & VOD Films: reliable IPTV playback, no CORS, custom User-Agent) ----
       if (isNativePlayerAvailable()) {
         try {
-          if (targetChannel.stream_type === 'series') {
-            let serverUrl = '';
-            let username = '';
-            let password = '';
-            const pl = (await db.playlists.toArray()).find((p) => p.type === 'xtream' && p.username && p.password);
-            if (pl) {
-              serverUrl = pl.server_url;
-              username = pl.username || '';
-              password = pl.password || '';
-            } else {
-              const saved = await getSetting<any>('last_xtream_config', null);
-              if (saved?.server_url && saved?.username && saved?.password) {
-                serverUrl = saved.server_url;
-                username = saved.username;
-                password = saved.password;
-              }
-            }
-            if (!serverUrl) {
-              alert('Identifiants Xtream introuvables : rechargez votre playlist.');
-              return;
-            }
-            const seriesId = targetChannel.id.replace(/^ch_xtream_series_/, '');
-            const episodes = await resolveSeriesEpisodes(serverUrl, username, password, seriesId);
-            if (episodes.length === 0) {
-              alert(`Aucun épisode disponible pour « ${targetChannel.name} » sur ce serveur.`);
-              return;
-            }
-            await NativePlayer.play({
-              urls: episodes.map((e) => e.url),
-              titles: episodes.map((e) => `${targetChannel.name} — ${e.title}`),
-              index: 0,
-              userAgent: NATIVE_PLAYER_USER_AGENT,
-              isLive: false,
-            });
-            return;
-          }
-
           const playlist = filteredChannels.length > 0 ? filteredChannels : [targetChannel];
           const startIndex = Math.max(0, playlist.findIndex((c) => c.id === targetChannel.id));
           await NativePlayer.play({
@@ -724,7 +752,7 @@ export default function KeoTVHome() {
         setIsFullscreen(true);
       }
     },
-    [filteredChannels, activeChannel]
+    [filteredChannels, activeChannel, activeSection]
   );
 
   // Jump directly to channel by number
@@ -787,6 +815,12 @@ export default function KeoTVHome() {
   // ANDROID HIERARCHICAL BACK BUTTON & DOUBLE-PRESS TO EXIT
   // ==============================================================
   const handleAndroidBack = useCallback(() => {
+    // 0. Series details modal -> close series page and return to series list
+    if (selectedSeriesForDetails) {
+      setSelectedSeriesForDetails(null);
+      return;
+    }
+
     // 1. Fullscreen player -> exit fullscreen
     if (isFullscreen) {
       setIsFullscreen(false);
@@ -831,6 +865,7 @@ export default function KeoTVHome() {
       }, 2000);
     }
   }, [
+    selectedSeriesForDetails,
     isFullscreen,
     isSettingsModalOpen,
     isCategoryModalOpen,
@@ -1498,7 +1533,7 @@ export default function KeoTVHome() {
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
         onResyncPlaylist={handleResyncPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={11}
+        currentBuildNumber={14}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
@@ -1528,6 +1563,18 @@ export default function KeoTVHome() {
         onApplySyncCode={handleApplySyncCode}
         onForceSync={handleForceSync}
       />
+
+      {/* Series Detail Full Page Modal (Seasons & Episodes) */}
+      {selectedSeriesForDetails && seriesServerCreds && (
+        <SeriesDetailModal
+          series={selectedSeriesForDetails}
+          serverUrl={seriesServerCreds.serverUrl}
+          username={seriesServerCreds.username}
+          password={seriesServerCreds.password}
+          onClose={() => setSelectedSeriesForDetails(null)}
+          onPlayEpisode={handlePlaySeriesEpisode}
+        />
+      )}
 
       {/* Floating Status & Back Toast Notifications */}
       {syncStatusBanner && (
