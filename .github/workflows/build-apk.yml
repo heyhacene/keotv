@@ -157,12 +157,13 @@ jobs:
           name: "KeoTV v1.0.0 (Build ${{ github.run_number }})"
           body: |
             ### 📺 KeoTV v1.0.0 (Build ${{ github.run_number }})
-            Cliquez sur le fichier **KeoTV-Build-${{ github.run_number }}.apk** ci-dessous pour mettre à jour directement votre application.
+            Cliquez sur le fichier **KeoTV-Build-${{ github.run_number }}.apk** ci-dessous pour installer ou mettre à jour directement votre application.
 
-            #### 🔒 Signature Cryptographique & Mises à Jour Directes :
-            - **Mise à jour sans désinstallation** : Cet APK est signé cryptographiquement avec le certificat officiel permanent KeoTV et un numéro de version strictement croissant (`versionCode ${{ github.run_number }}`).
-            - **Navigation par Groupe & Catégories restaurée** : Tiroir complet de groupes accessible d'un toucher (`Groupes` en bas ou sélecteur de groupe en haut).
-            - **Correction du lecteur vidéo & Plein écran** : Flux unique garanti, suppression du double flux et de l'icône doublon.
+            #### 🚀 Nouveautés & Correctifs Majeurs :
+            - **Affichage garanti de tous les flux TV, Films & Séries** : Chargement instantané par bouquet, headers réseau IPTV compatibles pour éliminer les erreurs 403 / listes vides.
+            - **Séparation stricte Films vs Séries** : Les catégories VOD et Séries sont désormais parfaitement isolées et dédoublonnées (plus aucun contenu identique dans les deux sections).
+            - **Lecture directe des Séries** : Résolution dynamique et lecture immédiate du premier épisode (S01E01).
+            - **Mise à jour directe sans désinstallation** : Signature cryptographique officielle permanente (`versionCode ${{ github.run_number }}`).
           files: |
             KeoTV.apk
             KeoTV-Build-${{ github.run_number }}.apk

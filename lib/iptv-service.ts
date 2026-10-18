@@ -20,6 +20,9 @@ export function toArray<T = any>(data: any): T[] {
   return [];
 }
 
+// Standard IPTV Player User-Agent accepted by all IPTV providers & CDNs
+const IPTV_USER_AGENT = 'IPTVSmartersPro/3.1.5 (Linux; Android 12)';
+
 // Universal HTTP fetcher that bypasses CORS on Android TV / Mobile using Capacitor Native HTTP
 export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'json'): Promise<any> {
   const cleanUrl = url.trim();
@@ -28,9 +31,14 @@ export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'js
     try {
       const response = await CapacitorHttp.get({
         url: cleanUrl,
+        headers: {
+          'User-Agent': IPTV_USER_AGENT,
+          'Accept': responseType === 'json' ? 'application/json, text/plain, */*' : '*/*',
+          'Connection': 'keep-alive',
+        },
         responseType: responseType === 'json' ? 'json' : 'text',
-        connectTimeout: 25000,
-        readTimeout: 60000,
+        connectTimeout: 20000,
+        readTimeout: 35000,
       });
 
       if (response.status >= 400) {
@@ -38,12 +46,17 @@ export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'js
       }
 
       if (response.data !== undefined && response.data !== null) {
-        if (responseType === 'json' && typeof response.data === 'string') {
-          try {
-            return JSON.parse(response.data);
-          } catch {
-            return response.data;
+        if (responseType === 'json') {
+          if (typeof response.data === 'string') {
+            const trimmed = response.data.trim();
+            if (!trimmed || trimmed === 'null') return [];
+            try {
+              return JSON.parse(trimmed);
+            } catch {
+              return response.data;
+            }
           }
+          return response.data;
         }
         return response.data;
       }
@@ -68,6 +81,41 @@ export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'js
   }
   return await res.text();
 }
+
+// Category classification helpers to guarantee 100% strict separation between Films and Séries
+export function isSeriesCategory(name: string): boolean {
+  const upper = (name || '').toUpperCase();
+  return (
+    upper.includes('SERIE') ||
+    upper.includes('SERIES') ||
+    upper.includes('SÉRIE') ||
+    upper.includes('SÉRIES') ||
+    upper.includes('SAISON') ||
+    upper.includes('SEASON') ||
+    upper.includes('EPISODE') ||
+    upper.includes('ÉPISODE') ||
+    upper.includes('ANIME') ||
+    upper.includes('ANIMES') ||
+    upper.includes('MANGA') ||
+    upper.includes('DRAMA')
+  );
+}
+
+export function isFilmCategory(name: string): boolean {
+  const upper = (name || '').toUpperCase();
+  return (
+    upper.includes('FILM') ||
+    upper.includes('FILMS') ||
+    upper.includes('MOVIE') ||
+    upper.includes('MOVIES') ||
+    upper.includes('CINEMA') ||
+    upper.includes('CINÉMA') ||
+    upper.includes('VOD') ||
+    upper.includes('SPECTACLE') ||
+    upper.includes('BOX OFFICE')
+  );
+}
+
 
 // Detect category icon based on category name
 export function detectCategoryIcon(name: string): string {
@@ -160,14 +208,64 @@ export interface FetchCategoryStreamsParams {
   streamType: 'live' | 'vod' | 'series';
 }
 
+// Resolve first playable episode URL for a TV series from Xtream API
+export async function resolveFirstEpisodeUrl(
+  serverUrl: string,
+  username: string,
+  password: string,
+  seriesId: string | number
+): Promise<string | null> {
+  let server = serverUrl.trim().replace(/\/+$/, '');
+  if (!server.startsWith('http://') && !server.startsWith('https://')) {
+    server = 'http://' + server;
+  }
+  const cleanUser = decodeURIComponent(username.trim());
+  const cleanPass = decodeURIComponent(password.trim());
+  const encUser = encodeURIComponent(cleanUser);
+  const encPass = encodeURIComponent(cleanPass);
+
+  const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_series_info&series_id=${seriesId}`;
+  try {
+    const data = await fetchHttp(url, 'json');
+    if (data && data.episodes) {
+      const seasonKeys = Object.keys(data.episodes).sort((a, b) => Number(a) - Number(b));
+      for (const sk of seasonKeys) {
+        const epList = data.episodes[sk];
+        if (Array.isArray(epList) && epList.length > 0) {
+          const firstEp = epList[0];
+          const epId = firstEp.id || firstEp.stream_id;
+          const ext = firstEp.container_extension || 'mp4';
+          if (epId) {
+            return `${server}/series/${encUser}/${encPass}/${epId}.${ext}`;
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Failed to resolve series episode url:', err);
+  }
+  return null;
+}
+
+export interface FetchCategoryStreamsParams {
+  serverUrl: string;
+  username: string;
+  password: string;
+  categoryId: string;
+  categoryName: string;
+  streamType: 'live' | 'vod' | 'series';
+}
+
 // On-demand category fetcher: fetches streams for a specific category in ~200ms
 export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsParams): Promise<Channel[]> {
   let server = params.serverUrl.trim().replace(/\/+$/, '');
   if (!server.startsWith('http://') && !server.startsWith('https://')) {
     server = 'http://' + server;
   }
-  const username = encodeURIComponent(params.username.trim());
-  const password = encodeURIComponent(params.password.trim());
+  const cleanUser = decodeURIComponent(params.username.trim());
+  const cleanPass = decodeURIComponent(params.password.trim());
+  const username = encodeURIComponent(cleanUser);
+  const password = encodeURIComponent(cleanPass);
   const rawCatId = params.categoryId.trim();
   const catName = params.categoryName || 'Bouquet';
   const type = params.streamType;
@@ -218,7 +316,7 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
       stream_type: type,
       group_id: `grp_${type}_${rawCatId}`,
       group_name: catName,
-      epg_id: item.epg_channel_id ? String(item.epg_channel_id).trim() : undefined,
+      epg_id: item.epg_channel_id ? String(item.epg_channel_id).trim() : (type === 'series' ? String(streamId) : undefined),
       is_favorite: false,
       is_hidden: false,
       custom_order: chNum,
@@ -247,11 +345,13 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
   if (!server.startsWith('http://') && !server.startsWith('https://')) {
     server = 'http://' + server;
   }
-  const username = encodeURIComponent(params.username.trim());
-  const password = encodeURIComponent(params.password.trim());
+  const cleanUsername = decodeURIComponent(params.username.trim());
+  const cleanPassword = decodeURIComponent(params.password.trim());
+  const username = encodeURIComponent(cleanUsername);
+  const password = encodeURIComponent(cleanPassword);
   const playlistName = params.name?.trim() || 'Abonnement Xtream';
 
-  onProgress?.('Étape 1/4 : Connexion au serveur et vérification des accès...');
+  onProgress?.('Étape 1/3 : Connexion au serveur et vérification des accès...');
 
   // 1. Authenticate with Xtream player API
   const authUrl = `${server}/player_api.php?username=${username}&password=${password}`;
@@ -262,7 +362,6 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     throw new Error(`Impossible de contacter le serveur Xtream (${server}) : ${err.message || 'Vérifiez l’adresse URL et votre connexion.'}`);
   }
 
-  // Handle Xtream response structure
   if (typeof authData === 'string') {
     try {
       authData = JSON.parse(authData);
@@ -276,8 +375,8 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     throw new Error('Identifiant ou mot de passe Xtream incorrect, ou compte inactif sur ce serveur.');
   }
 
-  // 2a. Fetch Live categories in strict provider lineup order
-  onProgress?.('Étape 2/4 : Récupération des bouquets TV, Films et Séries...');
+  // 2. Fetch Categories (Live, VOD, Series)
+  onProgress?.('Étape 2/3 : Organisation des bouquets TV, Films et Séries...');
   const catUrl = `${server}/player_api.php?username=${username}&password=${password}&action=get_live_categories`;
   let rawLiveCategories: any[] = [];
   try {
@@ -287,7 +386,6 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     console.warn('Could not fetch live categories directly:', err);
   }
 
-  // 2b. Fetch VOD categories in strict provider lineup order
   const vodCatUrl = `${server}/player_api.php?username=${username}&password=${password}&action=get_vod_categories`;
   let rawVodCategories: any[] = [];
   try {
@@ -297,7 +395,6 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     console.warn('Could not fetch vod categories:', err);
   }
 
-  // 2c. Fetch Series categories in strict provider lineup order
   const seriesCatUrl = `${server}/player_api.php?username=${username}&password=${password}&action=get_series_categories`;
   let rawSeriesCategories: any[] = [];
   try {
@@ -307,155 +404,11 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     console.warn('Could not fetch series categories:', err);
   }
 
-  // 3. Fetch Live streams
-  onProgress?.('Étape 3/4 : Téléchargement des chaînes en direct...');
-  const streamsUrl = `${server}/player_api.php?username=${username}&password=${password}&action=get_live_streams`;
-  let rawLiveStreams: any[] = [];
-  try {
-    const res = await fetchHttp(streamsUrl, 'json');
-    rawLiveStreams = toArray(res);
-  } catch (err: any) {
-    console.warn('Live streams batch fetch failed, will load on demand:', err);
-  }
-
-  // 4. Fetch VOD streams
-  onProgress?.('Étape 4/4 : Téléchargement du catalogue Films & Séries...');
-  const vodStreamsUrl = `${server}/player_api.php?username=${username}&password=${password}&action=get_vod_streams`;
-  let rawVodStreams: any[] = [];
-  try {
-    const res = await fetchHttp(vodStreamsUrl, 'json');
-    rawVodStreams = toArray(res);
-  } catch (err: any) {
-    console.warn('VOD streams batch fetch deferred to on-demand loading:', err);
-  }
-
-  // Fallback: If both live and VOD streams batch downloads failed, try the universal Xtream M3U Plus endpoint
-  if (rawLiveStreams.length === 0 && rawVodStreams.length === 0) {
-    onProgress?.('Connexion alternative directe au flux du serveur...');
-    try {
-      const m3uPlusUrl = `${server}/get.php?username=${username}&password=${password}&type=m3u_plus&output=m3u8`;
-      const m3uResult = await parseM3UPlaylist({ m3uUrl: m3uPlusUrl, name: playlistName });
-      if (m3uResult.channels.length > 0) {
-        return m3uResult;
-      }
-    } catch (m3uErr) {
-      console.warn('M3U plus fallback failed, proceeding with on-demand categories:', m3uErr);
-    }
-  }
-
-  // Build category dictionaries with type isolation
-  const liveCategoryMap = new Map<string, string>();
-  for (const c of rawLiveCategories) {
-    if (c && c.category_id !== undefined && c.category_id !== null) {
-      const idStr = String(c.category_id).trim();
-      const nameStr = c.category_name ? String(c.category_name).trim() : `Bouquet ${idStr}`;
-      liveCategoryMap.set(idStr, nameStr);
-    }
-  }
-
-  const vodCategoryMap = new Map<string, string>();
-  for (const c of rawVodCategories) {
-    if (c && c.category_id !== undefined && c.category_id !== null) {
-      const idStr = String(c.category_id).trim();
-      const nameStr = c.category_name ? String(c.category_name).trim() : `Films ${idStr}`;
-      vodCategoryMap.set(idStr, nameStr);
-    }
-  }
-
-  const seriesCategoryMap = new Map<string, string>();
-  for (const c of rawSeriesCategories) {
-    if (c && c.category_id !== undefined && c.category_id !== null) {
-      const idStr = String(c.category_id).trim();
-      const nameStr = c.category_name ? String(c.category_name).trim() : `Séries ${idStr}`;
-      seriesCategoryMap.set(idStr, nameStr);
-    }
-  }
-
-  const liveCategoryCounts = new Map<string, number>();
-  const vodCategoryCounts = new Map<string, number>();
-  const channels: Channel[] = [];
-  const playlistId = 'pl_xtream_' + Date.now();
-
-  // Process live streams
-  for (let i = 0; i < rawLiveStreams.length; i++) {
-    const item = rawLiveStreams[i];
-    if (!item) continue;
-
-    let rawCatId = item.category_id;
-    if ((rawCatId === undefined || rawCatId === null || rawCatId === '') && Array.isArray(item.category_ids) && item.category_ids.length > 0) {
-      rawCatId = item.category_ids[0];
-    }
-    const catIdStr = rawCatId !== undefined && rawCatId !== null && String(rawCatId).trim() !== ''
-      ? String(rawCatId).trim()
-      : 'other';
-
-    const catName = liveCategoryMap.get(catIdStr) || (catIdStr === 'other' ? 'Autres Chaînes' : `Bouquet ${catIdStr}`);
-    liveCategoryCounts.set(catIdStr, (liveCategoryCounts.get(catIdStr) || 0) + 1);
-
-    const streamId = item.stream_id || item.id || (i + 1);
-    const streamUrl = `${server}/live/${username}/${password}/${streamId}.m3u8`;
-    const chNum = typeof item.num === 'number' && item.num > 0 ? item.num : (i + 1);
-
-    channels.push({
-      id: `ch_xtream_live_${streamId}`,
-      num: chNum,
-      name: item.name ? String(item.name).trim() : `Chaîne ${i + 1}`,
-      logo: item.stream_icon ? String(item.stream_icon).trim() : '',
-      stream_url: streamUrl,
-      stream_type: 'live',
-      group_id: `grp_live_${catIdStr}`,
-      group_name: catName,
-      epg_id: item.epg_channel_id ? String(item.epg_channel_id).trim() : undefined,
-      is_favorite: false,
-      is_hidden: false,
-      custom_order: chNum,
-      resolution: detectResolution(item.name || ''),
-    });
-  }
-
-  // Process VOD streams
-  for (let i = 0; i < rawVodStreams.length; i++) {
-    const item = rawVodStreams[i];
-    if (!item) continue;
-
-    let rawCatId = item.category_id;
-    if ((rawCatId === undefined || rawCatId === null || rawCatId === '') && Array.isArray(item.category_ids) && item.category_ids.length > 0) {
-      rawCatId = item.category_ids[0];
-    }
-    const catIdStr = rawCatId !== undefined && rawCatId !== null && String(rawCatId).trim() !== ''
-      ? String(rawCatId).trim()
-      : 'other_vod';
-
-    const catName = vodCategoryMap.get(catIdStr) || 'Films';
-    vodCategoryCounts.set(catIdStr, (vodCategoryCounts.get(catIdStr) || 0) + 1);
-
-    const streamId = item.stream_id || item.id || (i + 1);
-    const ext = item.container_extension || 'mp4';
-    const streamUrl = `${server}/movie/${username}/${password}/${streamId}.${ext}`;
-    const chNum = typeof item.num === 'number' && item.num > 0 ? item.num : (i + 1);
-
-    channels.push({
-      id: `ch_xtream_vod_${streamId}`,
-      num: chNum,
-      name: item.name ? String(item.name).trim() : `Film ${i + 1}`,
-      logo: item.stream_icon ? String(item.stream_icon).trim() : '',
-      stream_url: streamUrl,
-      stream_type: 'vod',
-      group_id: `grp_vod_${catIdStr}`,
-      group_name: catName,
-      epg_id: undefined,
-      is_favorite: false,
-      is_hidden: false,
-      custom_order: chNum,
-      resolution: detectResolution(item.name || ''),
-    });
-  }
-
-  // Construct complete categories list in STRICT PROVIDER LINEUP ORDER (matching TiviMate / Smarters)
+  // 3. Classify and strictly partition categories so Films and Séries never overlap!
   const categories: Category[] = [];
   let orderIndex = 0;
 
-  // Add favorite category at the top
+  // Add Favorites category at the top of Live
   categories.push({
     id: 'fav',
     name: '★ Mes Favoris',
@@ -466,7 +419,7 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     icon: 'Star',
   });
 
-  // 1. LIVE CATEGORIES: Preserve the exact array order from rawLiveCategories (provider's defined lineup)
+  // 1. LIVE CATEGORIES
   const seenLiveCatIds = new Set<string>();
   for (let i = 0; i < rawLiveCategories.length; i++) {
     const rawCat = rawLiveCategories[i];
@@ -480,98 +433,124 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
       id: `grp_live_${catIdStr}`,
       name: catName,
       type: 'live',
-      count: liveCategoryCounts.get(catIdStr) || 0,
+      count: 0,
       is_hidden: false,
       custom_order: orderIndex++,
       icon: detectCategoryIcon(catName),
     });
   }
 
-  // 2. VOD CATEGORIES: Preserve the exact array order from rawVodCategories
+  // 2. VOD (FILMS) vs SÉRIES: Clean separation without duplicates
   const seenVodCatIds = new Set<string>();
+  const seenSeriesCatIds = new Set<string>();
   let vodOrderIndex = 10000;
+  let seriesOrderIndex = 20000;
+
+  // Scan rawVodCategories
   for (let i = 0; i < rawVodCategories.length; i++) {
     const rawCat = rawVodCategories[i];
     if (!rawCat || rawCat.category_id === undefined || rawCat.category_id === null) continue;
     const catIdStr = String(rawCat.category_id).trim();
-    if (seenVodCatIds.has(catIdStr)) continue;
-    seenVodCatIds.add(catIdStr);
-
     const catName = rawCat.category_name ? String(rawCat.category_name).trim() : `Films ${catIdStr}`;
-    categories.push({
-      id: `grp_vod_${catIdStr}`,
-      name: catName,
-      type: 'vod',
-      count: vodCategoryCounts.get(catIdStr) || 0,
-      is_hidden: false,
-      custom_order: vodOrderIndex++,
-      icon: 'Film',
-    });
+
+    if (isSeriesCategory(catName)) {
+      if (!seenSeriesCatIds.has(catIdStr)) {
+        seenSeriesCatIds.add(catIdStr);
+        categories.push({
+          id: `grp_series_${catIdStr}`,
+          name: catName,
+          type: 'series',
+          count: 0,
+          is_hidden: false,
+          custom_order: seriesOrderIndex++,
+          icon: 'Film',
+        });
+      }
+    } else {
+      if (!seenVodCatIds.has(catIdStr)) {
+        seenVodCatIds.add(catIdStr);
+        categories.push({
+          id: `grp_vod_${catIdStr}`,
+          name: catName,
+          type: 'vod',
+          count: 0,
+          is_hidden: false,
+          custom_order: vodOrderIndex++,
+          icon: 'Film',
+        });
+      }
+    }
   }
 
-  // 3. SERIES CATEGORIES: Preserve the exact array order from rawSeriesCategories
-  const seenSeriesCatIds = new Set<string>();
-  let seriesOrderIndex = 20000;
+  // Scan rawSeriesCategories
   for (let i = 0; i < rawSeriesCategories.length; i++) {
     const rawCat = rawSeriesCategories[i];
     if (!rawCat || rawCat.category_id === undefined || rawCat.category_id === null) continue;
     const catIdStr = String(rawCat.category_id).trim();
-    if (seenSeriesCatIds.has(catIdStr)) continue;
-    seenSeriesCatIds.add(catIdStr);
-
     const catName = rawCat.category_name ? String(rawCat.category_name).trim() : `Séries ${catIdStr}`;
-    categories.push({
-      id: `grp_series_${catIdStr}`,
-      name: catName,
-      type: 'series',
-      count: 0,
-      is_hidden: false,
-      custom_order: seriesOrderIndex++,
-      icon: 'Film',
-    });
+
+    if (isFilmCategory(catName) && !isSeriesCategory(catName)) {
+      if (!seenVodCatIds.has(catIdStr)) {
+        seenVodCatIds.add(catIdStr);
+        categories.push({
+          id: `grp_vod_${catIdStr}`,
+          name: catName,
+          type: 'vod',
+          count: 0,
+          is_hidden: false,
+          custom_order: vodOrderIndex++,
+          icon: 'Film',
+        });
+      }
+    } else {
+      if (!seenSeriesCatIds.has(catIdStr)) {
+        seenSeriesCatIds.add(catIdStr);
+        categories.push({
+          id: `grp_series_${catIdStr}`,
+          name: catName,
+          type: 'series',
+          count: 0,
+          is_hidden: false,
+          custom_order: seriesOrderIndex++,
+          icon: 'Film',
+        });
+      }
+    }
   }
 
-  // If live streams were downloaded and had bouquets not in rawLiveCategories, append them
-  liveCategoryCounts.forEach((count, catIdStr) => {
-    if (!seenLiveCatIds.has(catIdStr)) {
-      seenLiveCatIds.add(catIdStr);
-      const catName = catIdStr === 'other' ? 'Autres Chaînes' : `Bouquet ${catIdStr}`;
-      categories.push({
-        id: `grp_live_${catIdStr}`,
-        name: catName,
-        type: 'live',
-        count: count,
-        is_hidden: false,
-        custom_order: orderIndex++,
-        icon: detectCategoryIcon(catName),
-      });
-    }
-  });
+  // 4. Pre-fetch the channels for the FIRST live category immediately so playback starts instantly
+  onProgress?.('Étape 3/3 : Préparation du flux en direct...');
+  const channels: Channel[] = [];
+  const firstLiveCategory = categories.find((c) => c.type === 'live' && c.id !== 'fav');
 
-  // If VOD streams were downloaded and had bouquets not in rawVodCategories, append them
-  vodCategoryCounts.forEach((count, catIdStr) => {
-    if (!seenVodCatIds.has(catIdStr)) {
-      seenVodCatIds.add(catIdStr);
-      const catName = catIdStr === 'other_vod' ? 'Autres Films' : `Films ${catIdStr}`;
-      categories.push({
-        id: `grp_vod_${catIdStr}`,
-        name: catName,
-        type: 'vod',
-        count: count,
-        is_hidden: false,
-        custom_order: vodOrderIndex++,
-        icon: 'Film',
+  if (firstLiveCategory) {
+    const rawCatId = firstLiveCategory.id.replace(/^grp_live_/, '');
+    try {
+      const firstStreams = await fetchCategoryStreamsOnDemand({
+        serverUrl: server,
+        username: cleanUsername,
+        password: cleanPassword,
+        categoryId: rawCatId,
+        categoryName: firstLiveCategory.name,
+        streamType: 'live',
       });
+      if (firstStreams.length > 0) {
+        channels.push(...firstStreams);
+        firstLiveCategory.count = firstStreams.length;
+      }
+    } catch (err) {
+      console.warn('Initial category pre-fetch fallback:', err);
     }
-  });
+  }
 
+  const playlistId = 'pl_xtream_' + Date.now();
   const playlist: PlaylistConfig = {
     id: playlistId,
     name: playlistName,
     type: 'xtream',
     server_url: server,
-    username: params.username.trim(),
-    password: params.password.trim(),
+    username: cleanUsername,
+    password: cleanPassword,
     status: 'active',
     channel_count: channels.length,
     last_sync_at: new Date().toISOString(),
@@ -579,6 +558,7 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
 
   return { playlist, categories, channels };
 }
+
 
 export interface M3USyncParams {
   m3uUrl: string;
@@ -647,7 +627,14 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
     } else if (!line.startsWith('#') && currentExtInf) {
       const streamUrl = line;
       const groupName = currentExtInf.group;
-      const streamType = detectStreamType(currentExtInf.name, groupName, streamUrl);
+      let streamType: 'live' | 'vod' | 'series' = 'live';
+      if (isSeriesCategory(groupName) || isSeriesCategory(currentExtInf.name)) {
+        streamType = 'series';
+      } else if (isFilmCategory(groupName) || isFilmCategory(currentExtInf.name)) {
+        streamType = 'vod';
+      } else {
+        streamType = detectStreamType(currentExtInf.name, groupName, streamUrl);
+      }
       const groupId = `grp_${streamType}_` + groupName.toLowerCase().replace(/[^a-z0-9]/g, '_');
 
       if (!seenGroupIds.has(groupId)) {
@@ -660,6 +647,7 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
           categoryTypeMap.set(groupId, streamType);
         }
       }
+
 
       categoryCounts.set(groupId, (categoryCounts.get(groupId) || 0) + 1);
 
