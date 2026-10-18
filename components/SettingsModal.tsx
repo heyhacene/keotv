@@ -18,6 +18,7 @@ import {
   Send,
   CheckCircle2,
   Radio,
+  Pencil,
 } from 'lucide-react';
 import { PlaylistConfig } from '@/types/iptv';
 import { submitAppFeedback } from '@/lib/supabase';
@@ -33,6 +34,7 @@ interface SettingsModalProps {
   onDeletePlaylist: (id: string) => Promise<void>;
   onRestoreDemoPlaylist: () => Promise<void>;
   onResyncPlaylist?: (playlist: PlaylistConfig) => Promise<void>;
+  onEditPlaylist?: (playlist: PlaylistConfig) => void;
   isResyncing?: boolean;
   currentBuildNumber?: number;
   categorySort?: 'playlist' | 'alpha' | 'count';
@@ -60,8 +62,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onDeletePlaylist,
   onRestoreDemoPlaylist,
   onResyncPlaylist,
+  onEditPlaylist,
   isResyncing = false,
-  currentBuildNumber = 22,
+  currentBuildNumber = 23,
   categorySort = 'playlist',
   onCategorySortChange,
   channelSort = 'playlist',
@@ -514,6 +517,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </div>
                       ) : (
                         <div className="flex items-center space-x-1 flex-shrink-0">
+                          {onEditPlaylist && (
+                            <button
+                              onClick={() => onEditPlaylist(pl)}
+                              className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                              title="Modifier les paramètres de cette playlist"
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </button>
+                          )}
                           {onResyncPlaylist && (
                             <button
                               onClick={() => onResyncPlaylist(pl)}

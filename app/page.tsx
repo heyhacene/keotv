@@ -94,6 +94,7 @@ export default function KeoTVHome() {
   const bgLoadTokenRef = useRef<number>(0);
 
   const [isXtreamModalOpen, setIsXtreamModalOpen] = useState(false);
+  const [editingPlaylist, setEditingPlaylist] = useState<PlaylistConfig | null>(null);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
@@ -109,7 +110,7 @@ export default function KeoTVHome() {
   const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
 
   useEffect(() => {
-    checkForAppUpdate(22).then((info) => {
+    checkForAppUpdate(23).then((info) => {
       if (info && info.hasUpdate) {
         setAppUpdateInfo(info);
       }
@@ -970,6 +971,7 @@ export default function KeoTVHome() {
     }
     if (isXtreamModalOpen) {
       setIsXtreamModalOpen(false);
+      setEditingPlaylist(null);
       return;
     }
     if (isSyncModalOpen) {
@@ -1207,6 +1209,102 @@ export default function KeoTVHome() {
       setIsStopped(false);
     }
   };
+
+  // Open Xtream modal in edit mode with selected playlist data
+  const handleOpenEditPlaylist = useCallback((pl: PlaylistConfig) => {
+    setEditingPlaylist(pl);
+    setIsSettingsModalOpen(false);
+    setIsXtreamModalOpen(true);
+  }, []);
+
+  // Update playlist parameters (in-place or with full re-sync)
+  const handleUpdatePlaylistSettings = useCallback(
+    async (
+      id: string,
+      data: {
+        type: 'xtream' | 'm3u';
+        name: string;
+        server_url: string;
+        username?: string;
+        password?: string;
+        m3u_url?: string;
+      },
+      resync: boolean,
+      onProgress: (step: string) => void
+    ) => {
+      const existing = await db.playlists.get(id);
+      if (!existing) {
+        throw new Error('Playlist introuvable dans la base locale.');
+      }
+
+      const oldServerUrl = existing.server_url;
+      const oldUsername = existing.username;
+      const oldPassword = existing.password;
+
+      const updatedPl: PlaylistConfig = {
+        ...existing,
+        name: data.name,
+        type: data.type,
+        server_url: data.server_url,
+        username: data.username,
+        password: data.password,
+        m3u_url: data.m3u_url,
+      };
+
+      if (data.type === 'xtream') {
+        await setSetting('last_xtream_config', {
+          server_url: data.server_url,
+          username: data.username,
+          password: data.password,
+          name: data.name,
+        });
+      }
+
+      await db.playlists.put(updatedPl);
+      const allPls = await db.playlists.toArray();
+      setPlaylists(allPls);
+
+      if (resync) {
+        onProgress('Lancement de la re-synchronisation complète...');
+        await handleResyncPlaylist(updatedPl);
+      } else {
+        // Fast in-place credential/server URL update without re-downloading whole catalog
+        if (
+          data.type === 'xtream' &&
+          oldServerUrl &&
+          oldUsername &&
+          oldPassword &&
+          (oldServerUrl !== data.server_url ||
+            oldUsername !== data.username ||
+            oldPassword !== data.password)
+        ) {
+          onProgress('Mise à jour rapide des liens de flux...');
+          await db.channels.toCollection().modify((ch) => {
+            if (ch.stream_url) {
+              if (oldServerUrl !== data.server_url && ch.stream_url.includes(oldServerUrl)) {
+                ch.stream_url = ch.stream_url.replace(oldServerUrl, data.server_url);
+              }
+              if (oldUsername !== data.username && ch.stream_url.includes(`/${oldUsername}/`)) {
+                ch.stream_url = ch.stream_url.replace(`/${oldUsername}/`, `/${data.username}/`);
+              }
+              if (oldPassword !== data.password && ch.stream_url.includes(`/${oldPassword}/`)) {
+                ch.stream_url = ch.stream_url.replace(`/${oldPassword}/`, `/${data.password}/`);
+              }
+            }
+          });
+
+          if (activeChannel) {
+            const freshActive = await db.channels.get(activeChannel.id);
+            if (freshActive) {
+              setActiveChannel(freshActive);
+            }
+          }
+        }
+        onProgress('Paramètres de playlist enregistrés avec succès !');
+      }
+    },
+    [handleResyncPlaylist, activeChannel]
+  );
 
   // Delete playlist handler
   const handleDeletePlaylist = async (id: string) => {
@@ -1684,7 +1782,10 @@ export default function KeoTVHome() {
               }}
               onToggleFavorite={handleToggleFavorite}
               onOpenSyncModal={() => setIsSyncModalOpen(true)}
-              onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
+              onOpenXtreamModal={() => {
+                setEditingPlaylist(null);
+                setIsXtreamModalOpen(true);
+              }}
               onOpenSearch={() => setIsSearchModalOpen(true)}
               onToggleFullscreen={() => {
                 if (isNativePlayerAvailable() && activeChannel) {
@@ -1712,13 +1813,17 @@ export default function KeoTVHome() {
         onClose={() => setIsSettingsModalOpen(false)}
         syncCode={syncCode}
         playlists={playlists}
-        onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
+        onOpenXtreamModal={() => {
+          setEditingPlaylist(null);
+          setIsXtreamModalOpen(true);
+        }}
         onOpenSyncModal={() => setIsSyncModalOpen(true)}
         onDeletePlaylist={handleDeletePlaylist}
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
         onResyncPlaylist={handleResyncPlaylist}
+        onEditPlaylist={handleOpenEditPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={22}
+        currentBuildNumber={23}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
@@ -1737,8 +1842,13 @@ export default function KeoTVHome() {
 
       <XtreamModal
         isOpen={isXtreamModalOpen}
-        onClose={() => setIsXtreamModalOpen(false)}
+        onClose={() => {
+          setIsXtreamModalOpen(false);
+          setEditingPlaylist(null);
+        }}
         onSavePlaylist={handleSavePlaylist}
+        initialPlaylist={editingPlaylist}
+        onUpdatePlaylist={handleUpdatePlaylistSettings}
       />
 
       <SyncModal
