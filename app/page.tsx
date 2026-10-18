@@ -17,6 +17,7 @@ import { SeriesDetailModal } from '@/components/SeriesDetailModal';
 import { MovieDetailModal } from '@/components/MovieDetailModal';
 import { SearchModal } from '@/components/SearchModal';
 import { UpdatePopupModal } from '@/components/UpdatePopupModal';
+import { SplashScreen } from '@/components/SplashScreen';
 import { checkForAppUpdate, AppUpdateInfo } from '@/lib/update-service';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
 import {
@@ -93,6 +94,15 @@ export default function KeoTVHome() {
   const [bgLoadStatus, setBgLoadStatus] = useState<string | null>(null);
   const bgLoadTokenRef = useRef<number>(0);
 
+  // App Launch Splash Screen states
+  const [isSplashVisible, setIsSplashVisible] = useState<boolean>(true);
+  const [isSplashFading, setIsSplashFading] = useState<boolean>(false);
+
+  // Auto-refresh bouquets in background states
+  const [autoRefreshInterval, setAutoRefreshInterval] = useState<number>(24);
+  const [lastAutoRefreshAt, setLastAutoRefreshAt] = useState<string>('');
+  const [isSilentRefreshing, setIsSilentRefreshing] = useState<boolean>(false);
+
   const [isXtreamModalOpen, setIsXtreamModalOpen] = useState(false);
   const [editingPlaylist, setEditingPlaylist] = useState<PlaylistConfig | null>(null);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
@@ -110,7 +120,7 @@ export default function KeoTVHome() {
   const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
 
   useEffect(() => {
-    checkForAppUpdate(23).then((info) => {
+    checkForAppUpdate(24).then((info) => {
       if (info && info.hasUpdate) {
         setAppUpdateInfo(info);
       }
@@ -366,6 +376,101 @@ export default function KeoTVHome() {
     [channelSort, loadCategoryChannels]
   );
 
+  // Silent background refresh of bouquets & channels (keeps playback uninterrupted)
+  const triggerSilentRefresh = useCallback(async () => {
+    if (isSilentRefreshing) return;
+    const allPls = await db.playlists.toArray();
+    const activePl = allPls.find((p) => p.type === 'xtream' || (p.type === 'm3u' && p.id !== 'pl_demo_default'));
+    if (!activePl) return;
+
+    setIsSilentRefreshing(true);
+    try {
+      let result: { playlist: PlaylistConfig; categories: Category[]; channels: Channel[] };
+      if (activePl.type === 'xtream') {
+        result = await syncXtreamPlaylist({
+          serverUrl: activePl.server_url,
+          username: activePl.username || '',
+          password: activePl.password || '',
+          name: activePl.name,
+          onProgress: () => {},
+        });
+      } else {
+        result = await parseM3UPlaylist({
+          m3uUrl: activePl.m3u_url || activePl.server_url,
+          name: activePl.name,
+          onProgress: () => {},
+        });
+      }
+
+      if (result && result.categories && result.categories.length > 0) {
+        // Keep existing user favorites
+        const favIds = new Set((await db.channels.filter((c) => Boolean(c.is_favorite)).toArray()).map((c) => c.id));
+        for (const ch of result.channels) {
+          if (favIds.has(ch.id)) {
+            ch.is_favorite = true;
+          }
+        }
+
+        await db.playlists.put(result.playlist);
+        await db.categories.bulkPut(result.categories);
+
+        const CHUNK_SIZE = 500;
+        for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
+          const chunk = result.channels.slice(i, i + CHUNK_SIZE);
+          try {
+            await db.channels.bulkPut(chunk);
+          } catch {
+            for (const item of chunk) {
+              try { await db.channels.put(item); } catch {}
+            }
+          }
+        }
+
+        const loadedCats = await db.categories.orderBy('custom_order').toArray();
+        setCategories(loadedCats);
+        setPlaylists(await db.playlists.toArray());
+
+        if (selectedCategory) {
+          const freshCat = loadedCats.find((c) => c.id === selectedCategory.id) || selectedCategory;
+          loadCategoryChannels(freshCat, channelSort);
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      await setSetting('last_auto_refresh_at', nowIso);
+      setLastAutoRefreshAt(nowIso);
+
+      setSyncStatusBanner('Bouquets actualisés en arrière-plan');
+      setTimeout(() => {
+        setSyncStatusBanner(null);
+      }, 3000);
+    } catch (err) {
+      console.warn('Silent bouquet refresh error:', err);
+    } finally {
+      setIsSilentRefreshing(false);
+    }
+  }, [isSilentRefreshing, selectedCategory, channelSort, loadCategoryChannels]);
+
+  const handleAutoRefreshIntervalChange = useCallback(async (newInterval: number) => {
+    setAutoRefreshInterval(newInterval);
+    await setSetting('auto_refresh_interval', newInterval);
+  }, []);
+
+  // Recurring background check for scheduled bouquet refresh (checks every 15 minutes)
+  useEffect(() => {
+    if (autoRefreshInterval <= 0) return;
+    const timer = setInterval(() => {
+      getSetting<string>('last_auto_refresh_at', '').then((last) => {
+        const lastTime = last ? new Date(last).getTime() : 0;
+        const elapsed = (Date.now() - lastTime) / (1000 * 60 * 60);
+        if (elapsed >= autoRefreshInterval) {
+          triggerSilentRefresh();
+        }
+      });
+    }, 15 * 60 * 1000);
+    return () => clearInterval(timer);
+  }, [autoRefreshInterval, triggerSilentRefresh]);
+
   // 1. Initialize IndexedDB & Seed initial channels (strictly once on component mount)
   useEffect(() => {
     if (hasInitRunRef.current) return;
@@ -569,21 +674,47 @@ export default function KeoTVHome() {
         }
         setSyncCode(code);
 
+        // Dismiss splash screen with smooth fade-out
+        setIsSplashFading(true);
+        setTimeout(() => {
+          setIsSplashVisible(false);
+        }, 350);
+
+        const savedAutoRefresh = await getSetting<number>('auto_refresh_interval', 24);
+        const savedLastRefresh = await getSetting<string>('last_auto_refresh_at', '');
+        setAutoRefreshInterval(savedAutoRefresh);
+        setLastAutoRefreshAt(savedLastRefresh);
+
         if (resyncTarget) {
           handleResyncPlaylist(resyncTarget);
-        } else {
-          // Make sure the whole live playlist is available locally (resumes an interrupted download)
+        } else if (chCount === 0) {
+          // Only start initial background loader if database is empty
           const xtreamPl = (await db.playlists.toArray()).find((p) => p.type === 'xtream');
           if (xtreamPl) {
             startBackgroundLiveLoad(xtreamPl, loadedCats);
           }
+        } else if (savedAutoRefresh > 0) {
+          // Check if auto-refresh is due
+          const lastTime = savedLastRefresh ? new Date(savedLastRefresh).getTime() : 0;
+          const elapsedHours = (Date.now() - lastTime) / (1000 * 60 * 60);
+          if (elapsedHours >= savedAutoRefresh) {
+            // Trigger background refresh quietly after 4 seconds (app is fully interactive first)
+            setTimeout(() => {
+              triggerSilentRefresh();
+            }, 4000);
+          }
         }
       } catch (err) {
         console.error('Initialization error:', err);
+      } finally {
+        setIsSplashFading(true);
+        setTimeout(() => {
+          setIsSplashVisible(false);
+        }, 350);
       }
     }
     initDB();
-  }, []);
+  }, [triggerSilentRefresh, handleResyncPlaylist, startBackgroundLiveLoad, loadCategoryChannels]);
 
   // Compute sorted categories based on user's preference and activeSection (Direct / Films / Séries / Favoris)
   const sortedCategories = useMemo(() => {
@@ -1053,6 +1184,7 @@ export default function KeoTVHome() {
   }, [handleAndroidBack]);
 
   const isAnyModalOpen =
+    isSplashVisible ||
     isSettingsModalOpen ||
     isSyncModalOpen ||
     isCategoryModalOpen ||
@@ -1823,11 +1955,16 @@ export default function KeoTVHome() {
         onResyncPlaylist={handleResyncPlaylist}
         onEditPlaylist={handleOpenEditPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={23}
+        currentBuildNumber={24}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
         onChannelSortChange={handleChannelSortChange}
+        autoRefreshInterval={autoRefreshInterval}
+        onAutoRefreshIntervalChange={handleAutoRefreshIntervalChange}
+        lastAutoRefreshAt={lastAutoRefreshAt}
+        onTriggerSilentRefresh={triggerSilentRefresh}
+        isSilentRefreshing={isSilentRefreshing}
       />
 
       <CategoryDrawerModal
@@ -1919,6 +2056,9 @@ export default function KeoTVHome() {
           Appuyez à nouveau pour quitter KeoTV
         </div>
       )}
+
+      {/* Launch Splash Screen with Official KeoTV Logo */}
+      <SplashScreen isVisible={isSplashVisible} isFading={isSplashFading} />
     </main>
   );
 }

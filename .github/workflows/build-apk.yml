@@ -113,6 +113,14 @@ jobs:
           # Bannière Android TV 16:9 (320x180)
           rsvg-convert -w 320 -h 180 public/icon.svg -o android/app/src/main/res/drawable/tv_banner.png
 
+          # Générer le Splash Screen officiel KeoTV en haute résolution
+          rsvg-convert -w 512 -h 512 public/icon.svg -o android/app/src/main/res/drawable/splash.png
+          for dir in android/app/src/main/res/drawable-land-* android/app/src/main/res/drawable-port-*; do
+            if [ -d "$dir" ]; then
+              cp android/app/src/main/res/drawable/splash.png "$dir/splash.png"
+            fi
+          done
+
           # Supprimer le dossier anydpi-v26 pour éviter que l'icône adaptative par défaut de Capacitor masque notre icône
           rm -rf android/app/src/main/res/mipmap-anydpi-v26
 

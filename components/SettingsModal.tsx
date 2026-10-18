@@ -19,6 +19,7 @@ import {
   CheckCircle2,
   Radio,
   Pencil,
+  Clock,
 } from 'lucide-react';
 import { PlaylistConfig } from '@/types/iptv';
 import { submitAppFeedback } from '@/lib/supabase';
@@ -41,6 +42,11 @@ interface SettingsModalProps {
   onCategorySortChange?: (sort: 'playlist' | 'alpha' | 'count') => void;
   channelSort?: 'playlist' | 'alpha' | 'num';
   onChannelSortChange?: (sort: 'playlist' | 'alpha' | 'num') => void;
+  autoRefreshInterval?: number;
+  onAutoRefreshIntervalChange?: (interval: number) => void;
+  lastAutoRefreshAt?: string;
+  onTriggerSilentRefresh?: () => void;
+  isSilentRefreshing?: boolean;
 }
 
 const TABS: Array<{ id: 'playlists' | 'controls' | 'player' | 'sync' | 'update' | 'feedback'; label: string; icon: any }> = [
@@ -64,11 +70,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onResyncPlaylist,
   onEditPlaylist,
   isResyncing = false,
-  currentBuildNumber = 23,
+  currentBuildNumber = 24,
   categorySort = 'playlist',
   onCategorySortChange,
   channelSort = 'playlist',
   onChannelSortChange,
+  autoRefreshInterval = 24,
+  onAutoRefreshIntervalChange,
+  lastAutoRefreshAt,
+  onTriggerSilentRefresh,
+  isSilentRefreshing = false,
 }) => {
   const [activeTab, setActiveTab] = useState<'playlists' | 'controls' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -548,6 +559,71 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
                   ))
                 )}
+              </div>
+
+              {/* Section: Actualisation automatique des bouquets en arrière-plan */}
+              <div className="bg-tv-card/60 border border-tv-border rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2.5">
+                    <Clock className="w-4 h-4 text-tv-accent flex-shrink-0" />
+                    <div>
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                        Actualisation automatique des bouquets
+                      </h4>
+                      <p className="text-[11px] text-slate-400">
+                        Conserve les bouquets en mémoire pour un démarrage instantané et met à jour en arrière-plan selon l&apos;intervalle choisi.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Interval Selection Pills */}
+                <div className="grid grid-cols-5 gap-2 pt-1">
+                  {[
+                    { label: 'Manuel', value: 0 },
+                    { label: 'Toutes les 1h', value: 1 },
+                    { label: 'Toutes les 5h', value: 5 },
+                    { label: 'Toutes les 12h', value: 12 },
+                    { label: 'Toutes les 24h', value: 24 },
+                  ].map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => onAutoRefreshIntervalChange?.(item.value)}
+                      className={`px-2 py-2 rounded-xl text-xs font-bold transition flex flex-col items-center justify-center space-y-1 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
+                        autoRefreshInterval === item.value
+                          ? 'bg-tv-focus text-white shadow-lg border border-sky-400'
+                          : 'bg-tv-surface text-slate-400 hover:text-white hover:bg-white/5 border border-tv-border'
+                      }`}
+                    >
+                      <span>{item.label}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-tv-border/50 text-[11px] text-slate-400">
+                  <span>
+                    {lastAutoRefreshAt
+                      ? `Dernière actualisation : ${new Date(lastAutoRefreshAt).toLocaleString('fr-FR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}`
+                      : 'Dernière actualisation : Au démarrage ou lors du premier ajout'}
+                  </span>
+                  {onTriggerSilentRefresh && (
+                    <button
+                      type="button"
+                      onClick={onTriggerSilentRefresh}
+                      disabled={isSilentRefreshing}
+                      className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-medium transition flex items-center space-x-1.5 focus:outline-none focus:ring-2 focus:ring-tv-accent disabled:opacity-50"
+                    >
+                      <RefreshCw className={`w-3.5 h-3.5 ${isSilentRefreshing ? 'animate-spin text-tv-accent' : ''}`} />
+                      <span>{isSilentRefreshing ? 'Actualisation...' : 'Actualiser maintenant'}</span>
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           )}
