@@ -74,6 +74,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
       setQuery('');
       setResults([]);
       setContextMenuItem(null);
+      cachedIndexRef.current = null; // Immediately reclaim RAM for low-memory Android TV devices
     }
   }, [isOpen]);
 

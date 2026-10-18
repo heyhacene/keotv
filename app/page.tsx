@@ -30,6 +30,7 @@ import {
   resolveSeriesEpisodes,
   loadAllLiveCategories,
   SeriesEpisode,
+  isSeparatorChannel,
 } from '@/lib/iptv-service';
 import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
 
@@ -146,11 +147,20 @@ export default function KeoTVHome() {
     }, 2800);
   }, []);
 
+  // Active Xtream server credentials for rich metadata retrieval
+  const activeXtreamCreds = useMemo(() => {
+    const pl = playlists.find((p) => p.type === 'xtream' && p.username && p.password);
+    if (pl) {
+      return { serverUrl: pl.server_url, username: pl.username || '', password: pl.password || '' };
+    }
+    return null;
+  }, [playlists]);
+
   // Startup Update Check state & auto-check
   const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
 
   useEffect(() => {
-    checkForAppUpdate(26).then((info) => {
+    checkForAppUpdate(27).then((info) => {
       if (info && info.hasUpdate) {
         setAppUpdateInfo(info);
       }
@@ -517,28 +527,71 @@ export default function KeoTVHome() {
         setCategorySort(savedCatSort);
         setChannelSort(savedChSort);
 
-        // One-time clean reload: previous builds stored channels under wrong group ids
-        const DATA_VERSION = 13;
-        const savedDataVersion = await getSetting<number>('data_version', 0);
+        // 1. Permanent Playlist Persistence: Check Dexie, LocalStorage, and DB Settings
+        const backupPlJson = typeof window !== 'undefined' ? localStorage.getItem('keotv_saved_playlist_v1') : null;
+        const backupXtreamJson = typeof window !== 'undefined' ? localStorage.getItem('keotv_saved_xtream_creds') : null;
+        const savedXtreamConfig = await getSetting<any>('last_xtream_config', null);
+
         let resyncTarget: PlaylistConfig | null = null;
-        if (savedDataVersion < DATA_VERSION) {
-          const existingPls = await db.playlists.toArray();
-          const realPl = existingPls.find((p) => p.type === 'xtream' || (p.type === 'm3u' && p.id !== 'pl_demo_default'));
-          if (realPl) {
-            await db.categories.clear();
-            await db.channels.clear();
-            resyncTarget = realPl;
+        let activePlaylists = await db.playlists.toArray();
+
+        // If Dexie playlists table is empty or only has the demo playlist, RESTORE from permanent backups!
+        if (activePlaylists.length === 0 || activePlaylists.every((p) => p.id === 'pl_demo_default')) {
+          let recoveredPl: PlaylistConfig | null = null;
+          if (backupPlJson) {
+            try {
+              recoveredPl = JSON.parse(backupPlJson);
+            } catch {}
           }
-          await setSetting('data_version', DATA_VERSION);
+          if (!recoveredPl && backupXtreamJson) {
+            try {
+              const parsed = JSON.parse(backupXtreamJson);
+              if (parsed?.server_url && parsed?.username) {
+                recoveredPl = {
+                  id: 'pl_xtream_' + Date.now(),
+                  name: parsed.name || 'Mon Abonnement IPTV',
+                  type: 'xtream',
+                  server_url: parsed.server_url,
+                  username: parsed.username,
+                  password: parsed.password,
+                  status: 'active',
+                  channel_count: 0,
+                  last_sync_at: new Date().toISOString(),
+                };
+              }
+            } catch {}
+          }
+          if (!recoveredPl && savedXtreamConfig?.server_url && savedXtreamConfig?.username) {
+            recoveredPl = {
+              id: 'pl_xtream_' + Date.now(),
+              name: savedXtreamConfig.name || 'Mon Abonnement IPTV',
+              type: 'xtream',
+              server_url: savedXtreamConfig.server_url,
+              username: savedXtreamConfig.username,
+              password: savedXtreamConfig.password,
+              status: 'active',
+              channel_count: 0,
+              last_sync_at: new Date().toISOString(),
+            };
+          }
+
+          if (recoveredPl) {
+            await db.playlists.delete('pl_demo_default');
+            await db.playlists.put(recoveredPl);
+            activePlaylists = [recoveredPl];
+            // If channels or categories are empty, schedule background reload
+            const existingCatCount = await db.categories.count();
+            if (existingCatCount === 0) {
+              resyncTarget = recoveredPl;
+            }
+          }
         }
 
-        const allChannels = await db.channels.toArray();
-        const chCount = allChannels.length;
-        const currentPlaylists = await db.playlists.toArray();
-        const plCount = currentPlaylists.length;
+        // Fast count (zero memory overhead, no loading of 50k objects to RAM)
+        const chCount = await db.channels.count();
+        const catCount = await db.categories.count();
 
-        // Repair categories saved by previous builds: the stream type is always the API namespace
-        // encoded in the id (grp_live_ / grp_vod_ / grp_series_).
+        // Repair category stream type tags if needed (grp_vod_ -> vod, grp_series_ -> series, grp_live_ -> live)
         const allDbCats = await db.categories.toArray();
         for (const c of allDbCats) {
           const expected = c.id.startsWith('grp_vod_')
@@ -554,7 +607,7 @@ export default function KeoTVHome() {
           }
         }
 
-        // Check if user has real IPTV categories (non-demo)
+        // Check if user has non-demo categories
         const hasRealCats = allDbCats.some(
           (c) =>
             c.id !== 'fav' &&
@@ -565,105 +618,34 @@ export default function KeoTVHome() {
             c.id !== 'doc'
         );
 
-        // If user has real categories, NEVER keep the demo playlist in DB
         if (hasRealCats) {
           await db.playlists.delete('pl_demo_default');
         }
 
-        const savedXtreamConfig = await getSetting<any>('last_xtream_config', null);
-        let updatedPlaylists = await db.playlists.toArray();
+        // Only install demo channels on fresh first-time installation (NEVER overwrite user setup!)
+        const hasAnyUserConfig =
+          (await getSetting<boolean>('has_configured_playlist', false)) ||
+          Boolean(backupPlJson) ||
+          Boolean(backupXtreamJson) ||
+          Boolean(savedXtreamConfig) ||
+          activePlaylists.some((p) => p.id !== 'pl_demo_default');
 
-        // Check if channels are user IPTV channels rather than TNT mock channels
-        const isOnlyDemoChannels =
-          chCount > 0 &&
-          chCount <= 35 &&
-          allChannels.every(
-            (c) =>
-              c.id.startsWith('ch_tf1') ||
-              c.id.startsWith('ch_france') ||
-              c.id.startsWith('ch_m6') ||
-              c.id.startsWith('ch_arte') ||
-              c.id.startsWith('ch_w9') ||
-              c.id.startsWith('ch_tmc') ||
-              c.id.startsWith('ch_bfm') ||
-              c.id.startsWith('ch_c8')
-          );
+        if (!hasAnyUserConfig && chCount === 0 && catCount === 0) {
+          const userHasDeletedAll = await getSetting<boolean>('user_deleted_all_playlists', false);
+          if (!userHasDeletedAll) {
+            await db.categories.bulkAdd(INITIAL_CATEGORIES);
+            await db.channels.bulkAdd(INITIAL_CHANNELS);
 
-        // Restore real user subscription if playlists table is missing or was overwritten
-        if (updatedPlaylists.length === 0 || updatedPlaylists.every((p) => p.id === 'pl_demo_default')) {
-          if (savedXtreamConfig && savedXtreamConfig.server_url && savedXtreamConfig.username) {
-            const recoveredPl: PlaylistConfig = {
-              id: 'pl_xtream_' + Date.now(),
-              name: savedXtreamConfig.name || 'Mon Abonnement IPTV',
-              type: 'xtream',
-              server_url: savedXtreamConfig.server_url,
-              username: savedXtreamConfig.username,
-              password: savedXtreamConfig.password,
+            const demoPlaylist: PlaylistConfig = {
+              id: 'pl_demo_default',
+              name: 'Chaînes Démo Gratuites',
+              type: 'm3u',
+              server_url: 'https://test-streams.mux.dev',
               status: 'active',
-              channel_count: chCount,
+              channel_count: INITIAL_CHANNELS.length,
               last_sync_at: new Date().toISOString(),
             };
-            await db.playlists.clear();
-            await db.playlists.put(recoveredPl);
-          } else if (!isOnlyDemoChannels && chCount > 0) {
-            let userServerUrl = '';
-            let userUsername = '';
-            let userPassword = '';
-            let isXtream = false;
-
-            for (const ch of allChannels) {
-              if (ch.stream_url) {
-                const m = ch.stream_url.match(/^(https?:\/\/[^\/]+)\/(?:live|movie|series)\/([^\/]+)\/([^\/]+)\//i);
-                if (m) {
-                  userServerUrl = m[1];
-                  userUsername = decodeURIComponent(m[2]);
-                  userPassword = decodeURIComponent(m[3]);
-                  isXtream = true;
-                  break;
-                }
-              }
-            }
-
-            if (isXtream && userServerUrl) {
-              const recoveredPl: PlaylistConfig = {
-                id: 'pl_xtream_' + Date.now(),
-                name: 'Mon Abonnement IPTV',
-                type: 'xtream',
-                server_url: userServerUrl,
-                username: userUsername,
-                password: userPassword,
-                status: 'active',
-                channel_count: chCount,
-                last_sync_at: new Date().toISOString(),
-              };
-              await db.playlists.clear();
-              await db.playlists.put(recoveredPl);
-              await setSetting('last_xtream_config', {
-                server_url: userServerUrl,
-                username: userUsername,
-                password: userPassword,
-                name: 'Mon Abonnement IPTV',
-              });
-            }
-          } else if (chCount === 0 && !hasRealCats) {
-            const userHasDeletedAll = await getSetting<boolean>('user_deleted_all_playlists', false);
-            if (!userHasDeletedAll) {
-              await db.categories.clear();
-              await db.channels.clear();
-              await db.categories.bulkAdd(INITIAL_CATEGORIES);
-              await db.channels.bulkAdd(INITIAL_CHANNELS);
-
-              const demoPlaylist: PlaylistConfig = {
-                id: 'pl_demo_default',
-                name: 'Chaînes Démo Gratuites',
-                type: 'm3u',
-                server_url: 'https://test-streams.mux.dev',
-                status: 'active',
-                channel_count: INITIAL_CHANNELS.length,
-                last_sync_at: new Date().toISOString(),
-              };
-              await db.playlists.put(demoPlaylist);
-            }
+            await db.playlists.put(demoPlaylist);
           }
         }
 
@@ -860,7 +842,25 @@ export default function KeoTVHome() {
   // Update EPG info whenever focused channel changes (debounced by 80ms for ultra-fluid DPAD navigation)
   useEffect(() => {
     const focusedChannel = filteredChannels[focusedChannelIndex];
-    if (!focusedChannel) return;
+    if (!focusedChannel) {
+      setCurrentEpg(null);
+      setNextEpg(null);
+      return;
+    }
+
+    const isSep = isSeparatorChannel(focusedChannel);
+    const isVodOrSeries =
+      activeSection === 'vod' ||
+      activeSection === 'series' ||
+      focusedChannel.stream_type === 'vod' ||
+      focusedChannel.stream_type === 'series';
+
+    // Never generate dummy EPG for separators or films/series
+    if (isSep || isVodOrSeries) {
+      setCurrentEpg(null);
+      setNextEpg(null);
+      return;
+    }
 
     const timer = setTimeout(() => {
       const epg = getMockEpgForChannel(focusedChannel.id);
@@ -869,7 +869,7 @@ export default function KeoTVHome() {
     }, 80);
 
     return () => clearTimeout(timer);
-  }, [focusedChannelIndex, filteredChannels]);
+  }, [focusedChannelIndex, filteredChannels, activeSection]);
 
   // Play an episode chosen from the series detail page
   const handlePlaySeriesEpisode = useCallback(
@@ -1283,7 +1283,13 @@ export default function KeoTVHome() {
 
     // 4. Double back to exit application
     const now = Date.now();
-    if (now - lastBackPressTimeRef.current < 2000) {
+    const timeSinceLast = now - lastBackPressTimeRef.current;
+    if (timeSinceLast < 450) {
+      // Debounce rapid duplicate events from Android hardware / WebView
+      return;
+    }
+
+    if (timeSinceLast < 2500) {
       if (Capacitor.isNativePlatform()) {
         CapApp.exitApp();
       }
@@ -1315,36 +1321,47 @@ export default function KeoTVHome() {
     if (typeof window === 'undefined') return;
 
     let appListenerHandle: any = null;
+    let onPopState: any = null;
+    let onKeyDown: any = null;
+
     if (Capacitor.isNativePlatform()) {
       CapApp.addListener('backButton', () => {
         handleAndroidBack();
       }).then((h) => {
         appListenerHandle = h;
       });
+    } else {
+      onPopState = (e: PopStateEvent) => {
+        e.preventDefault();
+        window.history.pushState(null, '', window.location.href);
+        handleAndroidBack();
+      };
+      window.history.pushState(null, '', window.location.href);
+      window.addEventListener('popstate', onPopState);
+
+      onKeyDown = (e: KeyboardEvent) => {
+        if (e.keyCode === 4 || e.key === 'Escape') {
+          e.preventDefault();
+          handleAndroidBack();
+        }
+      };
+      window.addEventListener('keydown', onKeyDown);
     }
 
-    const onPopState = (e: PopStateEvent) => {
+    // Global protection against unexpected unhandled rejections that could close webview
+    const onUnhandledRejection = (e: PromiseRejectionEvent) => {
+      console.warn('Silently caught unhandled promise rejection in KeoTV:', e.reason);
       e.preventDefault();
-      window.history.pushState(null, '', window.location.href);
-      handleAndroidBack();
     };
-    window.history.pushState(null, '', window.location.href);
-    window.addEventListener('popstate', onPopState);
-
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.keyCode === 4) {
-        e.preventDefault();
-        handleAndroidBack();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('unhandledrejection', onUnhandledRejection);
 
     return () => {
       if (appListenerHandle) {
         appListenerHandle.remove();
       }
-      window.removeEventListener('popstate', onPopState);
-      window.removeEventListener('keydown', onKeyDown);
+      if (onPopState) window.removeEventListener('popstate', onPopState);
+      if (onKeyDown) window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('unhandledrejection', onUnhandledRejection);
     };
   }, [handleAndroidBack]);
 
@@ -1462,6 +1479,24 @@ export default function KeoTVHome() {
     // Save playlist config
     await db.playlists.put(result.playlist);
 
+    // Save permanent redundant backup in localStorage so updates/cache clears NEVER lose the playlist
+    await setSetting('has_configured_playlist', true);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('keotv_has_configured_playlist', 'true');
+      localStorage.setItem('keotv_saved_playlist_v1', JSON.stringify(result.playlist));
+      if (data.type === 'xtream') {
+        localStorage.setItem(
+          'keotv_saved_xtream_creds',
+          JSON.stringify({
+            server_url: data.server_url,
+            username: data.username,
+            password: data.password,
+            name: data.name,
+          })
+        );
+      }
+    }
+
     // Save real categories in Dexie
     await db.categories.bulkPut(result.categories);
 
@@ -1578,6 +1613,24 @@ export default function KeoTVHome() {
       }
 
       await db.playlists.put(updatedPl);
+
+      await setSetting('has_configured_playlist', true);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('keotv_has_configured_playlist', 'true');
+        localStorage.setItem('keotv_saved_playlist_v1', JSON.stringify(updatedPl));
+        if (data.type === 'xtream') {
+          localStorage.setItem(
+            'keotv_saved_xtream_creds',
+            JSON.stringify({
+              server_url: data.server_url,
+              username: data.username,
+              password: data.password,
+              name: data.name,
+            })
+          );
+        }
+      }
+
       const allPls = await db.playlists.toArray();
       setPlaylists(allPls);
 
@@ -2092,6 +2145,8 @@ export default function KeoTVHome() {
               currentEpg={currentEpg}
               nextEpg={nextEpg}
               activePane={activePane}
+              activeSection={activeSection}
+              serverCreds={activeXtreamCreds}
               onSelectCategory={(cat, idx, switchPane = true) => handleSelectCategory(cat, idx, switchPane)}
               onSelectChannel={(ch, idx) => {
                 setFocusedChannelIndex(idx);
@@ -2146,7 +2201,7 @@ export default function KeoTVHome() {
         onResyncPlaylist={handleResyncPlaylist}
         onEditPlaylist={handleOpenEditPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={26}
+        currentBuildNumber={27}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}

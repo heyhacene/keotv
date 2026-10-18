@@ -157,6 +157,42 @@ export function isAdultCategoryName(name: string): boolean {
   });
 }
 
+/**
+ * Detects whether an item in an IPTV playlist is a visual separator/header rather than a real playable channel.
+ * IPTV providers commonly insert decorative entries like "--- FRANCE ---", "=== CINEMA ===", "-----------------",
+ * "*** VOD 4K ***", or items with dummy URLs (empty, localhost, #) to divide categories into sub-blocks.
+ */
+export function isSeparatorChannel(ch?: Channel | null): boolean {
+  if (!ch) return false;
+  const name = (ch.name || '').trim();
+  if (!name) return true;
+
+  // Stream URL is empty, hash or dummy loopback
+  const url = (ch.stream_url || '').trim().toLowerCase();
+  if (!url || url === '#' || url.startsWith('http://localhost') || url.startsWith('http://127.0.0.1')) {
+    return true;
+  }
+
+  // Name consists solely of separator characters, spaces and punctuation
+  if (/^[-=*#_~|.\s/\\+]{3,}$/.test(name)) return true;
+
+  // Name is surrounded by repeated dashes, equals, asterisks, brackets e.g. "--- CANAL+ ---", "=== BEIN ==="
+  if (/^[-=*#_~]{2,}\s*.+\s*[-=*#_~]{2,}$/.test(name)) return true;
+
+  // Common IPTV header prefixes: "---", "***", "===", "###", ">>>", "<<<", "|||"
+  if (/^[-=*#_~|]{3,}/.test(name)) return true;
+
+  return false;
+}
+
+/**
+ * Extracts a clean readable label from a decorative separator name
+ */
+export function cleanSeparatorName(name: string): string {
+  if (!name) return '';
+  return name.replace(/^[-=*#_~|.\s/\\+]+|[-=*#_~|.\s/\\+]+$/g, '').trim() || name;
+}
+
 // Detect video resolution from channel name
 export function detectResolution(name: string): '4K' | 'FHD' | 'HD' | 'SD' {
   const upper = (name || '').toUpperCase();
@@ -831,6 +867,7 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
       is_hidden: false,
       custom_order: chNum,
       resolution: detectResolution(itemName),
+      is_separator: isSeparatorChannel({ name: itemName, stream_url: streamUrl } as any),
     });
   }
 
@@ -1112,6 +1149,7 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
         is_hidden: false,
         custom_order: channels.length + 1, // Strict M3U appearance order
         resolution: detectResolution(currentExtInf.name),
+        is_separator: isSeparatorChannel({ name: currentExtInf.name, stream_url: streamUrl } as any),
       });
 
       currentExtInf = null;

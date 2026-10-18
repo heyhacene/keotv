@@ -13,6 +13,7 @@ export interface Channel {
   custom_order: number;
   resolution?: string; // '4K' | 'FHD' | 'HD' | 'SD'
   is_adult?: boolean;
+  is_separator?: boolean;
 }
 
 export interface Category {

@@ -1,9 +1,35 @@
 'use client';
 
-import React, { useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { Channel, Category, EpgProgram, NavigationPane } from '@/types/iptv';
-import { Star, Tv, Trophy, Film, Globe, Compass, Clock, Radio, Info, Search, Lock, Sliders } from 'lucide-react';
+import {
+  Star,
+  Tv,
+  Trophy,
+  Film,
+  Globe,
+  Compass,
+  Clock,
+  Radio,
+  Info,
+  Search,
+  Lock,
+  Sliders,
+  Layers,
+  Bookmark,
+  Calendar,
+  User,
+  Clapperboard,
+  Loader2,
+  Play,
+} from 'lucide-react';
 import { LiveVideoPlayer } from './LiveVideoPlayer';
+import {
+  isSeparatorChannel,
+  cleanSeparatorName,
+  fetchVodInfo,
+  fetchSeriesInfo,
+} from '@/lib/iptv-service';
 
 interface TVGuideProps {
   categories: Category[];
@@ -30,6 +56,8 @@ interface TVGuideProps {
   onOpenSearch?: () => void;
   onOpenContextMenu?: (channel: Channel) => void;
   onOpenCategoryManager?: () => void;
+  activeSection?: 'live' | 'vod' | 'series' | 'fav';
+  serverCreds?: { serverUrl: string; username: string; password: string } | null;
 }
 
 // Helper for category icons
@@ -146,6 +174,35 @@ const ChannelRow = React.memo<ChannelRowProps>(
       }
     };
 
+    const isSep = channel.is_separator ?? isSeparatorChannel(channel);
+
+    if (isSep) {
+      const cleanLabel = cleanSeparatorName(channel.name);
+      return (
+        <div
+          id={`channel-item-${index}`}
+          onClick={() => onSelect(channel, index)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            onOpenContextMenu?.(channel);
+          }}
+          className={`flex items-center justify-between px-3.5 py-1.5 mx-2 my-1 rounded-xl select-none cursor-default transition-all duration-75 ${
+            isFocused
+              ? 'bg-tv-focus text-white font-bold ring-2 ring-tv-accent shadow-md'
+              : 'bg-white/5 border border-white/5 text-slate-400 font-semibold hover:bg-white/10'
+          }`}
+        >
+          <div className="flex items-center space-x-2 truncate">
+            <Layers className="w-3.5 h-3.5 text-tv-accent flex-shrink-0" />
+            <span className="text-xs uppercase tracking-wider truncate font-bold">{cleanLabel}</span>
+          </div>
+          <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono uppercase tracking-widest flex-shrink-0 ml-2">
+            Section
+          </span>
+        </div>
+      );
+    }
+
     return (
       <div
         id={`channel-item-${index}`}
@@ -214,13 +271,17 @@ const ChannelRow = React.memo<ChannelRowProps>(
               )}
             </div>
             <p className="text-[11px] text-slate-400 truncate mt-0.5">
-              {channel.id === 'ch_tf1'
+              {channel.stream_type === 'vod'
+                ? (channel.group_name || 'Film à la demande')
+                : channel.stream_type === 'series'
+                ? (channel.group_name || 'Série TV')
+                : channel.id === 'ch_tf1'
                 ? 'Le Journal de 20h & Météo'
                 : channel.id === 'ch_cplus'
                 ? 'Oppenheimer (2023) - Exclusivité 4K'
                 : channel.id === 'ch_beinsport1'
                 ? 'UEFA Champions League : Match en Direct'
-                : 'Programme en direct HD'}
+                : (channel.group_name || 'Flux en direct HD')}
             </p>
           </div>
         </div>
@@ -254,7 +315,8 @@ const ChannelRow = React.memo<ChannelRowProps>(
       prev.channel.num === next.channel.num &&
       prev.channel.name === next.channel.name &&
       prev.channel.is_favorite === next.channel.is_favorite &&
-      prev.channel.logo === next.channel.logo
+      prev.channel.logo === next.channel.logo &&
+      prev.channel.is_separator === next.channel.is_separator
     );
   }
 );
@@ -286,9 +348,115 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   onOpenSearch,
   onOpenContextMenu,
   onOpenCategoryManager,
+  activeSection = 'live',
+  serverCreds,
 }) => {
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
+
+  // Rich media preview states for VOD & Séries
+  const [mediaDetails, setMediaDetails] = useState<any | null>(null);
+  const [loadingMediaDetails, setLoadingMediaDetails] = useState<boolean>(false);
+  const detailsCacheRef = useRef<Map<string, any>>(new Map());
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const focusedChannel = channels[focusedChannelIndex] || activeChannel;
+  const isSep = isSeparatorChannel(focusedChannel);
+  const isMediaItem =
+    activeSection === 'vod' ||
+    activeSection === 'series' ||
+    focusedChannel?.stream_type === 'vod' ||
+    focusedChannel?.stream_type === 'series';
+
+  // Debounced media metadata fetcher: fires after staying paused on item for 1.2s
+  useEffect(() => {
+    if (!focusedChannel || isSep || !isMediaItem) {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+      setMediaDetails(null);
+      setLoadingMediaDetails(false);
+      return;
+    }
+
+    // Check in-memory cache for instant display
+    const cached = detailsCacheRef.current.get(focusedChannel.id);
+    if (cached) {
+      setMediaDetails(cached);
+      setLoadingMediaDetails(false);
+      return;
+    }
+
+    setMediaDetails(null);
+    setLoadingMediaDetails(false);
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+
+    debounceTimerRef.current = setTimeout(async () => {
+      if (!serverCreds?.serverUrl || !serverCreds?.username || !serverCreds?.password) {
+        return;
+      }
+      setLoadingMediaDetails(true);
+      try {
+        let loaded: any = null;
+        if (focusedChannel.stream_type === 'series' || activeSection === 'series') {
+          const rawId = focusedChannel.id.replace(/^ch_xtream_series_/, '');
+          const res = await fetchSeriesInfo(
+            serverCreds.serverUrl,
+            serverCreds.username,
+            serverCreds.password,
+            rawId
+          );
+          if (res?.info) {
+            loaded = {
+              title: res.info.name || focusedChannel.name,
+              plot: res.info.plot,
+              cover: res.info.cover || focusedChannel.logo,
+              genre: res.info.genre,
+              releaseDate: res.info.releaseDate,
+              rating: res.info.rating,
+              cast: res.info.cast,
+              director: res.info.director,
+              seasonsCount: res.seasons?.length || 0,
+              type: 'series',
+            };
+          }
+        } else {
+          const rawId = focusedChannel.id.replace(/^ch_xtream_vod_/, '');
+          const res = await fetchVodInfo(
+            serverCreds.serverUrl,
+            serverCreds.username,
+            serverCreds.password,
+            rawId,
+            focusedChannel
+          );
+          if (res?.info) {
+            loaded = {
+              title: res.info.name || focusedChannel.name,
+              plot: res.info.plot,
+              cover: res.info.cover || focusedChannel.logo,
+              genre: res.info.genre,
+              releaseDate: res.info.releaseDate,
+              rating: res.info.rating,
+              duration: res.info.duration,
+              cast: res.info.cast,
+              director: res.info.director,
+              type: 'vod',
+            };
+          }
+        }
+        if (loaded) {
+          detailsCacheRef.current.set(focusedChannel.id, loaded);
+          setMediaDetails(loaded);
+        }
+      } catch (err) {
+        console.warn('Failed to load media details in right panel:', err);
+      } finally {
+        setLoadingMediaDetails(false);
+      }
+    }, 1200);
+
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    };
+  }, [focusedChannel, isSep, isMediaItem, serverCreds, activeSection]);
 
   // INSTANT AUTO-SCROLL (behavior: 'auto' prevents the 500ms smooth animation stutter on Android TV)
   useEffect(() => {
@@ -511,87 +679,251 @@ export const TVGuide: React.FC<TVGuideProps> = ({
         )}
       </div>
 
-      {/* 3. RIGHT COLUMN: PREVIEW PLAYER & DETAILED EPG */}
-      <div className="w-80 xl:w-96 flex flex-col p-4 bg-tv-surface/60 overflow-y-auto flex-shrink-0">
-        {/* Live Preview Video Player */}
-        <div className="w-full aspect-video rounded-xl overflow-hidden shadow-2xl border border-tv-border bg-black mb-3 flex-shrink-0">
-          <LiveVideoPlayer
-            channel={activeChannel}
-            currentEpg={currentEpg}
-            nextEpg={nextEpg}
-            isFullscreen={false}
-            onToggleFullscreen={onToggleFullscreen}
-            isStopped={isStopped}
-            onTogglePlayStop={onTogglePlayStop}
-          />
-        </div>
+      {/* 3. RIGHT COLUMN: PREVIEW PLAYER & DETAILED EPG OR RICH MEDIA DETAILS */}
+      <div className="w-80 xl:w-96 flex flex-col p-4 bg-tv-surface/60 overflow-y-auto flex-shrink-0 border-l border-tv-border">
+        {isSep ? (
+          /* SEPARATOR / SECTION DIVIDER CARD */
+          <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
+            <div className="w-16 h-16 rounded-2xl bg-tv-focus/20 border border-tv-accent/30 flex items-center justify-center mb-4 shadow-xl">
+              <Layers className="w-8 h-8 text-tv-accent" />
+            </div>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-tv-accent bg-tv-accent/10 px-2.5 py-0.5 rounded-full border border-tv-accent/20 mb-2">
+              Séparateur de Bouquet
+            </span>
+            <h3 className="text-lg font-black text-white leading-tight mb-2">
+              {cleanSeparatorName(focusedChannel?.name || 'Séparateur')}
+            </h3>
+            <p className="text-xs text-slate-400 leading-relaxed mb-6">
+              Cet élément est un en-tête thématique inséré dans votre playlist. Il n'émet aucun flux vidéo.
+            </p>
+            <div className="w-full bg-tv-card/60 p-3 rounded-xl border border-tv-border text-[11px] text-slate-300">
+              💡 <span className="font-semibold text-white">Astuce télécommande :</span> Descendez avec la flèche <span className="font-mono text-tv-accent font-bold">▼</span> pour parcourir les chaînes de ce groupe.
+            </div>
+          </div>
+        ) : isMediaItem ? (
+          /* RICH MEDIA CARD (FILMS & SÉRIES) */
+          <div className="flex-1 flex flex-col space-y-3">
+            {/* Poster / Backdrop */}
+            <div className="relative w-full aspect-[16/10] rounded-2xl overflow-hidden bg-black/60 border border-tv-border shadow-2xl flex-shrink-0 group">
+              {(mediaDetails?.cover || focusedChannel?.logo) ? (
+                <img
+                  src={mediaDetails?.cover || focusedChannel?.logo}
+                  alt={focusedChannel?.name}
+                  className="w-full h-full object-cover object-top"
+                  onError={(e) => {
+                    (e.target as HTMLElement).style.display = 'none';
+                  }}
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-slate-900/80">
+                  {activeSection === 'series' || focusedChannel?.stream_type === 'series' ? (
+                    <Clapperboard className="w-12 h-12 text-slate-700" />
+                  ) : (
+                    <Film className="w-12 h-12 text-slate-700" />
+                  )}
+                </div>
+              )}
+              <div className="absolute inset-0 bg-gradient-to-t from-tv-bg via-transparent to-black/30 pointer-events-none" />
 
-        {/* EPG Program details */}
-        <div className="flex items-center space-x-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">
-          <Info className="w-4 h-4 text-tv-accent" />
-          <span>Guide du Programme</span>
-        </div>
-
-        {currentEpg ? (
-          <div className="space-y-3 flex-1 flex flex-col">
-            <div>
-              <div className="flex items-center space-x-2 text-xs text-tv-accent font-semibold mb-1">
-                <span>{currentEpg.category || 'En direct'}</span>
-                {currentEpg.rating && (
-                  <span className="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded">
-                    {currentEpg.rating}
+              {/* Type badge */}
+              <div className="absolute top-2.5 left-2.5 flex items-center space-x-1.5">
+                <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-full bg-tv-accent text-slate-950 shadow-md">
+                  {activeSection === 'series' || focusedChannel?.stream_type === 'series' ? 'Série' : 'Film VOD'}
+                </span>
+                {focusedChannel?.resolution && (
+                  <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded bg-black/70 text-white border border-white/20">
+                    {focusedChannel.resolution}
                   </span>
                 )}
               </div>
-              <h3 className="text-base font-bold text-white leading-snug">
-                {currentEpg.title}
+
+              {/* Favorite toggle badge */}
+              {focusedChannel && (
+                <button
+                  type="button"
+                  onClick={() => onToggleFavorite(focusedChannel)}
+                  className="absolute top-2.5 right-2.5 p-1.5 rounded-full bg-black/60 hover:bg-black/90 text-amber-400 border border-white/10 transition shadow-lg"
+                  title="Ajouter aux favoris"
+                >
+                  <Star className={`w-4 h-4 ${focusedChannel.is_favorite ? 'fill-amber-400' : ''}`} />
+                </button>
+              )}
+            </div>
+
+            {/* Title & Metadata */}
+            <div>
+              <h3 className="text-base font-bold text-white leading-snug line-clamp-2">
+                {mediaDetails?.title || focusedChannel?.name}
               </h3>
-              <div className="flex items-center space-x-2 text-xs text-slate-400 font-mono mt-1">
-                <Clock className="w-3.5 h-3.5 text-slate-500" />
+              <div className="flex flex-wrap items-center gap-2 text-xs text-slate-400 mt-1.5">
+                {mediaDetails?.releaseDate && (
+                  <span className="flex items-center space-x-1">
+                    <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                    <span>{String(mediaDetails.releaseDate).slice(0, 4)}</span>
+                  </span>
+                )}
+                {mediaDetails?.duration && (
+                  <span className="flex items-center space-x-1 font-mono">
+                    <Clock className="w-3.5 h-3.5 text-slate-500" />
+                    <span>{mediaDetails.duration}</span>
+                  </span>
+                )}
+                {mediaDetails?.seasonsCount && mediaDetails.seasonsCount > 0 && (
+                  <span className="font-mono text-tv-accent font-semibold">
+                    {mediaDetails.seasonsCount} {mediaDetails.seasonsCount > 1 ? 'Saisons' : 'Saison'}
+                  </span>
+                )}
+                {mediaDetails?.rating && Number(mediaDetails.rating) > 0 && (
+                  <span className="flex items-center space-x-1 text-amber-400 font-bold font-mono">
+                    <Star className="w-3 h-3 fill-amber-400" />
+                    <span>{Number(mediaDetails.rating).toFixed(1)}/10</span>
+                  </span>
+                )}
+              </div>
+
+              {mediaDetails?.genre && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {String(mediaDetails.genre).split(/[,/]/).slice(0, 3).map((g, idx) => (
+                    <span key={idx} className="text-[10px] bg-slate-800 text-slate-300 px-2 py-0.5 rounded-md font-medium">
+                      {g.trim()}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Synopsis / Plot */}
+            <div className="flex-1 bg-tv-card/60 p-3 rounded-xl border border-tv-border/60 overflow-y-auto">
+              {loadingMediaDetails ? (
+                <div className="flex items-center space-x-2 text-xs text-slate-400 py-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-tv-accent" />
+                  <span>Chargement des détails...</span>
+                </div>
+              ) : mediaDetails?.plot ? (
+                <p className="text-xs leading-relaxed text-slate-300">
+                  {mediaDetails.plot}
+                </p>
+              ) : (
+                <p className="text-xs leading-relaxed text-slate-400 italic">
+                  Arrêtez-vous sur ce titre pendant 1 à 2 secondes pour charger le résumé complet.
+                </p>
+              )}
+
+              {mediaDetails?.director && (
+                <div className="mt-2.5 pt-2 border-t border-white/5 text-[11px] text-slate-400">
+                  <span className="text-slate-500 font-semibold">De : </span>
+                  <span className="text-slate-200">{mediaDetails.director}</span>
+                </div>
+              )}
+
+              {mediaDetails?.cast && (
+                <div className="mt-1 text-[11px] text-slate-400 line-clamp-2">
+                  <span className="text-slate-500 font-semibold">Avec : </span>
+                  <span className="text-slate-300">{mediaDetails.cast}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Primary Action Button */}
+            {focusedChannel && (
+              <button
+                type="button"
+                onClick={() => onSelectChannel(focusedChannel, focusedChannelIndex)}
+                className="w-full py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition shadow-lg flex items-center justify-center space-x-2 mt-auto"
+              >
+                <Play className="w-3.5 h-3.5 fill-white" />
                 <span>
-                  {new Date(currentEpg.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}{' '}
-                  -{' '}
-                  {new Date(currentEpg.end).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                  {activeSection === 'series' || focusedChannel.stream_type === 'series'
+                    ? 'Voir les épisodes (OK)'
+                    : 'Lancer le film (OK)'}
                 </span>
-                <span className="text-slate-600">•</span>
-                <span>{currentEpg.duration_min} min</span>
-              </div>
-            </div>
-
-            {/* Synopsis */}
-            <div className="bg-tv-card/60 p-3 rounded-xl border border-tv-border/60">
-              <p className="text-xs leading-relaxed text-slate-300 line-clamp-4">
-                {currentEpg.description}
-              </p>
-            </div>
-
-            {/* Next program */}
-            {nextEpg && (
-              <div className="p-2.5 bg-tv-card/30 rounded-xl border border-tv-border/40">
-                <div className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-0.5">
-                  À suivre
-                </div>
-                <div className="text-xs font-semibold text-slate-200 truncate">
-                  {nextEpg.title}
-                </div>
-                <div className="text-[11px] text-slate-400 font-mono">
-                  {new Date(nextEpg.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
-                </div>
-              </div>
+              </button>
             )}
-
-            <button
-              type="button"
-              onClick={onToggleFullscreen}
-              className="w-full py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition shadow-lg mt-auto"
-            >
-              Passer en plein écran (Entrée)
-            </button>
           </div>
         ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-center p-4">
-            <Clock className="w-8 h-8 mb-2 opacity-50" />
-            <p className="text-xs">Sélectionnez une chaîne pour afficher les détails.</p>
+          /* LIVE TV PREVIEW & EPG */
+          <div className="flex-1 flex flex-col space-y-3">
+            {/* Live Preview Video Player */}
+            <div className="w-full aspect-video rounded-xl overflow-hidden shadow-2xl border border-tv-border bg-black mb-1 flex-shrink-0">
+              <LiveVideoPlayer
+                channel={activeChannel}
+                currentEpg={currentEpg}
+                nextEpg={nextEpg}
+                isFullscreen={false}
+                onToggleFullscreen={onToggleFullscreen}
+                isStopped={isStopped}
+                onTogglePlayStop={onTogglePlayStop}
+              />
+            </div>
+
+            {/* EPG Program details */}
+            <div className="flex items-center space-x-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+              <Info className="w-4 h-4 text-tv-accent" />
+              <span>Guide du Programme</span>
+            </div>
+
+            {currentEpg ? (
+              <div className="space-y-3 flex-1 flex flex-col">
+                <div>
+                  <div className="flex items-center space-x-2 text-xs text-tv-accent font-semibold mb-1">
+                    <span>{currentEpg.category || 'En direct'}</span>
+                    {currentEpg.rating && (
+                      <span className="text-[10px] bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded">
+                        {currentEpg.rating}
+                      </span>
+                    )}
+                  </div>
+                  <h3 className="text-base font-bold text-white leading-snug">
+                    {currentEpg.title}
+                  </h3>
+                  <div className="flex items-center space-x-2 text-xs text-slate-400 font-mono mt-1">
+                    <Clock className="w-3.5 h-3.5 text-slate-500" />
+                    <span>
+                      {new Date(currentEpg.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}{' '}
+                      -{' '}
+                      {new Date(currentEpg.end).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                    <span className="text-slate-600">•</span>
+                    <span>{currentEpg.duration_min} min</span>
+                  </div>
+                </div>
+
+                {/* Synopsis */}
+                <div className="bg-tv-card/60 p-3 rounded-xl border border-tv-border/60">
+                  <p className="text-xs leading-relaxed text-slate-300 line-clamp-4">
+                    {currentEpg.description}
+                  </p>
+                </div>
+
+                {/* Next program */}
+                {nextEpg && (
+                  <div className="p-2.5 bg-tv-card/30 rounded-xl border border-tv-border/40">
+                    <div className="text-[10px] uppercase font-bold text-slate-500 tracking-wider mb-0.5">
+                      À suivre
+                    </div>
+                    <div className="text-xs font-semibold text-slate-200 truncate">
+                      {nextEpg.title}
+                    </div>
+                    <div className="text-[11px] text-slate-400 font-mono">
+                      {new Date(nextEpg.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={onToggleFullscreen}
+                  className="w-full py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition shadow-lg mt-auto"
+                >
+                  Passer en plein écran (Entrée)
+                </button>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-center p-4">
+                <Clock className="w-8 h-8 mb-2 opacity-50" />
+                <p className="text-xs">Sélectionnez une chaîne pour afficher les détails.</p>
+              </div>
+            )}
           </div>
         )}
       </div>
