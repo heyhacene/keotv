@@ -179,7 +179,7 @@ export function useTVNavigation({
           setFocusedCategoryIndex(next);
           onSelectCategory(next, false);
         } else if (activePane === 'menu') {
-          setFocusedMenuIndex((prev) => (prev > 0 ? prev - 1 : 5));
+          setFocusedMenuIndex((prev) => (prev > 0 ? prev - 1 : 6));
         }
         return;
       }
@@ -194,7 +194,7 @@ export function useTVNavigation({
           setFocusedCategoryIndex(next);
           onSelectCategory(next, false);
         } else if (activePane === 'menu') {
-          setFocusedMenuIndex((prev) => (prev < 5 ? prev + 1 : 0));
+          setFocusedMenuIndex((prev) => (prev < 6 ? prev + 1 : 0));
         }
         return;
       }

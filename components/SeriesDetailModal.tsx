@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { ArrowLeft, Loader2, Play, AlertCircle, ChevronDown, ChevronRight, Film, Volume2, MessageSquare } from 'lucide-react';
 import { Channel } from '@/types/iptv';
 import { fetchSeriesInfo, SeriesDetails, SeriesEpisode } from '@/lib/iptv-service';
@@ -15,7 +15,9 @@ interface SeriesDetailModalProps {
   onPlayEpisode?: (episode: SeriesEpisode, allEpisodes: SeriesEpisode[], audioPref?: string, subPref?: string) => void;
 }
 
-// Full page for a series: seasons (collapsible) and all episodes of each season
+type FocusedSection = 'back' | 'audio' | 'sub' | 'seasons' | 'episodes';
+
+// Full page for a series: seasons (collapsible) and all episodes with full TV remote navigation
 export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
   series,
   serverUrl,
@@ -34,15 +36,28 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
   const [seriesAudio, setSeriesAudio] = useState<'vf' | 'vo'>('vf');
   const [seriesSub, setSeriesSub] = useState<'off' | 'fr' | 'en'>('off');
 
+  // TV Remote Navigation states
+  const [focusedSection, setFocusedSection] = useState<FocusedSection>('episodes');
+  const [focusedAudioChoice, setFocusedAudioChoice] = useState<'vf' | 'vo'>('vf');
+  const [focusedSubChoice, setFocusedSubChoice] = useState<'off' | 'fr' | 'en'>('off');
+  const [focusedSeasonIndex, setFocusedSeasonIndex] = useState<number>(0);
+  const [focusedEpisodeIndex, setFocusedEpisodeIndex] = useState<number>(0);
+
   // Load saved series language preferences
   useEffect(() => {
     if (!seriesKey) return;
     try {
       const savedAudio = localStorage.getItem(`keotv_series_audio_${seriesKey}`);
-      if (savedAudio === 'vo' || savedAudio === 'vf') setSeriesAudio(savedAudio);
+      if (savedAudio === 'vo' || savedAudio === 'vf') {
+        setSeriesAudio(savedAudio);
+        setFocusedAudioChoice(savedAudio);
+      }
 
       const savedSub = localStorage.getItem(`keotv_series_sub_${seriesKey}`);
-      if (savedSub === 'fr' || savedSub === 'en' || savedSub === 'off') setSeriesSub(savedSub);
+      if (savedSub === 'fr' || savedSub === 'en' || savedSub === 'off') {
+        setSeriesSub(savedSub);
+        setFocusedSubChoice(savedSub);
+      }
     } catch {
       // ignore
     }
@@ -50,6 +65,7 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
 
   const saveAudioPref = (val: 'vf' | 'vo') => {
     setSeriesAudio(val);
+    setFocusedAudioChoice(val);
     try {
       localStorage.setItem(`keotv_series_audio_${seriesKey}`, val);
     } catch {
@@ -59,6 +75,7 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
 
   const saveSubPref = (val: 'off' | 'fr' | 'en') => {
     setSeriesSub(val);
+    setFocusedSubChoice(val);
     try {
       localStorage.setItem(`keotv_series_sub_${seriesKey}`, val);
     } catch {
@@ -78,7 +95,12 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
       .then((d) => {
         if (cancelled) return;
         setDetails(d);
-        if (d.seasons.length > 0) setOpenSeason(d.seasons[0].season);
+        if (d.seasons.length > 0) {
+          setOpenSeason(d.seasons[0].season);
+          setFocusedSeasonIndex(0);
+          setFocusedEpisodeIndex(0);
+          setFocusedSection('episodes');
+        }
         if (d.seasons.length === 0) setError('Aucun épisode disponible pour cette série sur ce serveur.');
       })
       .catch((err: any) => {
@@ -94,11 +116,8 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
     };
   }, [series, serverUrl, username, password]);
 
-  if (!series) return null;
-
-  const playEpisode = async (episode: SeriesEpisode) => {
-    if (!details) return;
-    // Playlist = all episodes of all seasons in order, so "next" goes on to the following episode / season
+  const playEpisode = useCallback(async (episode: SeriesEpisode) => {
+    if (!details || !series) return;
     const all = details.seasons.flatMap((s) => s.episodes);
     const index = Math.max(0, all.findIndex((e) => e.id === episode.id));
 
@@ -126,11 +145,34 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
     }
 
     alert('La lecture des épisodes nécessite l’application Android KeoTV.');
+  }, [details, series, onPlayEpisode, seriesAudio, seriesSub, seriesKey]);
+
+  // Active season & current episode list
+  const activeSeasonData = details?.seasons.find((s) => s.season === openSeason);
+  const currentEpisodes = activeSeasonData?.episodes || [];
+
+  // Smooth scroll helper
+  const scrollToFocusedElement = (elementId: string) => {
+    setTimeout(() => {
+      const el = document.getElementById(elementId);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }, 40);
   };
 
-  // Remote control Back key handler
+  // ==============================================================
+  // FULL TV REMOTE CONTROL D-PAD ENGINE FOR SERIES DETAIL
+  // ==============================================================
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const isUp = e.key === 'ArrowUp' || (e as any).keyCode === 38;
+      const isDown = e.key === 'ArrowDown' || (e as any).keyCode === 40;
+      const isLeft = e.key === 'ArrowLeft' || (e as any).keyCode === 37;
+      const isRight = e.key === 'ArrowRight' || (e as any).keyCode === 39;
+      const isEnter =
+        e.key === 'Enter' ||
+        e.key === 'Select' ||
+        (e as any).keyCode === 13 ||
+        (e as any).keyCode === 23;
       const isBack =
         e.key === 'Escape' ||
         e.key === 'Backspace' ||
@@ -143,25 +185,252 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
         e.preventDefault();
         e.stopPropagation();
         onClose();
+        return;
+      }
+
+      if (!details || details.seasons.length === 0) {
+        if (isEnter && focusedSection === 'back') {
+          e.preventDefault();
+          onClose();
+        }
+        return;
+      }
+
+      // 1. SECTION: BACK BUTTON
+      if (focusedSection === 'back') {
+        if (isEnter) {
+          e.preventDefault();
+          onClose();
+          return;
+        }
+        if (isDown) {
+          e.preventDefault();
+          setFocusedSection('audio');
+          scrollToFocusedElement('series-pref-audio');
+          return;
+        }
+        return;
+      }
+
+      // 2. SECTION: AUDIO PREFERENCE
+      if (focusedSection === 'audio') {
+        if (isUp) {
+          e.preventDefault();
+          setFocusedSection('back');
+          scrollToFocusedElement('series-btn-back');
+          return;
+        }
+        if (isLeft) {
+          e.preventDefault();
+          saveAudioPref('vf');
+          return;
+        }
+        if (isRight) {
+          e.preventDefault();
+          if (focusedAudioChoice === 'vf') {
+            saveAudioPref('vo');
+          } else {
+            setFocusedSection('sub');
+            scrollToFocusedElement('series-pref-sub');
+          }
+          return;
+        }
+        if (isDown) {
+          e.preventDefault();
+          if (currentEpisodes.length > 0) {
+            setFocusedSection('episodes');
+            setFocusedEpisodeIndex(0);
+            scrollToFocusedElement('series-ep-0');
+          } else {
+            setFocusedSection('seasons');
+            setFocusedSeasonIndex(0);
+            scrollToFocusedElement('series-season-0');
+          }
+          return;
+        }
+        if (isEnter) {
+          e.preventDefault();
+          saveAudioPref(focusedAudioChoice === 'vf' ? 'vo' : 'vf');
+          return;
+        }
+        return;
+      }
+
+      // 3. SECTION: SUBTITLES PREFERENCE
+      if (focusedSection === 'sub') {
+        if (isUp) {
+          e.preventDefault();
+          setFocusedSection('back');
+          scrollToFocusedElement('series-btn-back');
+          return;
+        }
+        if (isLeft) {
+          e.preventDefault();
+          if (focusedSubChoice === 'en') {
+            saveSubPref('fr');
+          } else if (focusedSubChoice === 'fr') {
+            saveSubPref('off');
+          } else {
+            setFocusedSection('audio');
+            scrollToFocusedElement('series-pref-audio');
+          }
+          return;
+        }
+        if (isRight) {
+          e.preventDefault();
+          if (focusedSubChoice === 'off') {
+            saveSubPref('fr');
+          } else if (focusedSubChoice === 'fr') {
+            saveSubPref('en');
+          }
+          return;
+        }
+        if (isDown) {
+          e.preventDefault();
+          if (currentEpisodes.length > 0) {
+            setFocusedSection('episodes');
+            setFocusedEpisodeIndex(0);
+            scrollToFocusedElement('series-ep-0');
+          } else {
+            setFocusedSection('seasons');
+            setFocusedSeasonIndex(0);
+            scrollToFocusedElement('series-season-0');
+          }
+          return;
+        }
+        if (isEnter) {
+          e.preventDefault();
+          const next = focusedSubChoice === 'off' ? 'fr' : (focusedSubChoice === 'fr' ? 'en' : 'off');
+          saveSubPref(next);
+          return;
+        }
+        return;
+      }
+
+      // 4. SECTION: SEASONS HEADERS
+      if (focusedSection === 'seasons') {
+        if (isUp) {
+          e.preventDefault();
+          if (focusedSeasonIndex > 0) {
+            const nextIdx = focusedSeasonIndex - 1;
+            setFocusedSeasonIndex(nextIdx);
+            scrollToFocusedElement(`series-season-${nextIdx}`);
+          } else {
+            setFocusedSection('audio');
+            scrollToFocusedElement('series-pref-audio');
+          }
+          return;
+        }
+
+        if (isDown) {
+          e.preventDefault();
+          const currentSeasonObj = details.seasons[focusedSeasonIndex];
+          // If this season is open and has episodes, move directly into its episodes!
+          if (openSeason === currentSeasonObj?.season && currentSeasonObj.episodes.length > 0) {
+            setFocusedSection('episodes');
+            setFocusedEpisodeIndex(0);
+            scrollToFocusedElement('series-ep-0');
+          } else if (focusedSeasonIndex < details.seasons.length - 1) {
+            const nextIdx = focusedSeasonIndex + 1;
+            setFocusedSeasonIndex(nextIdx);
+            scrollToFocusedElement(`series-season-${nextIdx}`);
+          }
+          return;
+        }
+
+        if (isEnter) {
+          e.preventDefault();
+          const currentSeasonObj = details.seasons[focusedSeasonIndex];
+          if (currentSeasonObj) {
+            const isOpen = openSeason === currentSeasonObj.season;
+            setOpenSeason(isOpen ? null : currentSeasonObj.season);
+          }
+          return;
+        }
+        return;
+      }
+
+      // 5. SECTION: EPISODES
+      if (focusedSection === 'episodes') {
+        if (isUp) {
+          e.preventDefault();
+          if (focusedEpisodeIndex > 0) {
+            const nextIdx = focusedEpisodeIndex - 1;
+            setFocusedEpisodeIndex(nextIdx);
+            scrollToFocusedElement(`series-ep-${nextIdx}`);
+          } else {
+            // At first episode: move back up to season header
+            setFocusedSection('seasons');
+            scrollToFocusedElement(`series-season-${focusedSeasonIndex}`);
+          }
+          return;
+        }
+
+        if (isDown) {
+          e.preventDefault();
+          if (focusedEpisodeIndex < currentEpisodes.length - 1) {
+            const nextIdx = focusedEpisodeIndex + 1;
+            setFocusedEpisodeIndex(nextIdx);
+            scrollToFocusedElement(`series-ep-${nextIdx}`);
+          } else {
+            // At last episode: move down to next season header if available
+            if (focusedSeasonIndex < details.seasons.length - 1) {
+              const nextSeasonIdx = focusedSeasonIndex + 1;
+              setFocusedSection('seasons');
+              setFocusedSeasonIndex(nextSeasonIdx);
+              scrollToFocusedElement(`series-season-${nextSeasonIdx}`);
+            }
+          }
+          return;
+        }
+
+        if (isEnter) {
+          e.preventDefault();
+          const ep = currentEpisodes[focusedEpisodeIndex];
+          if (ep) {
+            playEpisode(ep);
+          }
+          return;
+        }
+        return;
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  }, [
+    details,
+    focusedSection,
+    focusedAudioChoice,
+    focusedSubChoice,
+    focusedSeasonIndex,
+    focusedEpisodeIndex,
+    openSeason,
+    currentEpisodes,
+    onClose,
+    playEpisode,
+  ]);
+
+  if (!series) return null;
 
   const cover = details?.cover || series.logo;
 
   return (
-    <div className="fixed inset-0 z-[60] bg-tv-bg flex flex-col">
+    <div className="fixed inset-0 z-[60] bg-tv-bg flex flex-col animate-fade-in select-none">
       {/* Header */}
       <div className="flex items-center space-x-3 px-4 py-3 bg-tv-surface border-b border-tv-border flex-shrink-0">
         <button
+          id="series-btn-back"
           onClick={onClose}
-          className="p-2 rounded-xl bg-tv-card hover:bg-tv-cardHover text-slate-200 hover:text-white transition flex items-center space-x-2 border border-tv-border shadow-sm focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+          className={`p-2.5 rounded-xl transition flex items-center space-x-2 border shadow-sm focus:outline-none ${
+            focusedSection === 'back'
+              ? 'bg-tv-focus text-white border-tv-accent ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-surface scale-105'
+              : 'bg-tv-card hover:bg-tv-cardHover text-slate-200 hover:text-white border-tv-border'
+          }`}
           title="Retour aux séries"
         >
           <ArrowLeft className="w-5 h-5 text-tv-accent" />
-          <span className="text-xs font-semibold hidden sm:inline">Retour</span>
+          <span className="text-xs font-semibold">Retour</span>
         </button>
         <div className="min-w-0 flex-1">
           <h2 className="text-sm sm:text-base font-bold text-white truncate">{series.name}</h2>
@@ -216,31 +485,39 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
                 </p>
               )}
 
-              {/* Series Audio & Subtitles Preference Selector */}
+              {/* Series Audio & Subtitles Preference Selector with remote focus */}
               <div className="mt-3.5 p-3 rounded-xl bg-black/40 border border-white/10 space-y-2">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                  <div className="flex items-center space-x-2">
+                  <div id="series-pref-audio" className="flex items-center space-x-2">
                     <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5 flex-shrink-0">
                       <Volume2 className="w-3.5 h-3.5 text-tv-accent" />
                       <span>Audio :</span>
                     </span>
-                    <div className="flex items-center space-x-1">
+                    <div className="flex items-center space-x-1.5">
                       <button
                         onClick={() => saveAudioPref('vf')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition border ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition border ${
                           seriesAudio === 'vf'
                             ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
                             : 'bg-tv-card/60 text-slate-400 border-white/5 hover:text-white'
+                        } ${
+                          focusedSection === 'audio' && focusedAudioChoice === 'vf'
+                            ? 'ring-2 ring-tv-accent scale-105 shadow-lg'
+                            : ''
                         }`}
                       >
                         Français (VF)
                       </button>
                       <button
                         onClick={() => saveAudioPref('vo')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition border ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition border ${
                           seriesAudio === 'vo'
                             ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
                             : 'bg-tv-card/60 text-slate-400 border-white/5 hover:text-white'
+                        } ${
+                          focusedSection === 'audio' && focusedAudioChoice === 'vo'
+                            ? 'ring-2 ring-tv-accent scale-105 shadow-lg'
+                            : ''
                         }`}
                       >
                         Version Originale (VO)
@@ -248,38 +525,50 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex items-center space-x-2">
+                  <div id="series-pref-sub" className="flex items-center space-x-2">
                     <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5 flex-shrink-0">
                       <MessageSquare className="w-3.5 h-3.5 text-purple-400" />
                       <span>Sous-titres :</span>
                     </span>
-                    <div className="flex items-center space-x-1">
+                    <div className="flex items-center space-x-1.5">
                       <button
                         onClick={() => saveSubPref('off')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition border ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition border ${
                           seriesSub === 'off'
                             ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
                             : 'bg-tv-card/60 text-slate-400 border-white/5 hover:text-white'
+                        } ${
+                          focusedSection === 'sub' && focusedSubChoice === 'off'
+                            ? 'ring-2 ring-purple-400 scale-105 shadow-lg'
+                            : ''
                         }`}
                       >
                         Sans
                       </button>
                       <button
                         onClick={() => saveSubPref('fr')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition border ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition border ${
                           seriesSub === 'fr'
                             ? 'bg-purple-600 text-white border-purple-400 shadow-sm'
                             : 'bg-tv-card/60 text-slate-400 border-white/5 hover:text-white'
+                        } ${
+                          focusedSection === 'sub' && focusedSubChoice === 'fr'
+                            ? 'ring-2 ring-purple-400 scale-105 shadow-lg'
+                            : ''
                         }`}
                       >
                         Français (FR)
                       </button>
                       <button
                         onClick={() => saveSubPref('en')}
-                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition border ${
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition border ${
                           seriesSub === 'en'
                             ? 'bg-purple-600 text-white border-purple-400 shadow-sm'
                             : 'bg-tv-card/60 text-slate-400 border-white/5 hover:text-white'
+                        } ${
+                          focusedSection === 'sub' && focusedSubChoice === 'en'
+                            ? 'ring-2 ring-purple-400 scale-105 shadow-lg'
+                            : ''
                         }`}
                       >
                         Anglais (EN)
@@ -288,7 +577,7 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
                   </div>
                 </div>
                 <p className="text-[10px] text-slate-400 italic">
-                  ✓ Vos choix de langue et sous-titres sont mémorisés spécifiquement pour cette série et appliqués automatiquement à tous ses épisodes.
+                  ✓ Vos choix de langue et sous-titres sont mémorisés pour cette série uniquement et appliqués à tous ses épisodes.
                 </p>
               </div>
             </div>
@@ -312,19 +601,35 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
           </div>
         )}
 
-        {/* Seasons Accordion */}
+        {/* Seasons Accordion & Episodes */}
         {details && details.seasons.length > 0 && (
           <div className="px-4 sm:px-6 py-6 space-y-3 max-w-5xl mx-auto">
             <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
               Saisons & Épisodes ({details.seasons.reduce((acc, s) => acc + s.episodes.length, 0)} épisodes au total)
             </h4>
-            {details.seasons.map((season) => {
+            {details.seasons.map((season, sIdx) => {
               const isOpen = openSeason === season.season;
+              const isSeasonFocused = focusedSection === 'seasons' && focusedSeasonIndex === sIdx;
+
               return (
-                <div key={season.season} className="rounded-2xl border border-tv-border bg-tv-card/60 backdrop-blur-sm overflow-hidden shadow-lg transition">
+                <div
+                  key={season.season}
+                  id={`series-season-${sIdx}`}
+                  className={`rounded-2xl border bg-tv-card/60 backdrop-blur-sm overflow-hidden shadow-lg transition ${
+                    isSeasonFocused
+                      ? 'border-tv-accent ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg scale-[1.01]'
+                      : 'border-tv-border'
+                  }`}
+                >
                   <button
-                    onClick={() => setOpenSeason(isOpen ? null : season.season)}
-                    className="w-full flex items-center justify-between p-4 text-left hover:bg-tv-cardHover transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-bg"
+                    onClick={() => {
+                      setOpenSeason(isOpen ? null : season.season);
+                      setFocusedSection('seasons');
+                      setFocusedSeasonIndex(sIdx);
+                    }}
+                    className={`w-full flex items-center justify-between p-4 text-left transition focus:outline-none ${
+                      isSeasonFocused ? 'bg-tv-focus/25' : 'hover:bg-tv-cardHover'
+                    }`}
                   >
                     <span className="text-sm sm:text-base font-bold text-white flex items-center space-x-2">
                       <span>{season.name}</span>
@@ -343,34 +648,56 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
 
                   {isOpen && (
                     <div className="border-t border-tv-border/60 divide-y divide-tv-border/40 bg-black/25">
-                      {season.episodes.map((ep) => (
-                        <button
-                          key={ep.id}
-                          onClick={() => playEpisode(ep)}
-                          className="w-full flex items-center space-x-3 sm:space-x-4 p-3.5 sm:p-4 text-left hover:bg-tv-focus/20 transition group focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-bg"
-                        >
-                          <span className="w-10 h-10 rounded-xl bg-tv-focus/80 group-hover:bg-tv-focus group-hover:scale-105 flex items-center justify-center flex-shrink-0 shadow transition">
-                            <Play className="w-4 h-4 text-white fill-white ml-0.5" />
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-xs sm:text-sm font-bold text-white group-hover:text-tv-accent transition truncate">
-                                Épisode {ep.episodeNum} : {ep.title}
-                              </span>
-                              {ep.duration && (
-                                <span className="text-[10px] text-slate-400 bg-white/5 px-1.5 py-0.5 rounded font-mono">
-                                  {ep.duration}
+                      {season.episodes.map((ep, epIdx) => {
+                        const isEpisodeFocused =
+                          focusedSection === 'episodes' &&
+                          openSeason === season.season &&
+                          focusedEpisodeIndex === epIdx;
+
+                        return (
+                          <div
+                            key={ep.id}
+                            id={`series-ep-${epIdx}`}
+                            onClick={() => {
+                              setFocusedSection('episodes');
+                              setFocusedEpisodeIndex(epIdx);
+                              playEpisode(ep);
+                            }}
+                            className={`w-full flex items-center space-x-3 sm:space-x-4 p-3.5 sm:p-4 text-left cursor-pointer transition focus:outline-none ${
+                              isEpisodeFocused
+                                ? 'bg-tv-focus text-white ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg scale-[1.01] shadow-xl shadow-sky-500/20'
+                                : 'hover:bg-tv-cardHover text-slate-200'
+                            }`}
+                          >
+                            <span
+                              className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow transition ${
+                                isEpisodeFocused
+                                  ? 'bg-tv-accent text-slate-950 scale-105'
+                                  : 'bg-tv-focus/80 text-white'
+                              }`}
+                            >
+                              <Play className={`w-4 h-4 ml-0.5 ${isEpisodeFocused ? 'fill-slate-950 text-slate-950' : 'fill-white text-white'}`} />
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center space-x-2">
+                                <span className="text-xs sm:text-sm font-bold truncate">
+                                  Épisode {ep.episodeNum} : {ep.title}
                                 </span>
+                                {ep.duration && (
+                                  <span className="text-[10px] bg-white/10 px-1.5 py-0.5 rounded font-mono text-slate-300">
+                                    {ep.duration}
+                                  </span>
+                                )}
+                              </div>
+                              {ep.plot && (
+                                <p className={`text-[11px] mt-1 line-clamp-2 leading-tight ${isEpisodeFocused ? 'text-slate-100' : 'text-slate-400'}`}>
+                                  {ep.plot}
+                                </p>
                               )}
                             </div>
-                            {ep.plot && (
-                              <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 leading-tight">
-                                {ep.plot}
-                              </p>
-                            )}
                           </div>
-                        </button>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>

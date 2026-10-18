@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Tv, Film, Clapperboard, Star, Settings, RefreshCw } from 'lucide-react';
+import { Tv, Film, Clapperboard, Star, Search, Settings, RefreshCw } from 'lucide-react';
 import { NavigationPane } from '@/types/iptv';
 
 interface NavigationSidebarProps {
@@ -11,6 +11,7 @@ interface NavigationSidebarProps {
   focusedMenuIndex: number;
   onOpenSyncModal: () => void;
   onOpenSettingsModal: () => void;
+  onOpenSearchModal: () => void;
 }
 
 export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
@@ -20,12 +21,14 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
   focusedMenuIndex,
   onOpenSyncModal,
   onOpenSettingsModal,
+  onOpenSearchModal,
 }) => {
   const menuItems = [
     { id: 'live', label: 'Direct', icon: Tv },
     { id: 'vod', label: 'Films', icon: Film },
     { id: 'series', label: 'Séries', icon: Clapperboard },
     { id: 'fav', label: 'Favoris', icon: Star },
+    { id: 'search', label: 'Recherche', icon: Search },
   ];
 
   return (
@@ -44,7 +47,7 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
         </span>
       </div>
 
-      {/* Main sections (indices 0 to 3) */}
+      {/* Main sections (indices 0 to 4) */}
       <div className="flex-1 flex flex-col space-y-2 w-full px-2">
         {menuItems.map((item, idx) => {
           const Icon = item.icon;
@@ -55,8 +58,14 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
             <button
               key={item.id}
               id={`menu-item-${idx}`}
-              onClick={() => onSelectSection(item.id)}
-              className={`w-full py-3 rounded-xl flex flex-col items-center justify-center transition-all duration-150 ${
+              onClick={() => {
+                if (item.id === 'search') {
+                  onOpenSearchModal();
+                } else {
+                  onSelectSection(item.id);
+                }
+              }}
+              className={`w-full py-2.5 rounded-xl flex flex-col items-center justify-center transition-all duration-150 ${
                 isFocused
                   ? 'bg-tv-focus text-white ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg shadow-tv-focus scale-105 font-bold'
                   : isActive
@@ -72,14 +81,14 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
         })}
       </div>
 
-      {/* Bottom utility buttons (indices 4 and 5) */}
+      {/* Bottom utility buttons (indices 5 and 6) */}
       <div className="flex flex-col space-y-2 w-full px-2 pt-4 border-t border-tv-border/50">
-        {/* Settings / Options (index 4) */}
+        {/* Settings / Options (index 5) */}
         <button
-          id="menu-item-4"
+          id="menu-item-5"
           onClick={onOpenSettingsModal}
           className={`w-full py-2.5 rounded-xl flex flex-col items-center justify-center transition-all duration-150 ${
-            activePane === 'menu' && focusedMenuIndex === 4
+            activePane === 'menu' && focusedMenuIndex === 5
               ? 'bg-tv-focus text-white ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg shadow-tv-focus scale-105 font-bold'
               : 'text-slate-400 hover:text-tv-accent hover:bg-tv-card/50'
           }`}
@@ -89,12 +98,12 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
           <span className="text-[8px] font-semibold">Options</span>
         </button>
 
-        {/* Sync (index 5) */}
+        {/* Sync (index 6) */}
         <button
-          id="menu-item-5"
+          id="menu-item-6"
           onClick={onOpenSyncModal}
           className={`w-full py-2.5 rounded-xl flex flex-col items-center justify-center transition-all duration-150 ${
-            activePane === 'menu' && focusedMenuIndex === 5
+            activePane === 'menu' && focusedMenuIndex === 6
               ? 'bg-tv-focus text-white ring-2 ring-emerald-400 ring-offset-2 ring-offset-tv-bg shadow-tv-focus scale-105 font-bold'
               : 'text-slate-400 hover:text-emerald-400 hover:bg-tv-card/50'
           }`}

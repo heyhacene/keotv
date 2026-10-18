@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { Channel, Category, EpgProgram, NavigationPane } from '@/types/iptv';
-import { Star, Tv, Trophy, Film, Globe, Compass, Sparkles, Clock, Radio, Info, ArrowUpDown } from 'lucide-react';
+import { Star, Tv, Trophy, Film, Globe, Compass, Sparkles, Clock, Radio, Info, ArrowUpDown, Search } from 'lucide-react';
 import { LiveVideoPlayer } from './LiveVideoPlayer';
 
 interface TVGuideProps {
@@ -27,6 +27,7 @@ interface TVGuideProps {
   onCategorySortChange?: (sort: 'playlist' | 'alpha' | 'count') => void;
   channelSort?: 'playlist' | 'alpha' | 'num';
   onChannelSortChange?: (sort: 'playlist' | 'alpha' | 'num') => void;
+  onOpenSearch?: () => void;
 }
 
 export const TVGuide: React.FC<TVGuideProps> = ({
@@ -49,6 +50,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   onCategorySortChange,
   channelSort = 'playlist',
   onChannelSortChange,
+  onOpenSearch,
 }) => {
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
@@ -107,10 +109,22 @@ export const TVGuide: React.FC<TVGuideProps> = ({
       >
         <div className="px-3 pb-2 mb-1 flex flex-col space-y-1.5 border-b border-tv-border/50">
           <div className="flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            <span>Groupes</span>
-            <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">
-              {categories.length}
+            <span className="flex items-center space-x-1.5">
+              <span>Groupes</span>
+              <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">
+                {categories.length}
+              </span>
             </span>
+            {onOpenSearch && (
+              <button
+                onClick={onOpenSearch}
+                className="p-1 px-2 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-300 hover:text-white flex items-center space-x-1 text-[10px] font-bold transition focus:outline-none"
+                title="Rechercher"
+              >
+                <Search className="w-3 h-3 text-tv-accent" />
+                <span>Chercher</span>
+              </button>
+            )}
           </div>
           {onCategorySortChange && (
             <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-md border border-white/5 text-[10px]">

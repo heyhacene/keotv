@@ -15,6 +15,9 @@ import { CategoryDrawerModal } from '@/components/CategoryDrawerModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { SeriesDetailModal } from '@/components/SeriesDetailModal';
 import { MovieDetailModal } from '@/components/MovieDetailModal';
+import { SearchModal } from '@/components/SearchModal';
+import { UpdatePopupModal } from '@/components/UpdatePopupModal';
+import { checkForAppUpdate, AppUpdateInfo } from '@/lib/update-service';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
 import {
   syncXtreamPlaylist,
@@ -98,6 +101,20 @@ export default function KeoTVHome() {
   const [seriesServerCreds, setSeriesServerCreds] = useState<{ serverUrl: string; username: string; password: string } | null>(null);
   const [selectedMovieForDetails, setSelectedMovieForDetails] = useState<Channel | null>(null);
   const [movieServerCreds, setMovieServerCreds] = useState<{ serverUrl: string; username: string; password: string } | null>(null);
+
+  // Global Search Modal state
+  const [isSearchModalOpen, setIsSearchModalOpen] = useState<boolean>(false);
+
+  // Startup Update Check state & auto-check
+  const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
+
+  useEffect(() => {
+    checkForAppUpdate(22).then((info) => {
+      if (info && info.hasUpdate) {
+        setAppUpdateInfo(info);
+      }
+    });
+  }, []);
 
   // Channel loader for the selected category from IndexedDB with multi-tier lookup & on-demand fetch
   const loadCategoryChannels = useCallback(
@@ -768,7 +785,7 @@ export default function KeoTVHome() {
       setNextEpg(epg.next);
 
       // ---- SÉRIES: A click on a series opens its dedicated page with seasons and all episodes! ----
-      if (targetChannel.stream_type === 'series' || activeSection === 'series') {
+      if (targetChannel.stream_type === 'series' || targetChannel.type === 'series' || (activeSection === 'series' && targetChannel.stream_type !== 'live')) {
         let serverUrl = '';
         let username = '';
         let password = '';
@@ -795,7 +812,7 @@ export default function KeoTVHome() {
       }
 
       // ---- FILMS (VOD): A click on a movie opens its dedicated sheet before playback! ----
-      if (targetChannel.stream_type === 'vod' || activeSection === 'vod') {
+      if (targetChannel.stream_type === 'vod' || targetChannel.type === 'vod' || (activeSection === 'vod' && targetChannel.stream_type !== 'live')) {
         let serverUrl = '';
         let username = '';
         let password = '';
@@ -912,6 +929,18 @@ export default function KeoTVHome() {
   // ANDROID HIERARCHICAL BACK BUTTON & DOUBLE-PRESS TO EXIT
   // ==============================================================
   const handleAndroidBack = useCallback(() => {
+    // -1. Startup update popup modal
+    if (appUpdateInfo) {
+      setAppUpdateInfo(null);
+      return;
+    }
+
+    // -1b. Universal Search modal
+    if (isSearchModalOpen) {
+      setIsSearchModalOpen(false);
+      return;
+    }
+
     // 0. Movie details modal -> close movie page and return to movie catalog
     if (selectedMovieForDetails) {
       setSelectedMovieForDetails(null);
@@ -1026,6 +1055,8 @@ export default function KeoTVHome() {
     isSyncModalOpen ||
     isCategoryModalOpen ||
     isXtreamModalOpen ||
+    isSearchModalOpen ||
+    Boolean(appUpdateInfo) ||
     Boolean(selectedMovieForDetails) ||
     Boolean(selectedSeriesForDetails);
 
@@ -1055,8 +1086,9 @@ export default function KeoTVHome() {
       else if (menuIdx === 1) handleSelectSection('vod');
       else if (menuIdx === 2) handleSelectSection('series');
       else if (menuIdx === 3) handleSelectSection('fav');
-      else if (menuIdx === 4) setIsSettingsModalOpen(true);
-      else if (menuIdx === 5) setIsSyncModalOpen(true);
+      else if (menuIdx === 4) setIsSearchModalOpen(true);
+      else if (menuIdx === 5) setIsSettingsModalOpen(true);
+      else if (menuIdx === 6) setIsSyncModalOpen(true);
     },
     isFullscreen,
     setIsFullscreen,
@@ -1632,6 +1664,7 @@ export default function KeoTVHome() {
               focusedMenuIndex={focusedMenuIndex}
               onOpenSyncModal={() => setIsSyncModalOpen(true)}
               onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
+              onOpenSearchModal={() => setIsSearchModalOpen(true)}
             />
 
             <TVGuide
@@ -1652,6 +1685,7 @@ export default function KeoTVHome() {
               onToggleFavorite={handleToggleFavorite}
               onOpenSyncModal={() => setIsSyncModalOpen(true)}
               onOpenXtreamModal={() => setIsXtreamModalOpen(true)}
+              onOpenSearch={() => setIsSearchModalOpen(true)}
               onToggleFullscreen={() => {
                 if (isNativePlayerAvailable() && activeChannel) {
                   handleSelectChannel(activeChannel, true);
@@ -1684,7 +1718,7 @@ export default function KeoTVHome() {
         onRestoreDemoPlaylist={handleRestoreDemoPlaylist}
         onResyncPlaylist={handleResyncPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={20}
+        currentBuildNumber={22}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
@@ -1739,6 +1773,21 @@ export default function KeoTVHome() {
           onSelectAnotherMovie={handleSelectAnotherMovie}
         />
       )}
+
+      {/* Universal Search Modal (Fast instant search across Live TV, Movies & Series) */}
+      <SearchModal
+        isOpen={isSearchModalOpen}
+        onClose={() => setIsSearchModalOpen(false)}
+        onSelectChannel={(ch) => handleSelectChannel(ch, true)}
+        onSelectMovie={(movie) => handleSelectChannel(movie, false)}
+        onSelectSeries={(series) => handleSelectChannel(series, false)}
+      />
+
+      {/* Startup Update Alert Modal (Automatically triggered if a newer build is released) */}
+      <UpdatePopupModal
+        updateInfo={appUpdateInfo}
+        onClose={() => setAppUpdateInfo(null)}
+      />
 
       {/* Floating Status & Back Toast Notifications */}
       {syncStatusBanner && (

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { PlaylistConfig } from '@/types/iptv';
 import { submitAppFeedback } from '@/lib/supabase';
+import { checkForAppUpdate, AppUpdateInfo, CURRENT_BUILD_NUMBER, DOWNLOADER_CODE, DIRECT_APK_URL } from '@/lib/update-service';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -60,7 +61,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onRestoreDemoPlaylist,
   onResyncPlaylist,
   isResyncing = false,
-  currentBuildNumber = 20,
+  currentBuildNumber = 22,
   categorySort = 'playlist',
   onCategorySortChange,
   channelSort = 'playlist',
@@ -69,6 +70,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [activeTab, setActiveTab] = useState<'playlists' | 'controls' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
+  const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
 
   // TV Remote & Zapping configurable settings
   const [zappingMode, setZappingMode] = useState<'direct' | 'banner'>('direct');
@@ -336,15 +338,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setCheckingUpdate(true);
     setUpdateStatus(null);
     try {
-      const res = await fetch('https://api.github.com/repos/heyhacene/keotv/releases/latest');
-      if (res.ok) {
-        const data = await res.json();
-        setUpdateStatus(`Dernière version disponible : ${data.name || data.tag_name}`);
+      const info = await checkForAppUpdate(currentBuildNumber);
+      setUpdateInfo(info);
+      if (info.hasUpdate) {
+        setUpdateStatus(`🎉 Nouvelle version disponible : Build ${info.latestBuild} (Votre version : Build ${info.currentBuild})`);
       } else {
-        setUpdateStatus('Vous utilisez déjà la dernière version de KeoTV.');
+        setUpdateStatus(`✓ Votre application KeoTV est parfaitement à jour (Build ${info.currentBuild}).`);
       }
     } catch {
-      setUpdateStatus('Impossible de vérifier pour le moment. Vérifiez votre connexion.');
+      setUpdateStatus('Impossible de vérifier pour le moment. Vérifiez votre connexion internet.');
     } finally {
       setCheckingUpdate(false);
     }
@@ -864,7 +866,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-slate-300">Version installée</span>
                   <span className="text-xs font-mono font-bold text-tv-accent">
-                    v1.0.0 (Build {process.env.NEXT_PUBLIC_BUILD_NUMBER || currentBuildNumber || 20})
+                    v1.0.0 (Build {process.env.NEXT_PUBLIC_BUILD_NUMBER || currentBuildNumber || 22})
                   </span>
                 </div>
 
@@ -874,6 +876,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <ShieldCheck className="w-4 h-4 mr-1" /> Certifié KeoTV Permanent
                   </span>
                 </div>
+
+                {updateInfo?.hasUpdate && (
+                  <div className="p-3 bg-amber-500/15 border border-amber-500/40 rounded-xl space-y-2 text-center animate-fade-in">
+                    <span className="text-xs font-bold text-amber-300 block">
+                      🎉 Mise à jour disponible : {updateInfo.latestVersionName}
+                    </span>
+                    <p className="text-[11px] text-slate-300">
+                      Une nouvelle version est prête. Vous pouvez l&apos;installer directement depuis Downloader.
+                    </p>
+                  </div>
+                )}
 
                 <div className="pt-2 flex flex-col sm:flex-row gap-2">
                   <button
@@ -887,10 +900,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                   <a
                     href="https://tinyurl.com/keo-apk"
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Télécharger l&apos;APK (Build {currentBuildNumber || 20})</span>
+                    <span>Télécharger l&apos;APK ({updateInfo?.hasUpdate ? `Build ${updateInfo.latestBuild}` : `Build ${currentBuildNumber || 22}`})</span>
                   </a>
                 </div>
 
@@ -910,7 +925,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
 
                 {updateStatus && (
-                  <div className="p-3 bg-black/40 rounded-xl text-xs text-center text-slate-300 border border-white/5">
+                  <div className={`p-3 rounded-xl text-xs text-center border ${updateInfo?.hasUpdate ? 'bg-amber-950/40 text-amber-200 border-amber-500/30' : 'bg-black/40 text-slate-300 border-white/5'}`}>
                     {updateStatus}
                   </div>
                 )}
