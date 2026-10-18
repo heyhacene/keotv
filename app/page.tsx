@@ -18,6 +18,9 @@ import { MovieDetailModal } from '@/components/MovieDetailModal';
 import { SearchModal } from '@/components/SearchModal';
 import { UpdatePopupModal } from '@/components/UpdatePopupModal';
 import { SplashScreen } from '@/components/SplashScreen';
+import { ContextMenuModal } from '@/components/ContextMenuModal';
+import { CategoryManagerModal } from '@/components/CategoryManagerModal';
+import { ParentalPinModal } from '@/components/ParentalPinModal';
 import { checkForAppUpdate, AppUpdateInfo } from '@/lib/update-service';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
 import {
@@ -116,15 +119,46 @@ export default function KeoTVHome() {
   // Global Search Modal state
   const [isSearchModalOpen, setIsSearchModalOpen] = useState<boolean>(false);
 
+  // Category manager & contextual actions
+  const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState<boolean>(false);
+  const [contextMenuItem, setContextMenuItem] = useState<Channel | null>(null);
+  const [contextMenuCategory, setContextMenuCategory] = useState<Category | null>(null);
+  const [isContextMenuOpen, setIsContextMenuOpen] = useState<boolean>(false);
+
+  // Parental lock & PIN states
+  const [isParentalPinModalOpen, setIsParentalPinModalOpen] = useState<boolean>(false);
+  const [parentalPin, setParentalPin] = useState<string>('0000');
+  const [parentalEnabled, setParentalEnabled] = useState<boolean>(false);
+  const [parentalHideAdult, setParentalHideAdult] = useState<boolean>(false);
+  const [unlockedAdultSession, setUnlockedAdultSession] = useState<boolean>(false);
+  const [pendingCategoryToUnlock, setPendingCategoryToUnlock] = useState<Category | null>(null);
+  const [pendingChannelToUnlock, setPendingChannelToUnlock] = useState<Channel | null>(null);
+
+  // Toast notification state
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToastMessage(msg);
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    toastTimeoutRef.current = setTimeout(() => {
+      setToastMessage(null);
+    }, 2800);
+  }, []);
+
   // Startup Update Check state & auto-check
   const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
 
   useEffect(() => {
-    checkForAppUpdate(25).then((info) => {
+    checkForAppUpdate(26).then((info) => {
       if (info && info.hasUpdate) {
         setAppUpdateInfo(info);
       }
     });
+
+    getSetting('parental_pin', '0000').then((pin) => setParentalPin(pin || '0000'));
+    getSetting('parental_enabled', false).then((en) => setParentalEnabled(Boolean(en)));
+    getSetting('parental_hide_adult', false).then((hd) => setParentalHideAdult(Boolean(hd)));
   }, []);
 
   // Channel loader for the selected category from IndexedDB with multi-tier lookup & on-demand fetch
@@ -718,8 +752,10 @@ export default function KeoTVHome() {
 
   // Compute sorted categories based on user's preference and activeSection (Direct / Films / Séries / Favoris)
   const sortedCategories = useMemo(() => {
-    // 1. Filter categories by activeSection
+    // 1. Filter categories by activeSection, exclusion (is_hidden), and parental lock
     let sectionCats = categories.filter((c) => {
+      if (c.is_hidden) return false;
+      if (parentalEnabled && parentalHideAdult && c.is_adult && !unlockedAdultSession) return false;
       if (activeSection === 'live') {
         return c.type === 'live' || !c.type || c.id === 'fav';
       }
@@ -737,7 +773,7 @@ export default function KeoTVHome() {
 
     // Graceful fallback ONLY if live section is active but categories had no explicit type tag
     if (activeSection === 'live' && sectionCats.length === 0 && categories.length > 0) {
-      sectionCats = categories.filter((c) => c.id !== 'fav' && (!c.type || c.type === 'live'));
+      sectionCats = categories.filter((c) => !c.is_hidden && c.id !== 'fav' && (!c.type || c.type === 'live'));
     }
 
     const favCat = sectionCats.find((c) => c.id === 'fav');
@@ -761,7 +797,7 @@ export default function KeoTVHome() {
       }
       return c;
     });
-  }, [categories, categorySort, favCount, activeSection]);
+  }, [categories, categorySort, favCount, activeSection, parentalEnabled, parentalHideAdult, unlockedAdultSession]);
 
   // Section switcher (Direct, Films, Séries, Favoris)
   const handleSelectSection = useCallback(
@@ -769,6 +805,8 @@ export default function KeoTVHome() {
       setActiveSection(section);
 
       const matchingCats = categories.filter((c) => {
+        if (c.is_hidden) return false;
+        if (parentalEnabled && parentalHideAdult && c.is_adult && !unlockedAdultSession) return false;
         if (section === 'live') return c.type === 'live' || !c.type;
         if (section === 'vod') return c.type === 'vod';
         if (section === 'series') return c.type === 'series';
@@ -798,7 +836,7 @@ export default function KeoTVHome() {
         setChannels([]);
       }
     },
-    [categories, channelSort, loadCategoryChannels]
+    [categories, channelSort, loadCategoryChannels, categorySort, parentalEnabled, parentalHideAdult, unlockedAdultSession]
   );
 
   // Handle category sort change
@@ -974,17 +1012,25 @@ export default function KeoTVHome() {
         return;
       }
 
+      // Check if targetChannel is in an adult category & locked
+      if (targetChannel.is_adult && parentalEnabled && !unlockedAdultSession) {
+        setPendingChannelToUnlock(targetChannel);
+        setIsParentalPinModalOpen(true);
+        return;
+      }
+
       // ---- Native Android player (Live TV: reliable IPTV playback, no CORS, custom User-Agent) ----
       if (isNativePlayerAvailable()) {
         try {
-          const playlist = filteredChannels.length > 0 ? filteredChannels : [targetChannel];
-          const startIndex = Math.max(0, playlist.findIndex((c) => c.id === targetChannel.id));
+          const isTargetInPlaylist = filteredChannels.some((c) => c.id === targetChannel.id);
+          const playlist = isTargetInPlaylist ? filteredChannels : [targetChannel];
+          const startIndex = isTargetInPlaylist ? filteredChannels.findIndex((c) => c.id === targetChannel.id) : 0;
           await NativePlayer.play({
             urls: playlist.map((c) => c.stream_url),
             titles: playlist.map((c) => c.name),
             index: startIndex,
             userAgent: NATIVE_PLAYER_USER_AGENT,
-            isLive: targetChannel.stream_type === 'live',
+            isLive: true,
           });
         } catch (err: any) {
           console.error('Native player error:', err);
@@ -1000,7 +1046,7 @@ export default function KeoTVHome() {
         setIsFullscreen(true);
       }
     },
-    [filteredChannels, activeChannel, activeSection]
+    [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession]
   );
 
   // Jump directly to channel by number
@@ -1036,9 +1082,13 @@ export default function KeoTVHome() {
       const count = await db.channels.filter((c) => Boolean(c.is_favorite)).count();
       setFavCount(count);
 
+      // User-requested toast feedback
+      showToast(newFavoriteState ? `⭐ « ${ch.name} » enregistré dans vos favoris !` : `« ${ch.name} » retiré de vos favoris.`);
+
       // If viewing favorites, reload to update the view
-      if (selectedCategory?.id === 'fav') {
-        loadCategoryChannels(selectedCategory, channelSort);
+      if (selectedCategory?.id === 'fav' || activeSection === 'fav') {
+        const favs = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
+        setChannels(favs);
       }
 
       // Auto-sync favorite to cloud if syncCode exists
@@ -1047,11 +1097,16 @@ export default function KeoTVHome() {
         pushSyncToCloud(syncCode, { favorites: favIds });
       }
     },
-    [filteredChannels, syncCode, selectedCategory, channelSort, loadCategoryChannels]
+    [filteredChannels, syncCode, selectedCategory, activeSection, showToast]
   );
 
-  // Category selection
+  // Category selection with parental protection check
   const handleSelectCategory = (cat: Category, index: number, switchPane: boolean = false) => {
+    if (cat.is_adult && parentalEnabled && !unlockedAdultSession) {
+      setPendingCategoryToUnlock(cat);
+      setIsParentalPinModalOpen(true);
+      return;
+    }
     setSelectedCategory(cat);
     setFocusedCategoryIndex(index);
     setFocusedChannelIndex(0);
@@ -1061,10 +1116,110 @@ export default function KeoTVHome() {
     loadCategoryChannels(cat, channelSort);
   };
 
+  // Parental & Category manager handlers
+  const handleUpdateParentalPin = async (newPin: string) => {
+    setParentalPin(newPin);
+    await setSetting('parental_pin', newPin);
+    showToast('🔒 Code PIN parental mis à jour');
+  };
+
+  const handleToggleParentalEnabled = async (enabled: boolean) => {
+    setParentalEnabled(enabled);
+    await setSetting('parental_enabled', enabled);
+    showToast(enabled ? '🔒 Contrôle parental activé' : '🔓 Contrôle parental désactivé');
+  };
+
+  const handleToggleParentalHideAdult = async (hide: boolean) => {
+    setParentalHideAdult(hide);
+    await setSetting('parental_hide_adult', hide);
+    showToast(hide ? '🔞 Bouquets adultes masqués' : '🔞 Cadenas affiché sur les bouquets adultes');
+  };
+
+  const handleUnlockAdultSession = () => {
+    setUnlockedAdultSession(true);
+    setIsParentalPinModalOpen(false);
+    if (pendingCategoryToUnlock) {
+      const cat = pendingCategoryToUnlock;
+      setPendingCategoryToUnlock(null);
+      setSelectedCategory(cat);
+      setFocusedChannelIndex(0);
+      loadCategoryChannels(cat, channelSort);
+      setActivePane('channels');
+    }
+    if (pendingChannelToUnlock) {
+      const ch = pendingChannelToUnlock;
+      setPendingChannelToUnlock(null);
+      handleSelectChannel(ch, true);
+    }
+    showToast('🔓 Session Adulte déverrouillée');
+  };
+
+  const handleUpdateCategory = async (catId: string, updates: Partial<Category>) => {
+    await db.categories.update(catId, updates);
+    setCategories((prev) =>
+      prev.map((c) => (c.id === catId ? { ...c, ...updates } : c))
+    );
+    showToast('Bouquet mis à jour');
+  };
+
+  const handleReorderCategories = async (reordered: Category[]) => {
+    for (const c of reordered) {
+      await db.categories.update(c.id, { custom_order: c.custom_order });
+    }
+    setCategories(reordered);
+    showToast('Ordre des bouquets enregistré');
+  };
+
+  const handleResetCategoryOrder = async () => {
+    const all = await db.categories.toArray();
+    all.forEach((c, idx) => {
+      c.custom_order = idx;
+    });
+    for (const c of all) {
+      await db.categories.update(c.id, { custom_order: c.custom_order });
+    }
+    setCategories(all);
+    showToast('Ordre d’origine réinitialisé');
+  };
+
+  const handleToggleAdultCategory = async (category: Category) => {
+    const next = !category.is_adult;
+    await handleUpdateCategory(category.id, { is_adult: next });
+    showToast(next ? `🔞 « ${category.name} » protégé par contrôle parental` : `« ${category.name} » déverrouillé`);
+  };
+
+  const handleToggleHideCategory = async (category: Category) => {
+    const next = !category.is_hidden;
+    await handleUpdateCategory(category.id, { is_hidden: next });
+    showToast(next ? `Bouquet « ${category.name} » masqué` : `Bouquet « ${category.name} » réaffiché`);
+  };
+
   // ==============================================================
   // ANDROID HIERARCHICAL BACK BUTTON & DOUBLE-PRESS TO EXIT
   // ==============================================================
   const handleAndroidBack = useCallback(() => {
+    // -2. Context menu modal
+    if (isContextMenuOpen) {
+      setIsContextMenuOpen(false);
+      setContextMenuItem(null);
+      setContextMenuCategory(null);
+      return;
+    }
+
+    // -2b. Parental PIN modal
+    if (isParentalPinModalOpen) {
+      setIsParentalPinModalOpen(false);
+      setPendingCategoryToUnlock(null);
+      setPendingChannelToUnlock(null);
+      return;
+    }
+
+    // -2c. Category manager modal
+    if (isCategoryManagerOpen) {
+      setIsCategoryManagerOpen(false);
+      return;
+    }
+
     // -1. Startup update popup modal
     if (appUpdateInfo) {
       setAppUpdateInfo(null);
@@ -1140,6 +1295,12 @@ export default function KeoTVHome() {
       }, 2000);
     }
   }, [
+    isContextMenuOpen,
+    isParentalPinModalOpen,
+    isCategoryManagerOpen,
+    appUpdateInfo,
+    isSearchModalOpen,
+    selectedMovieForDetails,
     selectedSeriesForDetails,
     isFullscreen,
     isSettingsModalOpen,
@@ -1194,6 +1355,9 @@ export default function KeoTVHome() {
     isCategoryModalOpen ||
     isXtreamModalOpen ||
     isSearchModalOpen ||
+    isCategoryManagerOpen ||
+    isParentalPinModalOpen ||
+    isContextMenuOpen ||
     Boolean(appUpdateInfo) ||
     Boolean(selectedMovieForDetails) ||
     Boolean(selectedSeriesForDetails);
@@ -1219,6 +1383,23 @@ export default function KeoTVHome() {
     },
     onSelectChannel: handleSelectChannel,
     onToggleFavorite: (idx) => handleToggleFavorite(idx),
+    onOpenContextMenu: (idx) => {
+      if (activePane === 'channels') {
+        const ch = filteredChannels[idx];
+        if (ch) {
+          setContextMenuItem(ch);
+          setContextMenuCategory(null);
+          setIsContextMenuOpen(true);
+        }
+      } else if (activePane === 'categories') {
+        const cat = sortedCategories[idx];
+        if (cat) {
+          setContextMenuCategory(cat);
+          setContextMenuItem(null);
+          setIsContextMenuOpen(true);
+        }
+      }
+    },
     onSelectMenuItem: (menuIdx) => {
       if (menuIdx === 0) handleSelectSection('live');
       else if (menuIdx === 1) handleSelectSection('vod');
@@ -1923,6 +2104,12 @@ export default function KeoTVHome() {
                 setIsXtreamModalOpen(true);
               }}
               onOpenSearch={() => setIsSearchModalOpen(true)}
+              onOpenContextMenu={(ch) => {
+                setContextMenuItem(ch);
+                setContextMenuCategory(null);
+                setIsContextMenuOpen(true);
+              }}
+              onOpenCategoryManager={() => setIsCategoryManagerOpen(true)}
               onToggleFullscreen={() => {
                 if (isNativePlayerAvailable() && activeChannel) {
                   handleSelectChannel(activeChannel, true);
@@ -1959,7 +2146,7 @@ export default function KeoTVHome() {
         onResyncPlaylist={handleResyncPlaylist}
         onEditPlaylist={handleOpenEditPlaylist}
         isResyncing={isResyncing}
-        currentBuildNumber={25}
+        currentBuildNumber={26}
         categorySort={categorySort}
         onCategorySortChange={handleCategorySortChange}
         channelSort={channelSort}
@@ -1969,6 +2156,13 @@ export default function KeoTVHome() {
         lastAutoRefreshAt={lastAutoRefreshAt}
         onTriggerSilentRefresh={triggerSilentRefresh}
         isSilentRefreshing={isSilentRefreshing}
+        parentalPin={parentalPin}
+        parentalEnabled={parentalEnabled}
+        parentalHideAdult={parentalHideAdult}
+        onUpdateParentalPin={handleUpdateParentalPin}
+        onToggleParentalEnabled={handleToggleParentalEnabled}
+        onToggleParentalHideAdult={handleToggleParentalHideAdult}
+        onOpenCategoryManager={() => setIsCategoryManagerOpen(true)}
       />
 
       <CategoryDrawerModal
@@ -2009,6 +2203,7 @@ export default function KeoTVHome() {
           password={seriesServerCreds.password}
           onClose={() => setSelectedSeriesForDetails(null)}
           onPlayEpisode={handlePlaySeriesEpisode}
+          onToggleFavorite={handleToggleFavorite}
         />
       )}
 
@@ -2022,6 +2217,7 @@ export default function KeoTVHome() {
           onClose={() => setSelectedMovieForDetails(null)}
           onPlay={handlePlayMovie}
           onSelectAnotherMovie={handleSelectAnotherMovie}
+          onToggleFavorite={handleToggleFavorite}
         />
       )}
 
@@ -2032,6 +2228,47 @@ export default function KeoTVHome() {
         onSelectChannel={(ch) => handleSelectChannel(ch, true)}
         onSelectMovie={(movie) => handleSelectChannel(movie, false)}
         onSelectSeries={(series) => handleSelectChannel(series, false)}
+        onToggleFavorite={handleToggleFavorite}
+      />
+
+      {/* Category Manager Modal */}
+      <CategoryManagerModal
+        isOpen={isCategoryManagerOpen}
+        onClose={() => setIsCategoryManagerOpen(false)}
+        categories={categories}
+        onUpdateCategory={handleUpdateCategory}
+        onReorderCategories={handleReorderCategories}
+        onResetOrder={handleResetCategoryOrder}
+      />
+
+      {/* Parental PIN Verification Modal */}
+      <ParentalPinModal
+        isOpen={isParentalPinModalOpen}
+        onClose={() => {
+          setIsParentalPinModalOpen(false);
+          setPendingCategoryToUnlock(null);
+          setPendingChannelToUnlock(null);
+        }}
+        onSuccess={handleUnlockAdultSession}
+        correctPin={parentalPin}
+        categoryName={pendingCategoryToUnlock?.name}
+      />
+
+      {/* TV Long-Press Context Menu */}
+      <ContextMenuModal
+        isOpen={isContextMenuOpen}
+        onClose={() => {
+          setIsContextMenuOpen(false);
+          setContextMenuItem(null);
+          setContextMenuCategory(null);
+        }}
+        item={contextMenuItem}
+        category={contextMenuCategory}
+        onToggleFavorite={handleToggleFavorite}
+        onPlay={(ch) => handleSelectChannel(ch, true)}
+        onOpenDetails={(ch) => handleSelectChannel(ch, false)}
+        onToggleAdultCategory={handleToggleAdultCategory}
+        onToggleHideCategory={handleToggleHideCategory}
       />
 
       {/* Startup Update Alert Modal (Automatically triggered if a newer build is released) */}
@@ -2039,6 +2276,13 @@ export default function KeoTVHome() {
         updateInfo={appUpdateInfo}
         onClose={() => setAppUpdateInfo(null)}
       />
+
+      {/* User Toast Message */}
+      {toastMessage && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white border border-amber-500/50 px-5 py-3 rounded-2xl text-sm font-semibold shadow-2xl flex items-center space-x-2.5 backdrop-blur-md animate-fade-in pointer-events-none">
+          <span>{toastMessage}</span>
+        </div>
+      )}
 
       {/* Floating Status & Back Toast Notifications */}
       {syncStatusBanner && (

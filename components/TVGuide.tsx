@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef, useMemo } from 'react';
 import { Channel, Category, EpgProgram, NavigationPane } from '@/types/iptv';
-import { Star, Tv, Trophy, Film, Globe, Compass, Clock, Radio, Info, Search } from 'lucide-react';
+import { Star, Tv, Trophy, Film, Globe, Compass, Clock, Radio, Info, Search, Lock, Sliders } from 'lucide-react';
 import { LiveVideoPlayer } from './LiveVideoPlayer';
 
 interface TVGuideProps {
@@ -28,10 +28,15 @@ interface TVGuideProps {
   channelSort?: 'playlist' | 'alpha' | 'num';
   onChannelSortChange?: (sort: 'playlist' | 'alpha' | 'num') => void;
   onOpenSearch?: () => void;
+  onOpenContextMenu?: (channel: Channel) => void;
+  onOpenCategoryManager?: () => void;
 }
 
 // Helper for category icons
-function renderCategoryIcon(iconName?: string) {
+function renderCategoryIcon(iconName?: string, isAdult?: boolean) {
+  if (isAdult || iconName === 'Lock') {
+    return <Lock className="w-4 h-4 text-rose-400 flex-shrink-0" />;
+  }
   switch (iconName) {
     case 'Star':
       return <Star className="w-4 h-4 text-amber-400 flex-shrink-0" />;
@@ -75,8 +80,13 @@ const CategoryRow = React.memo<CategoryRowProps>(
         }`}
       >
         <div className="flex items-center space-x-2.5 min-w-0">
-          {renderCategoryIcon(category.icon)}
+          {renderCategoryIcon(category.icon, category.is_adult)}
           <span className="truncate">{category.name}</span>
+          {category.is_adult && (
+            <span className="text-[9px] bg-rose-500/20 text-rose-300 border border-rose-500/30 px-1 py-0.2 rounded font-black flex-shrink-0">
+              18+
+            </span>
+          )}
         </div>
         <span
           className={`text-[11px] px-1.5 py-0.5 rounded-full font-mono flex-shrink-0 ${
@@ -98,7 +108,8 @@ const CategoryRow = React.memo<CategoryRowProps>(
       prev.isSelected === next.isSelected &&
       prev.category.id === next.category.id &&
       prev.category.count === next.category.count &&
-      prev.category.name === next.category.name
+      prev.category.name === next.category.name &&
+      prev.category.is_adult === next.category.is_adult
     );
   }
 );
@@ -114,14 +125,41 @@ interface ChannelRowProps {
   isActive: boolean;
   onSelect: (channel: Channel, index: number) => void;
   onToggleFavorite: (channel: Channel) => void;
+  onOpenContextMenu?: (channel: Channel) => void;
 }
 
 const ChannelRow = React.memo<ChannelRowProps>(
-  ({ channel, index, isFocused, isActive, onSelect, onToggleFavorite }) => {
+  ({ channel, index, isFocused, isActive, onSelect, onToggleFavorite, onOpenContextMenu }) => {
+    const pressTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+    const handlePressStart = () => {
+      if (!onOpenContextMenu) return;
+      pressTimerRef.current = setTimeout(() => {
+        onOpenContextMenu(channel);
+      }, 500);
+    };
+
+    const handlePressEnd = () => {
+      if (pressTimerRef.current) {
+        clearTimeout(pressTimerRef.current);
+        pressTimerRef.current = null;
+      }
+    };
+
     return (
       <div
         id={`channel-item-${index}`}
         onClick={() => onSelect(channel, index)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          onOpenContextMenu?.(channel);
+        }}
+        onTouchStart={handlePressStart}
+        onTouchEnd={handlePressEnd}
+        onTouchCancel={handlePressEnd}
+        onMouseDown={handlePressStart}
+        onMouseUp={handlePressEnd}
+        onMouseLeave={handlePressEnd}
         className={`flex items-center justify-between px-3.5 py-2 mx-2 my-0.5 rounded-xl cursor-pointer border select-none ${
           isFocused
             ? 'bg-tv-focus border-tv-accent text-white font-bold ring-2 ring-tv-accent ring-offset-1 ring-offset-tv-bg z-10'
@@ -246,6 +284,8 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   channelSort = 'playlist',
   onChannelSortChange,
   onOpenSearch,
+  onOpenContextMenu,
+  onOpenCategoryManager,
 }) => {
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
@@ -311,17 +351,30 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 {categories.length}
               </span>
             </span>
-            {onOpenSearch && (
-              <button
-                type="button"
-                onClick={onOpenSearch}
-                className="p-1 px-2 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-300 hover:text-white flex items-center space-x-1 text-[10px] font-bold focus:outline-none"
-                title="Rechercher"
-              >
-                <Search className="w-3 h-3 text-tv-accent" />
-                <span>Chercher</span>
-              </button>
-            )}
+            <div className="flex items-center space-x-1">
+              {onOpenCategoryManager && (
+                <button
+                  type="button"
+                  onClick={onOpenCategoryManager}
+                  className="p-1 px-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-300 hover:text-white flex items-center space-x-1 text-[10px] font-bold focus:outline-none"
+                  title="Organiser l'ordre et masquer des bouquets"
+                >
+                  <Sliders className="w-3 h-3 text-sky-400" />
+                  <span>Ordre</span>
+                </button>
+              )}
+              {onOpenSearch && (
+                <button
+                  type="button"
+                  onClick={onOpenSearch}
+                  className="p-1 px-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-300 hover:text-white flex items-center space-x-1 text-[10px] font-bold focus:outline-none"
+                  title="Rechercher"
+                >
+                  <Search className="w-3 h-3 text-tv-accent" />
+                  <span>Chercher</span>
+                </button>
+              )}
+            </div>
           </div>
           {onCategorySortChange && (
             <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-md border border-white/5 text-[10px]">
@@ -447,6 +500,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                   isActive={isActive}
                   onSelect={onSelectChannel}
                   onToggleFavorite={onToggleFavorite}
+                  onOpenContextMenu={onOpenContextMenu}
                 />
               );
             })}

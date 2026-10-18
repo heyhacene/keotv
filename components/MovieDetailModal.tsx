@@ -20,6 +20,7 @@ interface MovieDetailModalProps {
   onClose: () => void;
   onPlay: (movie: Channel) => void;
   onSelectAnotherMovie?: (movie: Channel) => void;
+  onToggleFavorite?: (movie: Channel) => void;
 }
 
 export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
@@ -30,10 +31,13 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
   onClose,
   onPlay,
   onSelectAnotherMovie,
+  onToggleFavorite,
 }) => {
   const [details, setDetails] = useState<MovieDetails | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [isFavorite, setIsFavorite] = useState<boolean>(Boolean(movie?.is_favorite));
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Actor photos state: map of actor name -> photo URL
   const [actorPhotos, setActorPhotos] = useState<Record<string, string>>({});
@@ -45,7 +49,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
   const [searchedActor, setSearchedActor] = useState<string | null>(null);
 
   // TV Remote Navigation states
-  const [focusedSection, setFocusedSection] = useState<'back' | 'play' | 'actors' | 'films'>('play');
+  const [focusedSection, setFocusedSection] = useState<'back' | 'play' | 'fav' | 'actors' | 'films'>('play');
   const [focusedActorIndex, setFocusedActorIndex] = useState<number>(0);
   const [focusedFilmIndex, setFocusedFilmIndex] = useState<number>(0);
 
@@ -65,6 +69,8 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
     setFocusedSection('play');
     setFocusedActorIndex(0);
     setFocusedFilmIndex(0);
+    setIsFavorite(Boolean(movie.is_favorite));
+    setToastMessage(null);
     setLoading(true);
 
     const vodId = movie.epg_id || movie.id.replace(/^ch_xtream_(?:vod_)?/, '');
@@ -111,6 +117,29 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
       cancelled = true;
     };
   }, [movie, serverUrl, username, password]);
+
+  const handleToggleFavorite = async () => {
+    if (!movie) return;
+    const nextState = !isFavorite;
+    setIsFavorite(nextState);
+
+    try {
+      await db.channels.update(movie.id, { is_favorite: nextState });
+    } catch {
+      try {
+        await db.channels.put({ ...movie, is_favorite: nextState });
+      } catch {}
+    }
+
+    setToastMessage(nextState ? '⭐ Enregistré dans vos favoris !' : 'Retiré de vos favoris.');
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 2500);
+
+    if (onToggleFavorite) {
+      onToggleFavorite({ ...movie, is_favorite: nextState });
+    }
+  };
 
   // When an actor is clicked: query filmography + match against local Dexie playlist
   const handleActorClick = async (actor: string) => {
@@ -203,6 +232,12 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
           document.getElementById('movie-detail-back')?.focus();
           return;
         }
+        if (isRight) {
+          e.preventDefault();
+          setFocusedSection('fav');
+          document.getElementById('movie-detail-fav')?.focus();
+          return;
+        }
         if (isDown) {
           e.preventDefault();
           if (details?.actors && details.actors.length > 0) {
@@ -216,6 +251,37 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
         if (isEnter) {
           e.preventDefault();
           if (movie) onPlay(movie);
+          return;
+        }
+      }
+
+      // SECTION 1B: Favorite button
+      if (focusedSection === 'fav') {
+        if (isUp) {
+          e.preventDefault();
+          setFocusedSection('back');
+          document.getElementById('movie-detail-back')?.focus();
+          return;
+        }
+        if (isLeft) {
+          e.preventDefault();
+          setFocusedSection('play');
+          playButtonRef.current?.focus();
+          return;
+        }
+        if (isDown) {
+          e.preventDefault();
+          if (details?.actors && details.actors.length > 0) {
+            setFocusedSection('actors');
+            const target = document.getElementById(`actor-chip-${focusedActorIndex}`) || document.getElementById('actor-chip-0');
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          return;
+        }
+        if (isEnter) {
+          e.preventDefault();
+          handleToggleFavorite();
           return;
         }
       }
@@ -373,6 +439,14 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[60] bg-tv-bg flex flex-col animate-fade-in select-none">
+      {/* Floating Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-amber-500/95 text-slate-950 font-black px-5 py-2.5 rounded-2xl shadow-2xl flex items-center space-x-2 border border-amber-300 animate-in fade-in slide-in-from-top-4 pointer-events-none">
+          <Star className="w-4 h-4 fill-slate-950 text-slate-950" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="flex items-center space-x-3 px-4 py-3 bg-tv-surface/90 backdrop-blur-md border-b border-tv-border flex-shrink-0 z-20">
         <button
@@ -490,7 +564,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
                 </p>
               )}
 
-              {/* Action Buttons: Prominent "Lecture" Button */}
+              {/* Action Buttons: Prominent "Lecture" & "Favoris" Buttons */}
               <div className="pt-2 flex flex-wrap items-center gap-3">
                 <button
                   id="movie-detail-play"
@@ -504,6 +578,24 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
                 >
                   <Play className="w-5 h-5 fill-slate-950" />
                   <span>Lancer le film</span>
+                </button>
+
+                <button
+                  id="movie-detail-fav"
+                  type="button"
+                  onClick={handleToggleFavorite}
+                  className={`px-5 py-3.5 rounded-2xl font-bold text-sm sm:text-base flex items-center space-x-2.5 transition select-none ${
+                    isFavorite
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-lg shadow-amber-500/10'
+                      : 'bg-tv-card text-slate-300 hover:text-white border border-tv-border'
+                  } ${
+                    focusedSection === 'fav'
+                      ? 'ring-4 ring-amber-400 ring-offset-2 ring-offset-tv-bg scale-[1.03] shadow-2xl shadow-amber-400/40 text-white'
+                      : ''
+                  }`}
+                >
+                  <Star className={`w-5 h-5 ${isFavorite ? 'fill-amber-400 text-amber-400' : 'text-slate-400'}`} />
+                  <span>{isFavorite ? 'Dans vos favoris' : 'Ajouter aux favoris'}</span>
                 </button>
               </div>
 

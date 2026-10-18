@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { ArrowLeft, Loader2, Play, AlertCircle, ChevronDown, ChevronRight, Film, Volume2, MessageSquare } from 'lucide-react';
+import { ArrowLeft, Loader2, Play, AlertCircle, ChevronDown, ChevronRight, Film, Volume2, MessageSquare, Star } from 'lucide-react';
 import { Channel } from '@/types/iptv';
 import { fetchSeriesInfo, SeriesDetails, SeriesEpisode } from '@/lib/iptv-service';
 import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
+import { db } from '@/lib/db';
 
 interface SeriesDetailModalProps {
   series: Channel | null;
@@ -13,9 +14,10 @@ interface SeriesDetailModalProps {
   password: string;
   onClose: () => void;
   onPlayEpisode?: (episode: SeriesEpisode, allEpisodes: SeriesEpisode[], audioPref?: string, subPref?: string) => void;
+  onToggleFavorite?: (series: Channel) => void;
 }
 
-type FocusedSection = 'back' | 'audio' | 'sub' | 'seasons' | 'episodes';
+type FocusedSection = 'back' | 'fav' | 'audio' | 'sub' | 'seasons' | 'episodes';
 
 // Full page for a series: seasons (collapsible) and all episodes with full TV remote navigation
 export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
@@ -25,11 +27,14 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
   password,
   onClose,
   onPlayEpisode,
+  onToggleFavorite,
 }) => {
   const [details, setDetails] = useState<SeriesDetails | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [openSeason, setOpenSeason] = useState<number | null>(null);
+  const [isFavorite, setIsFavorite] = useState<boolean>(Boolean(series?.is_favorite));
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   // Persistent audio & subtitle choices per series
   const seriesKey = series?.id || series?.name || '';
@@ -83,11 +88,36 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
     }
   };
 
+  const handleToggleFavorite = async () => {
+    if (!series) return;
+    const nextState = !isFavorite;
+    setIsFavorite(nextState);
+
+    try {
+      await db.channels.update(series.id, { is_favorite: nextState });
+    } catch {
+      try {
+        await db.channels.put({ ...series, is_favorite: nextState });
+      } catch {}
+    }
+
+    setToastMessage(nextState ? '⭐ Enregistré dans vos favoris !' : 'Retiré de vos favoris.');
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 2500);
+
+    if (onToggleFavorite) {
+      onToggleFavorite({ ...series, is_favorite: nextState });
+    }
+  };
+
   useEffect(() => {
     if (!series) return;
     let cancelled = false;
     setDetails(null);
     setError(null);
+    setIsFavorite(Boolean(series.is_favorite));
+    setToastMessage(null);
     setLoading(true);
 
     const seriesId = series.epg_id || series.id.replace(/^ch_xtream_(?:series_)?/, '');
@@ -203,6 +233,12 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
           onClose();
           return;
         }
+        if (isRight) {
+          e.preventDefault();
+          setFocusedSection('fav');
+          scrollToFocusedElement('series-btn-fav');
+          return;
+        }
         if (isDown) {
           e.preventDefault();
           setFocusedSection('audio');
@@ -212,12 +248,34 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
         return;
       }
 
+      // 1B. SECTION: FAVORITE BUTTON
+      if (focusedSection === 'fav') {
+        if (isLeft) {
+          e.preventDefault();
+          setFocusedSection('back');
+          scrollToFocusedElement('series-btn-back');
+          return;
+        }
+        if (isDown) {
+          e.preventDefault();
+          setFocusedSection('audio');
+          scrollToFocusedElement('series-pref-audio');
+          return;
+        }
+        if (isEnter) {
+          e.preventDefault();
+          handleToggleFavorite();
+          return;
+        }
+        return;
+      }
+
       // 2. SECTION: AUDIO PREFERENCE
       if (focusedSection === 'audio') {
         if (isUp) {
           e.preventDefault();
-          setFocusedSection('back');
-          scrollToFocusedElement('series-btn-back');
+          setFocusedSection('fav');
+          scrollToFocusedElement('series-btn-fav');
           return;
         }
         if (isLeft) {
@@ -417,6 +475,14 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-[60] bg-tv-bg flex flex-col animate-fade-in select-none">
+      {/* Floating Toast Notification */}
+      {toastMessage && (
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-amber-500/95 text-slate-950 font-black px-5 py-2.5 rounded-2xl shadow-2xl flex items-center space-x-2 border border-amber-300 animate-in fade-in slide-in-from-top-4 pointer-events-none">
+          <Star className="w-4 h-4 fill-slate-950 text-slate-950" />
+          <span>{toastMessage}</span>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex items-center space-x-3 px-4 py-3 bg-tv-surface border-b border-tv-border flex-shrink-0">
         <button
@@ -456,7 +522,28 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <h3 className="text-xl sm:text-2xl font-black text-white">{series.name}</h3>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <h3 className="text-xl sm:text-2xl font-black text-white">{series.name}</h3>
+
+                {/* Favorite Toggle Button */}
+                <button
+                  id="series-btn-fav"
+                  type="button"
+                  onClick={handleToggleFavorite}
+                  className={`px-3.5 py-2 rounded-xl text-xs font-bold flex items-center space-x-2 transition select-none flex-shrink-0 ${
+                    isFavorite
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-lg shadow-amber-500/10'
+                      : 'bg-tv-card text-slate-300 hover:text-white border border-tv-border'
+                  } ${
+                    focusedSection === 'fav'
+                      ? 'ring-4 ring-amber-400 ring-offset-2 ring-offset-tv-bg scale-105 shadow-2xl shadow-amber-400/40 text-white'
+                      : ''
+                  }`}
+                >
+                  <Star className={`w-4 h-4 ${isFavorite ? 'fill-amber-400 text-amber-400' : 'text-slate-400'}`} />
+                  <span>{isFavorite ? 'Dans vos favoris' : 'Ajouter aux favoris'}</span>
+                </button>
+              </div>
               <div className="flex flex-wrap items-center gap-2 text-xs text-slate-300 mt-2">
                 {details?.year && <span className="bg-tv-card px-2.5 py-0.5 rounded-lg border border-tv-border font-medium">{details.year}</span>}
                 {details?.genre && <span className="bg-tv-card px-2.5 py-0.5 rounded-lg border border-tv-border font-medium">{details.genre}</span>}

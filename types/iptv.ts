@@ -12,6 +12,7 @@ export interface Channel {
   is_hidden: boolean;
   custom_order: number;
   resolution?: string; // '4K' | 'FHD' | 'HD' | 'SD'
+  is_adult?: boolean;
 }
 
 export interface Category {
@@ -22,6 +23,7 @@ export interface Category {
   icon?: string;
   is_hidden: boolean;
   custom_order: number;
+  is_adult?: boolean;
 }
 
 export interface EpgProgram {
@@ -58,6 +60,9 @@ export interface UserSettings {
   auto_play_on_startup: boolean;
   sync_code?: string;
   sync_last_at?: string;
+  parental_pin?: string;
+  parental_enabled?: boolean;
+  parental_hide_adult?: boolean;
 }
 
 export type NavigationPane = 'menu' | 'categories' | 'channels' | 'player_osd' | 'settings' | 'modal';

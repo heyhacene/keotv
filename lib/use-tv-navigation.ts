@@ -18,6 +18,7 @@ export interface TVNavOptions {
   onSelectCategory: (index: number, switchPane?: boolean) => void;
   onSelectChannel: (index: number, fullscreen: boolean) => void;
   onToggleFavorite: (channelIndex: number) => void;
+  onOpenContextMenu?: (channelIndex: number) => void;
   onSelectMenuItem: (menuIndex: number) => void;
   isFullscreen: boolean;
   setIsFullscreen: (full: boolean) => void;
@@ -41,6 +42,7 @@ export function useTVNavigation({
   onSelectCategory,
   onSelectChannel,
   onToggleFavorite,
+  onOpenContextMenu,
   onSelectMenuItem,
   isFullscreen,
   setIsFullscreen,
@@ -126,6 +128,16 @@ export function useTVNavigation({
 
       const isChannelUp = key === 'ChannelUp' || key === 'PageUp' || keyCode === 33 || keyCode === 166;
       const isChannelDown = key === 'ChannelDown' || key === 'PageDown' || keyCode === 34 || keyCode === 167;
+
+      // Menu key (Android TV keyCode 82 or Menu button)
+      const isMenu = key === 'Menu' || keyCode === 82;
+      if (isMenu) {
+        if (activePane === 'channels' && onOpenContextMenu && channelCount > 0) {
+          e.preventDefault();
+          onOpenContextMenu(focusedChannelIndexRef.current);
+          return;
+        }
+      }
 
       // Favorite toggle key ('f' or Media/Yellow button)
       if (isFav) {
@@ -223,6 +235,11 @@ export function useTVNavigation({
       }
 
       if (isEnter) {
+        if (e.repeat && activePane === 'channels' && onOpenContextMenu && channelCount > 0) {
+          e.preventDefault();
+          onOpenContextMenu(focusedChannelIndexRef.current);
+          return;
+        }
         e.preventDefault();
         if (activePane === 'menu') {
           onSelectMenuItem(focusedMenuIndex);
@@ -264,6 +281,7 @@ export function useTVNavigation({
       onSelectCategory,
       onSelectChannel,
       onToggleFavorite,
+      onOpenContextMenu,
       onSelectMenuItem,
       setIsFullscreen,
       onJumpToChannelNumber,

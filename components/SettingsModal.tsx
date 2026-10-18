@@ -47,10 +47,19 @@ interface SettingsModalProps {
   lastAutoRefreshAt?: string;
   onTriggerSilentRefresh?: () => void;
   isSilentRefreshing?: boolean;
+  onOpenCategoryManager?: () => void;
+  parentalPin?: string;
+  onUpdateParentalPin?: (pin: string) => void;
+  parentalEnabled?: boolean;
+  onToggleParentalEnabled?: (enabled: boolean) => void;
+  parentalHideAdult?: boolean;
+  onToggleParentalHideAdult?: (hide: boolean) => void;
 }
 
-const TABS: Array<{ id: 'playlists' | 'controls' | 'player' | 'sync' | 'update' | 'feedback'; label: string; icon: any }> = [
+const TABS: Array<{ id: 'playlists' | 'controls' | 'categories' | 'parental' | 'player' | 'sync' | 'update' | 'feedback'; label: string; icon: any }> = [
   { id: 'playlists', label: 'Playlists & Abonnements', icon: Server },
+  { id: 'categories', label: 'Ordre & Bouquets', icon: Sliders },
+  { id: 'parental', label: 'Contrôle Parental', icon: ShieldCheck },
   { id: 'controls', label: 'Télécommande & Zapping', icon: Radio },
   { id: 'player', label: 'Affichage & Buffer', icon: Sliders },
   { id: 'sync', label: 'Identification & Synchro', icon: RefreshCw },
@@ -80,11 +89,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   lastAutoRefreshAt,
   onTriggerSilentRefresh,
   isSilentRefreshing = false,
+  onOpenCategoryManager,
+  parentalPin = '0000',
+  onUpdateParentalPin,
+  parentalEnabled = false,
+  onToggleParentalEnabled,
+  parentalHideAdult = false,
+  onToggleParentalHideAdult,
 }) => {
-  const [activeTab, setActiveTab] = useState<'playlists' | 'controls' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
+  const [activeTab, setActiveTab] = useState<'playlists' | 'controls' | 'categories' | 'parental' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
+  const [editingPin, setEditingPin] = useState(parentalPin);
+  const [pinSavedFeedback, setPinSavedFeedback] = useState(false);
 
   // TV Remote & Zapping configurable settings
   const [zappingMode, setZappingMode] = useState<'direct' | 'banner'>('direct');
@@ -624,6 +642,195 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </button>
                   )}
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* TAB: ORDRE & BOUQUETS                                          */}
+          {/* ============================================================== */}
+          {activeTab === 'categories' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-sm font-bold text-white">Ordre & Organisation des Bouquets</h3>
+                <p className="text-xs text-slate-400">
+                  Personnalisez l&apos;ordre de présentation de vos bouquets, masquez les groupes indésirables ou excluez des contenus.
+                </p>
+              </div>
+
+              {/* Open Category Manager Dedicated Screen */}
+              <div className="bg-gradient-to-r from-tv-card to-tv-cardHover border border-tv-border p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <h4 className="text-sm font-bold text-white flex items-center space-x-2">
+                    <Sliders className="w-4 h-4 text-tv-accent" />
+                    <span>Éditeur d&apos;ordre & d&apos;exclusion</span>
+                  </h4>
+                  <p className="text-xs text-slate-300">
+                    Déplacez facilement vos bouquets vers le haut ou le bas, ou masquez-les en un clic.
+                  </p>
+                </div>
+                {onOpenCategoryManager && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenCategoryManager();
+                    }}
+                    className="px-5 py-3 rounded-xl bg-tv-accent text-slate-950 font-black text-xs hover:bg-sky-400 transition flex items-center justify-center space-x-2 shadow-lg shadow-sky-500/20 flex-shrink-0"
+                  >
+                    <Sliders className="w-4 h-4" />
+                    <span>Gérer les bouquets</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Sort Preferences */}
+              {onCategorySortChange && (
+                <div className="bg-tv-card/60 border border-tv-border p-4 rounded-2xl space-y-3">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                    Mode de tri par défaut des groupes
+                  </h4>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <button
+                      type="button"
+                      onClick={() => onCategorySortChange('playlist')}
+                      className={`p-3 rounded-xl border text-left transition ${
+                        categorySort === 'playlist'
+                          ? 'bg-tv-focus border-tv-accent text-white shadow-md'
+                          : 'bg-black/30 border-white/5 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span className="block text-xs font-bold">Ordre Playlist</span>
+                      <span className="block text-[10px] text-slate-400 mt-0.5">
+                        Ordre d&apos;origine de votre fournisseur
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onCategorySortChange('alpha')}
+                      className={`p-3 rounded-xl border text-left transition ${
+                        categorySort === 'alpha'
+                          ? 'bg-tv-focus border-tv-accent text-white shadow-md'
+                          : 'bg-black/30 border-white/5 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span className="block text-xs font-bold">Alphabétique (A-Z)</span>
+                      <span className="block text-[10px] text-slate-400 mt-0.5">
+                        Classement par nom de bouquet
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onCategorySortChange('count')}
+                      className={`p-3 rounded-xl border text-left transition ${
+                        categorySort === 'count'
+                          ? 'bg-tv-focus border-tv-accent text-white shadow-md'
+                          : 'bg-black/30 border-white/5 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span className="block text-xs font-bold">Par nombre de chaînes</span>
+                      <span className="block text-[10px] text-slate-400 mt-0.5">
+                        Les plus gros bouquets en premier
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* TAB: CONTRÔLE PARENTAL                                         */}
+          {/* ============================================================== */}
+          {activeTab === 'parental' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-sm font-bold text-white">Contrôle Parental & Protection 18+</h3>
+                <p className="text-xs text-slate-400">
+                  Verrouillez l&apos;accès aux bouquets réservés aux adultes au moyen d&apos;un code PIN secret à 4 chiffres.
+                </p>
+              </div>
+
+              {/* Enable / Disable Parental Lock */}
+              <div className="bg-tv-card/60 border border-tv-border p-4 rounded-2xl flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-white">Verrouillage des bouquets adultes</h4>
+                  <p className="text-[11px] text-slate-400">
+                    Exige le code PIN pour afficher ou lancer les contenus adultes (18+, XXX).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onToggleParentalEnabled && onToggleParentalEnabled(!parentalEnabled)}
+                  className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
+                    parentalEnabled ? 'bg-tv-accent justify-end' : 'bg-slate-700 justify-start'
+                  }`}
+                >
+                  <div className="bg-white w-4 h-4 rounded-full shadow-md" />
+                </button>
+              </div>
+
+              {/* Hide adult categories completely */}
+              <div className="bg-tv-card/60 border border-tv-border p-4 rounded-2xl flex items-center justify-between">
+                <div>
+                  <h4 className="text-xs font-bold text-white">Masquage total des bouquets adultes</h4>
+                  <p className="text-[11px] text-slate-400">
+                    Fait disparaître complètement les bouquets adultes du guide au lieu d&apos;afficher un cadenas.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => onToggleParentalHideAdult && onToggleParentalHideAdult(!parentalHideAdult)}
+                  className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
+                    parentalHideAdult ? 'bg-tv-accent justify-end' : 'bg-slate-700 justify-start'
+                  }`}
+                >
+                  <div className="bg-white w-4 h-4 rounded-full shadow-md" />
+                </button>
+              </div>
+
+              {/* PIN Code Configuration */}
+              <div className="bg-tv-card/60 border border-tv-border p-4 rounded-2xl space-y-3">
+                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                  Code PIN de déverrouillage (4 chiffres)
+                </h4>
+                <div className="flex items-center space-x-3">
+                  <input
+                    type="password"
+                    maxLength={4}
+                    value={editingPin}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, '');
+                      setEditingPin(val);
+                      setPinSavedFeedback(false);
+                    }}
+                    className="w-32 bg-black/50 border border-tv-border focus:border-tv-accent text-white px-3 py-2 rounded-xl text-center font-mono text-base tracking-widest focus:outline-none"
+                    placeholder="0000"
+                  />
+                  <button
+                    type="button"
+                    disabled={editingPin.length !== 4}
+                    onClick={() => {
+                      if (onUpdateParentalPin) {
+                        onUpdateParentalPin(editingPin);
+                        setPinSavedFeedback(true);
+                        setTimeout(() => setPinSavedFeedback(false), 2500);
+                      }
+                    }}
+                    className="px-4 py-2 rounded-xl bg-tv-focus text-white text-xs font-bold hover:bg-sky-500 transition disabled:opacity-40"
+                  >
+                    Enregistrer le PIN
+                  </button>
+                  {pinSavedFeedback && (
+                    <span className="text-xs font-bold text-emerald-400 flex items-center space-x-1">
+                      <CheckCircle2 className="w-4 h-4" />
+                      <span>PIN mis à jour !</span>
+                    </span>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500">
+                  Le code PIN est mémorisé sur votre appareil et permet de protéger votre foyer.
+                </p>
               </div>
             </div>
           )}

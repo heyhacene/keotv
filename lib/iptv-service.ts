@@ -120,6 +120,9 @@ export function isFilmCategory(name: string): boolean {
 // Detect category icon based on category name
 export function detectCategoryIcon(name: string): string {
   const upper = (name || '').toUpperCase();
+  if (isAdultCategoryName(name)) {
+    return 'Lock';
+  }
   if (upper.includes('SPORT') || upper.includes('FOOT') || upper.includes('CANAL+') || upper.includes('BEIN') || upper.includes('RMC')) {
     return 'Trophy';
   }
@@ -136,6 +139,22 @@ export function detectCategoryIcon(name: string): string {
     return 'Star';
   }
   return 'Tv';
+}
+
+// Detect adult category from name for parental control
+export function isAdultCategoryName(name: string): boolean {
+  if (!name) return false;
+  const lower = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const adultKeywords = [
+    'adult', 'adulte', 'xxx', 'porn', '+18', '18+', 'for adult',
+    'erotic', 'erotique', 'hot', 'redlight', 'playboy', 'penthouse',
+    'dorcel', 'hustler', 'brazzers', 'vivid', 'passion', 'sexy', 'venus'
+  ];
+  return adultKeywords.some((kw) => {
+    const escaped = kw.replace('+', '\\+');
+    const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
+    return regex.test(lower);
+  });
 }
 
 // Detect video resolution from channel name
@@ -928,6 +947,7 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
       if (seen.has(catIdStr)) continue;
       seen.add(catIdStr);
       const catName = rawCat.category_name ? String(rawCat.category_name).trim() : `${fallbackLabel} ${catIdStr}`;
+      const isAdult = isAdultCategoryName(catName);
       categories.push({
         id: `grp_${kind}_${catIdStr}`,
         name: catName,
@@ -935,7 +955,8 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
         count: 0,
         is_hidden: false,
         custom_order: order++,
-        icon: kind === 'live' ? detectCategoryIcon(catName) : 'Film',
+        icon: isAdult ? 'Lock' : kind === 'live' ? detectCategoryIcon(catName) : 'Film',
+        is_adult: isAdult,
       });
     }
   };
@@ -1119,6 +1140,7 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
 
   for (const grp of groupOrder) {
     const grpType = categoryTypeMap.get(grp.id) || 'live';
+    const isAdult = isAdultCategoryName(grp.name);
     categories.push({
       id: grp.id,
       name: grp.name,
@@ -1126,7 +1148,8 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
       count: categoryCounts.get(grp.id) || 0,
       is_hidden: false,
       custom_order: orderIndex++,
-      icon: detectCategoryIcon(grp.name),
+      icon: isAdult ? 'Lock' : detectCategoryIcon(grp.name),
+      is_adult: isAdult,
     });
   }
 
