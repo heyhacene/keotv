@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Channel, Category } from '@/types/iptv';
 import { Star, Play, Info, Lock, Unlock, X, EyeOff } from 'lucide-react';
 
