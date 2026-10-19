@@ -58,6 +58,7 @@ interface TVGuideProps {
   onOpenCategoryManager?: () => void;
   activeSection?: 'live' | 'vod' | 'series' | 'fav';
   serverCreds?: { serverUrl: string; username: string; password: string } | null;
+  boundaryHit?: { pane: string; boundary: 'top' | 'bottom'; time: number } | null;
 }
 
 // Helper for category icons
@@ -352,9 +353,49 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   onOpenCategoryManager,
   activeSection = 'live',
   serverCreds,
+  boundaryHit,
 }) => {
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
+
+  // Boundary resistance bounce & floating pill indicators for list carousels
+  const [channelBounce, setChannelBounce] = useState<'top' | 'bottom' | null>(null);
+  const [channelNotice, setChannelNotice] = useState<'top' | 'bottom' | null>(null);
+  const [categoryBounce, setCategoryBounce] = useState<'top' | 'bottom' | null>(null);
+  const [categoryNotice, setCategoryNotice] = useState<'top' | 'bottom' | null>(null);
+
+  useEffect(() => {
+    if (!boundaryHit) return;
+    if (boundaryHit.pane === 'channels') {
+      setChannelBounce(boundaryHit.boundary);
+      setChannelNotice(boundaryHit.boundary);
+      const timerBounce = setTimeout(() => setChannelBounce(null), 180);
+      const timerNotice = setTimeout(() => setChannelNotice(null), 1200);
+      return () => {
+        clearTimeout(timerBounce);
+        clearTimeout(timerNotice);
+      };
+    } else if (boundaryHit.pane === 'categories') {
+      setCategoryBounce(boundaryHit.boundary);
+      setCategoryNotice(boundaryHit.boundary);
+      const timerBounce = setTimeout(() => setCategoryBounce(null), 180);
+      const timerNotice = setTimeout(() => setCategoryNotice(null), 1200);
+      return () => {
+        clearTimeout(timerBounce);
+        clearTimeout(timerNotice);
+      };
+    }
+  }, [boundaryHit]);
+
+  useEffect(() => {
+    setChannelNotice(null);
+    setChannelBounce(null);
+  }, [focusedChannelIndex]);
+
+  useEffect(() => {
+    setCategoryNotice(null);
+    setCategoryBounce(null);
+  }, [focusedCategoryIndex]);
 
   // Rich media preview states for VOD & Séries
   const [mediaDetails, setMediaDetails] = useState<any | null>(null);
@@ -521,192 +562,254 @@ export const TVGuide: React.FC<TVGuideProps> = ({
     <div className="flex-1 flex overflow-hidden bg-tv-bg text-slate-100 select-none">
       {/* 1. CATEGORIES COLUMN */}
       <div
-        ref={categoryListRef}
-        className={`w-56 xl:w-64 border-r border-tv-border flex flex-col py-2.5 overflow-y-auto overflow-x-hidden flex-shrink-0 ${
+        className={`relative w-56 xl:w-64 border-r border-tv-border flex flex-col flex-shrink-0 ${
           activePane === 'categories' ? 'bg-tv-surface/90' : 'bg-tv-surface/40'
         }`}
       >
-        <div className="px-3 pb-2 mb-1 flex flex-col space-y-1.5 border-b border-tv-border/50">
-          <div className="flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider">
-            <span className="flex items-center space-x-1.5">
-              <span>Groupes</span>
-              <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">
-                {categories.length}
+        <div
+          ref={categoryListRef}
+          style={{
+            transform:
+              categoryBounce === 'bottom'
+                ? 'translateY(-8px)'
+                : categoryBounce === 'top'
+                ? 'translateY(8px)'
+                : 'translateY(0)',
+            transition: 'transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+          }}
+          className="flex-1 flex flex-col py-2.5 overflow-y-auto overflow-x-hidden"
+        >
+          <div className="px-3 pb-2 mb-1 flex flex-col space-y-1.5 border-b border-tv-border/50">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider">
+              <span className="flex items-center space-x-1.5">
+                <span>Groupes</span>
+                <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded text-slate-400 font-mono">
+                  {categories.length}
+                </span>
               </span>
-            </span>
-            <div className="flex items-center space-x-1">
-              {onOpenCategoryManager && (
-                <button
-                  type="button"
-                  onClick={onOpenCategoryManager}
-                  className="p-1 px-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-300 hover:text-white flex items-center space-x-1 text-[10px] font-bold focus:outline-none"
-                  title="Organiser l'ordre et masquer des bouquets"
-                >
-                  <Sliders className="w-3 h-3 text-sky-400" />
-                  <span>Ordre</span>
-                </button>
-              )}
-              {onOpenSearch && (
-                <button
-                  type="button"
-                  onClick={onOpenSearch}
-                  className="p-1 px-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-300 hover:text-white flex items-center space-x-1 text-[10px] font-bold focus:outline-none"
-                  title="Rechercher"
-                >
-                  <Search className="w-3 h-3 text-tv-accent" />
-                  <span>Chercher</span>
-                </button>
-              )}
+              <div className="flex items-center space-x-1">
+                {onOpenCategoryManager && (
+                  <button
+                    type="button"
+                    onClick={onOpenCategoryManager}
+                    className="p-1 px-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-300 hover:text-white flex items-center space-x-1 text-[10px] font-bold focus:outline-none"
+                    title="Organiser l'ordre et masquer des bouquets"
+                  >
+                    <Sliders className="w-3 h-3 text-sky-400" />
+                    <span>Ordre</span>
+                  </button>
+                )}
+                {onOpenSearch && (
+                  <button
+                    type="button"
+                    onClick={onOpenSearch}
+                    className="p-1 px-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-300 hover:text-white flex items-center space-x-1 text-[10px] font-bold focus:outline-none"
+                    title="Rechercher"
+                  >
+                    <Search className="w-3 h-3 text-tv-accent" />
+                    <span>Chercher</span>
+                  </button>
+                )}
+              </div>
             </div>
+            {onCategorySortChange && (
+              <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-md border border-white/5 text-[10px]">
+                <button
+                  type="button"
+                  onClick={() => onCategorySortChange('playlist')}
+                  className={`flex-1 py-0.5 rounded font-semibold text-center ${
+                    categorySort === 'playlist' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Ordre Playlist par défaut"
+                >
+                  Playlist
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCategorySortChange('alpha')}
+                  className={`flex-1 py-0.5 rounded font-semibold text-center ${
+                    categorySort === 'alpha' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Ordre alphabétique"
+                >
+                  A-Z
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCategorySortChange('count')}
+                  className={`flex-1 py-0.5 rounded font-semibold text-center ${
+                    categorySort === 'count' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Trier par nombre de chaînes"
+                >
+                  Nbr
+                </button>
+              </div>
+            )}
           </div>
-          {onCategorySortChange && (
-            <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-md border border-white/5 text-[10px]">
-              <button
-                type="button"
-                onClick={() => onCategorySortChange('playlist')}
-                className={`flex-1 py-0.5 rounded font-semibold text-center ${
-                  categorySort === 'playlist' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Ordre Playlist par défaut"
-              >
-                Playlist
-              </button>
-              <button
-                type="button"
-                onClick={() => onCategorySortChange('alpha')}
-                className={`flex-1 py-0.5 rounded font-semibold text-center ${
-                  categorySort === 'alpha' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Ordre alphabétique"
-              >
-                A-Z
-              </button>
-              <button
-                type="button"
-                onClick={() => onCategorySortChange('count')}
-                className={`flex-1 py-0.5 rounded font-semibold text-center ${
-                  categorySort === 'count' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Trier par nombre de chaînes"
-              >
-                Nbr
-              </button>
-            </div>
-          )}
+
+          {categories.map((cat, idx) => (
+            <CategoryRow
+              key={cat.id}
+              category={cat}
+              index={idx}
+              isFocused={activePane === 'categories' && focusedCategoryIndex === idx}
+              isSelected={selectedCategory?.id === cat.id}
+              onSelect={(c, i) => onSelectCategory(c, i, true)}
+            />
+          ))}
         </div>
 
-        {categories.map((cat, idx) => (
-          <CategoryRow
-            key={cat.id}
-            category={cat}
-            index={idx}
-            isFocused={activePane === 'categories' && focusedCategoryIndex === idx}
-            isSelected={selectedCategory?.id === cat.id}
-            onSelect={(c, i) => onSelectCategory(c, i, true)}
-          />
-        ))}
+        {/* Floating boundary indicator pill for categories */}
+        {categoryNotice && (
+          <div
+            className={`absolute ${
+              categoryNotice === 'bottom' ? 'bottom-3' : 'top-14'
+            } left-2 right-2 z-30 pointer-events-none transition-all duration-200 animate-in fade-in`}
+          >
+            <div className="flex items-center justify-center space-x-1.5 px-2.5 py-1.5 rounded-full bg-slate-900/95 border border-sky-500/40 shadow-2xl backdrop-blur-md text-[10px] font-medium text-sky-200 text-center">
+              <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse flex-shrink-0" />
+              <span className="truncate">
+                {categoryNotice === 'bottom'
+                  ? 'Fin de liste • Appuyez pour reprendre'
+                  : 'Début de liste • Appuyez pour la fin'}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* 2. CHANNELS LIST COLUMN */}
       <div
-        ref={channelListRef}
-        className={`flex-1 min-w-[280px] border-r border-tv-border flex flex-col py-2.5 overflow-y-auto overflow-x-hidden ${
+        className={`relative flex-1 min-w-[280px] border-r border-tv-border flex flex-col ${
           activePane === 'channels' ? 'bg-tv-bg' : 'bg-tv-bg/80'
         }`}
       >
-        <div className="px-3 pb-2 mb-1 flex items-center justify-between border-b border-tv-border/50">
-          <div className="min-w-0 flex-1 mr-2">
-            <span className="truncate block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-              {selectedCategory?.name || 'Chaînes en direct'}
-            </span>
-            <span className="text-[10px] text-slate-500 font-mono">
-              {channels.length}{' '}
-              {selectedCategory?.type === 'series'
-                ? 'séries'
-                : selectedCategory?.type === 'vod'
-                ? 'films'
-                : 'chaînes'}
-            </span>
+        <div
+          ref={channelListRef}
+          style={{
+            transform:
+              channelBounce === 'bottom'
+                ? 'translateY(-8px)'
+                : channelBounce === 'top'
+                ? 'translateY(8px)'
+                : 'translateY(0)',
+            transition: 'transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+          }}
+          className="flex-1 flex flex-col py-2.5 overflow-y-auto overflow-x-hidden"
+        >
+          <div className="px-3 pb-2 mb-1 flex items-center justify-between border-b border-tv-border/50">
+            <div className="min-w-0 flex-1 mr-2">
+              <span className="truncate block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                {selectedCategory?.name || 'Chaînes en direct'}
+              </span>
+              <span className="text-[10px] text-slate-500 font-mono">
+                {channels.length}{' '}
+                {selectedCategory?.type === 'series'
+                  ? 'séries'
+                  : selectedCategory?.type === 'vod'
+                  ? 'films'
+                  : 'chaînes'}
+              </span>
+            </div>
+            {onChannelSortChange && (
+              <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-md border border-white/5 text-[10px] flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => onChannelSortChange('playlist')}
+                  className={`px-2 py-0.5 rounded font-semibold ${
+                    channelSort === 'playlist' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Ordre de la playlist par défaut"
+                >
+                  Playlist
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChannelSortChange('alpha')}
+                  className={`px-2 py-0.5 rounded font-semibold ${
+                    channelSort === 'alpha' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Alphabétique A à Z"
+                >
+                  A-Z
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChannelSortChange('num')}
+                  className={`px-2 py-0.5 rounded font-semibold ${
+                    channelSort === 'num' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Numéro de chaîne"
+                >
+                  N°
+                </button>
+              </div>
+            )}
           </div>
-          {onChannelSortChange && (
-            <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-md border border-white/5 text-[10px] flex-shrink-0">
-              <button
-                type="button"
-                onClick={() => onChannelSortChange('playlist')}
-                className={`px-2 py-0.5 rounded font-semibold ${
-                  channelSort === 'playlist' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Ordre de la playlist par défaut"
-              >
-                Playlist
-              </button>
-              <button
-                type="button"
-                onClick={() => onChannelSortChange('alpha')}
-                className={`px-2 py-0.5 rounded font-semibold ${
-                  channelSort === 'alpha' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Alphabétique A à Z"
-              >
-                A-Z
-              </button>
-              <button
-                type="button"
-                onClick={() => onChannelSortChange('num')}
-                className={`px-2 py-0.5 rounded font-semibold ${
-                  channelSort === 'num' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
-                }`}
-                title="Numéro de chaîne"
-              >
-                N°
-              </button>
+
+          {channels.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-slate-500">
+              {selectedCategory?.id.startsWith('fav') ? (
+                <>
+                  <Star className="w-10 h-10 mb-2 text-amber-400/50" />
+                  <p className="text-sm text-slate-300 font-medium">Aucun favori dans cette catégorie.</p>
+                  <p className="text-xs text-slate-500 mt-1 max-w-xs text-center">
+                    Appuyez longuement sur un média ou cliquez sur l&apos;étoile pour l&apos;ajouter à vos favoris.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Radio className="w-10 h-10 mb-2 opacity-50" />
+                  <p className="text-sm">Aucune chaîne dans ce groupe.</p>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col">
+              {topSpacerHeight > 0 && (
+                <div style={{ height: topSpacerHeight }} className="flex-shrink-0" />
+              )}
+              {visibleChannels.map((ch, relIdx) => {
+                const realIdx = startIndex + relIdx;
+                const isFocused = activePane === 'channels' && focusedChannelIndex === realIdx;
+                const isActive = activeChannel?.id === ch.id;
+
+                return (
+                  <ChannelRow
+                    key={ch.id}
+                    channel={ch}
+                    index={realIdx}
+                    isFocused={isFocused}
+                    isActive={isActive}
+                    onSelect={onSelectChannel}
+                    onToggleFavorite={onToggleFavorite}
+                    onOpenContextMenu={onOpenContextMenu}
+                  />
+                );
+              })}
+              {bottomSpacerHeight > 0 && (
+                <div style={{ height: bottomSpacerHeight }} className="flex-shrink-0" />
+              )}
             </div>
           )}
         </div>
 
-        {channels.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center p-8 text-slate-500">
-            {selectedCategory?.id.startsWith('fav') ? (
-              <>
-                <Star className="w-10 h-10 mb-2 text-amber-400/50" />
-                <p className="text-sm text-slate-300 font-medium">Aucun favori dans cette catégorie.</p>
-                <p className="text-xs text-slate-500 mt-1 max-w-xs text-center">
-                  Appuyez longuement sur un média ou cliquez sur l&apos;étoile pour l&apos;ajouter à vos favoris.
-                </p>
-              </>
-            ) : (
-              <>
-                <Radio className="w-10 h-10 mb-2 opacity-50" />
-                <p className="text-sm">Aucune chaîne dans ce groupe.</p>
-              </>
-            )}
-          </div>
-        ) : (
-          <div className="flex flex-col">
-            {topSpacerHeight > 0 && (
-              <div style={{ height: topSpacerHeight }} className="flex-shrink-0" />
-            )}
-            {visibleChannels.map((ch, relIdx) => {
-              const realIdx = startIndex + relIdx;
-              const isFocused = activePane === 'channels' && focusedChannelIndex === realIdx;
-              const isActive = activeChannel?.id === ch.id;
-
-              return (
-                <ChannelRow
-                  key={ch.id}
-                  channel={ch}
-                  index={realIdx}
-                  isFocused={isFocused}
-                  isActive={isActive}
-                  onSelect={onSelectChannel}
-                  onToggleFavorite={onToggleFavorite}
-                  onOpenContextMenu={onOpenContextMenu}
-                />
-              );
-            })}
-            {bottomSpacerHeight > 0 && (
-              <div style={{ height: bottomSpacerHeight }} className="flex-shrink-0" />
-            )}
+        {/* Floating boundary indicator pill for channels */}
+        {channelNotice && (
+          <div
+            className={`absolute ${
+              channelNotice === 'bottom' ? 'bottom-3' : 'top-14'
+            } left-4 right-4 z-30 pointer-events-none transition-all duration-200 animate-in fade-in`}
+          >
+            <div className="flex items-center justify-center space-x-1.5 px-3 py-1.5 rounded-full bg-slate-900/95 border border-sky-500/40 shadow-2xl backdrop-blur-md text-[11px] font-medium text-sky-200 text-center">
+              <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse flex-shrink-0" />
+              <span className="truncate">
+                {channelNotice === 'bottom'
+                  ? 'Fin de la liste • Appuyez à nouveau pour reprendre au début'
+                  : 'Début de la liste • Appuyez à nouveau pour aller à la fin'}
+              </span>
+            </div>
           </div>
         )}
       </div>

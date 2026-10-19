@@ -25,6 +25,7 @@ export interface TVNavOptions {
   onJumpToChannelNumber: (num: number) => void;
   onJumpToCurrentCategory?: () => void;
   onBack?: () => void;
+  onBoundaryHit?: (pane: NavigationPane | 'menu' | 'fullscreen', boundary: 'top' | 'bottom') => void;
 }
 
 export function useTVNavigation({
@@ -49,6 +50,7 @@ export function useTVNavigation({
   onJumpToChannelNumber,
   onJumpToCurrentCategory,
   onBack,
+  onBoundaryHit,
 }: TVNavOptions) {
   const numberBufferRef = useRef<string>('');
   const numberTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -57,6 +59,53 @@ export function useTVNavigation({
   focusedCategoryIndexRef.current = focusedCategoryIndex;
   const focusedChannelIndexRef = useRef(focusedChannelIndex);
   focusedChannelIndexRef.current = focusedChannelIndex;
+  const focusedMenuIndexRef = useRef(focusedMenuIndex);
+  focusedMenuIndexRef.current = focusedMenuIndex;
+
+  // Track boundary attempts for list carousel blockage (gives user time to understand they are at the end)
+  const boundaryAttemptRef = useRef<{
+    pane: string;
+    boundary: 'top' | 'bottom';
+    timestamp: number;
+  } | null>(null);
+
+  const shouldAllowWrap = useCallback(
+    (pane: string, boundary: 'top' | 'bottom', isRepeat: boolean): boolean => {
+      const now = Date.now();
+      const attempt = boundaryAttemptRef.current;
+
+      // If first attempt at this boundary or happened more than 1200ms ago:
+      if (!attempt || attempt.pane !== pane || attempt.boundary !== boundary || now - attempt.timestamp > 1200) {
+        boundaryAttemptRef.current = { pane, boundary, timestamp: now };
+        if (onBoundaryHit) {
+          onBoundaryHit(pane as any, boundary);
+        }
+        return false; // LÉGER BLOCAGE: stop at the boundary!
+      }
+
+      const elapsed = now - attempt.timestamp;
+
+      // When holding down the arrow key (repeat events):
+      // Require holding through a clear 380ms pause at the boundary before wrapping
+      if (isRepeat) {
+        if (elapsed < 380) {
+          return false;
+        }
+        boundaryAttemptRef.current = null;
+        return true;
+      }
+
+      // Ignore rapid switch debounce chatter < 70ms
+      if (elapsed < 70) {
+        return false;
+      }
+
+      // Deliberate second press: allow wrap back to the start!
+      boundaryAttemptRef.current = null;
+      return true;
+    },
+    [onBoundaryHit]
+  );
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -161,20 +210,37 @@ export function useTVNavigation({
         }
         if (isUp || isChannelUp) {
           e.preventDefault();
-          setFocusedChannelIndex((prev) => {
-            const next = prev > 0 ? prev - 1 : Math.max(0, channelCount - 1);
+          if (channelCount <= 1) return;
+          const current = focusedChannelIndexRef.current;
+          if (current <= 0) {
+            if (shouldAllowWrap('fullscreen', 'top', e.repeat)) {
+              const next = channelCount - 1;
+              setFocusedChannelIndex(next);
+              onSelectChannel(next, true);
+            }
+          } else {
+            boundaryAttemptRef.current = null;
+            const next = current - 1;
+            setFocusedChannelIndex(next);
             onSelectChannel(next, true);
-            return next;
-          });
+          }
           return;
         }
         if (isDown || isChannelDown) {
           e.preventDefault();
-          setFocusedChannelIndex((prev) => {
-            const next = prev < channelCount - 1 ? prev + 1 : 0;
+          if (channelCount <= 1) return;
+          const current = focusedChannelIndexRef.current;
+          if (current >= channelCount - 1) {
+            if (shouldAllowWrap('fullscreen', 'bottom', e.repeat)) {
+              setFocusedChannelIndex(0);
+              onSelectChannel(0, true);
+            }
+          } else {
+            boundaryAttemptRef.current = null;
+            const next = current + 1;
+            setFocusedChannelIndex(next);
             onSelectChannel(next, true);
-            return next;
-          });
+          }
           return;
         }
         return;
@@ -184,13 +250,37 @@ export function useTVNavigation({
       if (isUp) {
         e.preventDefault();
         if (activePane === 'channels') {
-          setFocusedChannelIndex((prev) => (prev > 0 ? prev - 1 : Math.max(0, channelCount - 1)));
+          if (channelCount <= 1) return;
+          const current = focusedChannelIndexRef.current;
+          if (current <= 0) {
+            if (shouldAllowWrap('channels', 'top', e.repeat)) {
+              setFocusedChannelIndex(channelCount - 1);
+            }
+          } else {
+            boundaryAttemptRef.current = null;
+            setFocusedChannelIndex((prev) => Math.max(0, prev - 1));
+          }
         } else if (activePane === 'categories') {
+          if (categoryCount <= 1) return;
           const current = focusedCategoryIndexRef.current;
-          const next = current > 0 ? current - 1 : Math.max(0, categoryCount - 1);
-          setFocusedCategoryIndex(next);
+          if (current <= 0) {
+            if (shouldAllowWrap('categories', 'top', e.repeat)) {
+              setFocusedCategoryIndex(categoryCount - 1);
+            }
+          } else {
+            boundaryAttemptRef.current = null;
+            setFocusedCategoryIndex((prev) => Math.max(0, prev - 1));
+          }
         } else if (activePane === 'menu') {
-          setFocusedMenuIndex((prev) => (prev > 0 ? prev - 1 : 6));
+          const current = focusedMenuIndexRef.current;
+          if (current <= 0) {
+            if (shouldAllowWrap('menu', 'top', e.repeat)) {
+              setFocusedMenuIndex(6);
+            }
+          } else {
+            boundaryAttemptRef.current = null;
+            setFocusedMenuIndex((prev) => Math.max(0, prev - 1));
+          }
         }
         return;
       }
@@ -198,19 +288,44 @@ export function useTVNavigation({
       if (isDown) {
         e.preventDefault();
         if (activePane === 'channels') {
-          setFocusedChannelIndex((prev) => (prev < channelCount - 1 ? prev + 1 : 0));
+          if (channelCount <= 1) return;
+          const current = focusedChannelIndexRef.current;
+          if (current >= channelCount - 1) {
+            if (shouldAllowWrap('channels', 'bottom', e.repeat)) {
+              setFocusedChannelIndex(0);
+            }
+          } else {
+            boundaryAttemptRef.current = null;
+            setFocusedChannelIndex((prev) => prev + 1);
+          }
         } else if (activePane === 'categories') {
+          if (categoryCount <= 1) return;
           const current = focusedCategoryIndexRef.current;
-          const next = current < categoryCount - 1 ? current + 1 : 0;
-          setFocusedCategoryIndex(next);
+          if (current >= categoryCount - 1) {
+            if (shouldAllowWrap('categories', 'bottom', e.repeat)) {
+              setFocusedCategoryIndex(0);
+            }
+          } else {
+            boundaryAttemptRef.current = null;
+            setFocusedCategoryIndex((prev) => prev + 1);
+          }
         } else if (activePane === 'menu') {
-          setFocusedMenuIndex((prev) => (prev < 6 ? prev + 1 : 0));
+          const current = focusedMenuIndexRef.current;
+          if (current >= 6) {
+            if (shouldAllowWrap('menu', 'bottom', e.repeat)) {
+              setFocusedMenuIndex(0);
+            }
+          } else {
+            boundaryAttemptRef.current = null;
+            setFocusedMenuIndex((prev) => prev + 1);
+          }
         }
         return;
       }
 
       if (isLeft) {
         e.preventDefault();
+        boundaryAttemptRef.current = null;
         if (activePane === 'channels') {
           if (onJumpToCurrentCategory) {
             onJumpToCurrentCategory();
@@ -224,6 +339,7 @@ export function useTVNavigation({
 
       if (isRight) {
         e.preventDefault();
+        boundaryAttemptRef.current = null;
         if (activePane === 'menu') {
           setActivePane('categories');
         } else if (activePane === 'categories') {
@@ -234,6 +350,7 @@ export function useTVNavigation({
       }
 
       if (isEnter) {
+        boundaryAttemptRef.current = null;
         if (e.repeat && activePane === 'channels' && onOpenContextMenu && channelCount > 0) {
           e.preventDefault();
           onOpenContextMenu(focusedChannelIndexRef.current);
@@ -241,18 +358,19 @@ export function useTVNavigation({
         }
         e.preventDefault();
         if (activePane === 'menu') {
-          onSelectMenuItem(focusedMenuIndex);
+          onSelectMenuItem(focusedMenuIndexRef.current);
         } else if (activePane === 'categories') {
-          onSelectCategory(focusedCategoryIndex, true);
+          onSelectCategory(focusedCategoryIndexRef.current, true);
           setActivePane('channels');
         } else if (activePane === 'channels') {
-          onSelectChannel(focusedChannelIndex, false);
+          onSelectChannel(focusedChannelIndexRef.current, false);
         }
         return;
       }
 
       if (isBack) {
         e.preventDefault();
+        boundaryAttemptRef.current = null;
         if (onBack) {
           onBack();
           return;
@@ -285,6 +403,7 @@ export function useTVNavigation({
       setIsFullscreen,
       onJumpToChannelNumber,
       onBack,
+      shouldAllowWrap,
     ]
   );
 

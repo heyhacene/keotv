@@ -143,6 +143,13 @@ export default function KeoTVHome() {
   const [pendingCategoryToUnlock, setPendingCategoryToUnlock] = useState<Category | null>(null);
   const [pendingChannelToUnlock, setPendingChannelToUnlock] = useState<Channel | null>(null);
 
+  // List boundary hit state for carousel blockage feedback
+  const [boundaryHit, setBoundaryHit] = useState<{
+    pane: string;
+    boundary: 'top' | 'bottom';
+    time: number;
+  } | null>(null);
+
   // Toast notification state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -1699,6 +1706,9 @@ export default function KeoTVHome() {
       }
     },
     onBack: handleAndroidBack,
+    onBoundaryHit: (pane, boundary) => {
+      setBoundaryHit({ pane, boundary, time: Date.now() });
+    },
   });
 
 
@@ -2412,6 +2422,7 @@ export default function KeoTVHome() {
               onOpenSyncModal={() => setIsSyncModalOpen(true)}
               onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
               onOpenSearchModal={() => setIsSearchModalOpen(true)}
+              boundaryHit={boundaryHit}
             />
 
             <TVGuide
@@ -2426,6 +2437,7 @@ export default function KeoTVHome() {
               activePane={activePane}
               activeSection={activeSection}
               serverCreds={activeXtreamCreds}
+              boundaryHit={boundaryHit}
               onSelectCategory={(cat, idx, switchPane = true) => handleSelectCategory(cat, idx, switchPane)}
               onSelectChannel={(ch, idx) => {
                 setFocusedChannelIndex(idx);

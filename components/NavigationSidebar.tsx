@@ -12,6 +12,7 @@ interface NavigationSidebarProps {
   onOpenSyncModal: () => void;
   onOpenSettingsModal: () => void;
   onOpenSearchModal: () => void;
+  boundaryHit?: { pane: string; boundary: 'top' | 'bottom'; time: number } | null;
 }
 
 export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
@@ -22,7 +23,17 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
   onOpenSyncModal,
   onOpenSettingsModal,
   onOpenSearchModal,
+  boundaryHit,
 }) => {
+  const [menuBounce, setMenuBounce] = React.useState<'top' | 'bottom' | null>(null);
+
+  React.useEffect(() => {
+    if (!boundaryHit || boundaryHit.pane !== 'menu') return;
+    setMenuBounce(boundaryHit.boundary);
+    const timer = setTimeout(() => setMenuBounce(null), 180);
+    return () => clearTimeout(timer);
+  }, [boundaryHit]);
+
   const menuItems = [
     { id: 'live', label: 'Direct', icon: Tv },
     { id: 'vod', label: 'Films', icon: Film },
@@ -33,6 +44,15 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
 
   return (
     <div
+      style={{
+        transform:
+          menuBounce === 'bottom'
+            ? 'translateY(-6px)'
+            : menuBounce === 'top'
+            ? 'translateY(6px)'
+            : 'translateY(0)',
+        transition: 'transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+      }}
       className={`w-16 md:w-20 border-r border-tv-border flex flex-col items-center py-4 justify-between transition-colors select-none ${
         activePane === 'menu' ? 'bg-tv-surface' : 'bg-tv-bg'
       }`}

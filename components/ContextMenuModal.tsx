@@ -110,6 +110,8 @@ export const ContextMenuModal: React.FC<ContextMenuModalProps> = ({
     }
   }, [isOpen]);
 
+  const boundaryAttemptRef = useRef<{ boundary: 'top' | 'bottom'; timestamp: number } | null>(null);
+
   // Remote D-Pad Navigation
   useEffect(() => {
     if (!isOpen) return;
@@ -130,23 +132,57 @@ export const ContextMenuModal: React.FC<ContextMenuModalProps> = ({
 
       if (isBack) {
         e.preventDefault();
+        boundaryAttemptRef.current = null;
         onClose();
         return;
       }
 
       if (isUp) {
         e.preventDefault();
-        setFocusedIndex((prev) => (prev > 0 ? prev - 1 : options.length - 1));
+        if (options.length <= 1) return;
+        if (focusedIndex <= 0) {
+          const now = Date.now();
+          const attempt = boundaryAttemptRef.current;
+          if (!attempt || attempt.boundary !== 'top' || now - attempt.timestamp > 1200) {
+            boundaryAttemptRef.current = { boundary: 'top', timestamp: now };
+            return; // Block at top!
+          }
+          if (e.repeat && now - attempt.timestamp < 380) {
+            return;
+          }
+          boundaryAttemptRef.current = null;
+          setFocusedIndex(options.length - 1);
+        } else {
+          boundaryAttemptRef.current = null;
+          setFocusedIndex((prev) => prev - 1);
+        }
         return;
       }
 
       if (isDown) {
         e.preventDefault();
-        setFocusedIndex((prev) => (prev < options.length - 1 ? prev + 1 : 0));
+        if (options.length <= 1) return;
+        if (focusedIndex >= options.length - 1) {
+          const now = Date.now();
+          const attempt = boundaryAttemptRef.current;
+          if (!attempt || attempt.boundary !== 'bottom' || now - attempt.timestamp > 1200) {
+            boundaryAttemptRef.current = { boundary: 'bottom', timestamp: now };
+            return; // Block at bottom!
+          }
+          if (e.repeat && now - attempt.timestamp < 380) {
+            return;
+          }
+          boundaryAttemptRef.current = null;
+          setFocusedIndex(0);
+        } else {
+          boundaryAttemptRef.current = null;
+          setFocusedIndex((prev) => prev + 1);
+        }
         return;
       }
 
       if (isEnter) {
+        boundaryAttemptRef.current = null;
         e.preventDefault();
         const opt = options[focusedIndex];
         if (opt) opt.action();

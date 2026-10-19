@@ -11,8 +11,8 @@ export interface AppUpdateInfo {
 
 export const CURRENT_BUILD_NUMBER =
   typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_BUILD_NUMBER
-    ? parseInt(process.env.NEXT_PUBLIC_BUILD_NUMBER, 10) || 31
-    : 31;
+    ? parseInt(process.env.NEXT_PUBLIC_BUILD_NUMBER, 10) || 32
+    : 32;
 export const DOWNLOADER_CODE = '4317787';
 export const DIRECT_APK_URL = 'https://tinyurl.com/keo-apk';
 
