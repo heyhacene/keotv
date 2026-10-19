@@ -103,8 +103,9 @@ jobs:
             sed -i 's/<application/<application android:usesCleartextTraffic="true"/' "$MANIFEST"
           fi
 
-          # Permettre le mode paysage natif Android TV en évitant le verrouillage portrait
-          sed -i 's/android:screenOrientation="portrait"/android:screenOrientation="unspecified"/g' "$MANIFEST"
+          # Permettre la rotation dynamique par capteur sur smartphone/tablette et paysage forcé sur TV
+          sed -i 's/android:screenOrientation="portrait"/android:screenOrientation="sensor"/g' "$MANIFEST"
+          sed -i 's/android:screenOrientation="unspecified"/android:screenOrientation="sensor"/g' "$MANIFEST"
 
       - name: Génération automatique des icônes Android et de la Bannière Android TV
         run: |

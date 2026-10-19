@@ -24,7 +24,9 @@ public class MainActivity extends BridgeActivity {
             });
         }
 
-        // Force landscape orientation on Android TV devices
+        // Orientation management:
+        // - Force landscape orientation on Android TV devices
+        // - Allow sensor-based automatic rotation on mobile smartphones and tablets
         UiModeManager uiModeManager = (UiModeManager) getSystemService(UI_MODE_SERVICE);
         boolean isTv = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION)
                 || getPackageManager().hasSystemFeature("android.software.leanback")
@@ -32,11 +34,26 @@ public class MainActivity extends BridgeActivity {
 
         if (isTv) {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+        } else {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
         }
 
-        // Ensure WebView receives remote control D-Pad focus
+        // Tag WebView user agent so frontend knows device type and ensure WebView receives focus
         final WebView webView = getBridge() != null ? getBridge().getWebView() : null;
         if (webView != null) {
+            try {
+                String defaultUa = webView.getSettings().getUserAgentString();
+                if (isTv) {
+                    if (!defaultUa.contains("KeoTV-AndroidTV")) {
+                        webView.getSettings().setUserAgentString(defaultUa + " KeoTV-AndroidTV");
+                    }
+                } else {
+                    if (!defaultUa.contains("KeoTV-Mobile")) {
+                        webView.getSettings().setUserAgentString(defaultUa + " KeoTV-Mobile");
+                    }
+                }
+            } catch (Exception ignored) {}
+
             webView.setFocusable(true);
             webView.setFocusableInTouchMode(true);
             webView.post(new Runnable() {

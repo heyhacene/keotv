@@ -38,7 +38,7 @@ import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from 
 
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
-import { Star, Tv, Film, Clapperboard, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square, ArrowUpDown, AlertCircle, Loader2 } from 'lucide-react';
+import { Star, Tv, Film, Clapperboard, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square, ArrowUpDown, AlertCircle, Loader2, Search, Sliders, Maximize, Smartphone, RotateCw } from 'lucide-react';
 
 export default function KeoTVHome() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -71,26 +71,113 @@ export default function KeoTVHome() {
   const [focusedChannelIndex, setFocusedChannelIndex] = useState<number>(0);
   const [focusedMenuIndex, setFocusedMenuIndex] = useState<number>(0);
 
-  // Layout mode: true ONLY for smartphones held strictly in vertical portrait mode
-  const [isPortraitMobile, setIsPortraitMobile] = useState<boolean>(false);
+  // Responsive Layout Mode: 'mobile-portrait' | 'mobile-landscape' | 'tv'
+  const [layoutMode, setLayoutMode] = useState<'tv' | 'mobile-portrait' | 'mobile-landscape'>('tv');
+  const [forcedOrientation, setForcedOrientation] = useState<'portrait' | 'landscape' | null>(null);
 
   useEffect(() => {
     const updateLayoutMode = () => {
-      // Android TVs and landscape tablets/monitors are always landscape (e.g. 960x540, 1280x720, 1920x1080).
-      // We only switch to the single-column smartphone layout if the device is strictly in vertical portrait
-      // AND has a narrow width (< 700px).
-      const isPortrait = typeof window !== 'undefined' && window.innerHeight > window.innerWidth && window.innerWidth < 700;
-      setIsPortraitMobile(isPortrait);
+      if (typeof window === 'undefined') return;
+
+      const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+      const isTvDevice = /KeoTV-AndroidTV|Android TV|GoogleTV|Large Screen/i.test(ua);
+
+      // Dedicated Android TV hardware always stays in full TV mode
+      if (isTvDevice) {
+        setLayoutMode('tv');
+        return;
+      }
+
+      // Check if user manually forced portrait or landscape via in-app button
+      if (forcedOrientation === 'portrait') {
+        setLayoutMode('mobile-portrait');
+        return;
+      }
+      if (forcedOrientation === 'landscape') {
+        setLayoutMode('mobile-landscape');
+        return;
+      }
+
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const isPortrait = height > width;
+
+      const isTouch = 'ontouchstart' in window || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
+      const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod|KeoTV-Mobile/i.test(ua) || isTouch;
+
+      if (isPortrait) {
+        // Vertical phone or portrait tablet -> Mobile Portrait
+        setLayoutMode('mobile-portrait');
+      } else {
+        // Horizontal orientation:
+        // If it's a mobile device or screen with compact mobile height (< 580px) -> Mobile Landscape!
+        if (isMobileDevice || height < 580 || width < 1000) {
+          setLayoutMode('mobile-landscape');
+        } else {
+          // Large desktop widescreen monitor or TV
+          setLayoutMode('tv');
+        }
+      }
     };
 
     updateLayoutMode();
     window.addEventListener('resize', updateLayoutMode);
     window.addEventListener('orientationchange', updateLayoutMode);
+
+    if (typeof screen !== 'undefined' && screen.orientation) {
+      screen.orientation.addEventListener('change', updateLayoutMode);
+    }
+
     return () => {
       window.removeEventListener('resize', updateLayoutMode);
       window.removeEventListener('orientationchange', updateLayoutMode);
+      if (typeof screen !== 'undefined' && screen.orientation) {
+        screen.orientation.removeEventListener('change', updateLayoutMode);
+      }
     };
-  }, []);
+  }, [forcedOrientation]);
+
+  const isPortraitMobile = layoutMode === 'mobile-portrait';
+  const isLandscapeMobile = layoutMode === 'mobile-landscape';
+  const isTvMode = layoutMode === 'tv';
+
+  const handleToggleOrientation = useCallback(() => {
+    if (layoutMode === 'mobile-portrait') {
+      setForcedOrientation('landscape');
+      try {
+        if (typeof screen !== 'undefined' && (screen.orientation as any)?.lock) {
+          (screen.orientation as any).lock('landscape').catch(() => {});
+        }
+      } catch {}
+    } else {
+      setForcedOrientation('portrait');
+      try {
+        if (typeof screen !== 'undefined' && (screen.orientation as any)?.lock) {
+          (screen.orientation as any).lock('portrait').catch(() => {});
+        } else if (typeof screen !== 'undefined' && screen.orientation?.unlock) {
+          screen.orientation.unlock();
+        }
+      } catch {}
+    }
+  }, [layoutMode]);
+
+  const getEpgProgressPercent = (epg: EpgProgram | null) => {
+    if (!epg || !epg.start || !epg.end) return 0;
+    try {
+      const now = new Date();
+      const [startH, startM] = epg.start.split(':').map(Number);
+      const [endH, endM] = epg.end.split(':').map(Number);
+      const startMin = startH * 60 + startM;
+      let endMin = endH * 60 + endM;
+      if (endMin < startMin) endMin += 24 * 60; // spans across midnight
+      const nowMin = now.getHours() * 60 + now.getMinutes();
+      if (nowMin < startMin) return 0;
+      if (nowMin > endMin) return 100;
+      return Math.round(((nowMin - startMin) / (endMin - startMin)) * 100);
+    } catch {
+      return 50;
+    }
+  };
 
   const [activeChannel, setActiveChannel] = useState<Channel | null>(null);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
@@ -1649,9 +1736,9 @@ export default function KeoTVHome() {
     Boolean(selectedMovieForDetails) ||
     Boolean(selectedSeriesForDetails);
 
-  // Register remote control D-Pad keyboard events with hierarchical back handler
+  // Register remote control D-Pad keyboard events with hierarchical back handler (TV mode only)
   useTVNavigation({
-    enabled: !isAnyModalOpen,
+    enabled: !isAnyModalOpen && isTvMode,
     activePane,
     setActivePane,
     channelCount: filteredChannels.length,
@@ -2146,6 +2233,13 @@ export default function KeoTVHome() {
             >
               <Star className={`w-5 h-5 ${activeChannel?.is_favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
             </button>
+            <button
+              onClick={handleToggleOrientation}
+              className="p-1.5 text-slate-400 hover:text-sky-300 transition"
+              title="Passer en mode paysage (TV)"
+            >
+              <RotateCw className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
@@ -2404,9 +2498,411 @@ export default function KeoTVHome() {
       )}
 
       {/* ============================================================== */}
-      {/* 2. TV / LANDSCAPE VIEW (Android TV 16:9, Tablets, Monitors)   */}
+      {/* 2. MOBILE LANDSCAPE VIEW (Widescreen TV-inspired for Phones)   */}
       {/* ============================================================== */}
-      {!isPortraitMobile && (
+      {isLandscapeMobile && (
+        <div className="flex h-full w-full bg-tv-bg overflow-hidden select-none">
+          {/* A. Ultra-compact TV-style Sidebar (48px) */}
+          <div className="w-12 bg-tv-surface border-r border-tv-border flex flex-col items-center py-2 justify-between flex-shrink-0 z-20">
+            {/* KeoTV mini logo */}
+            <div className="flex flex-col items-center mb-1">
+              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-sky-600 to-tv-accent flex items-center justify-center shadow-md shadow-sky-500/20">
+                <Tv className="w-4 h-4 text-white" />
+              </div>
+            </div>
+
+            {/* Navigation Icons (Direct, Films, Séries, Favoris, Recherche) */}
+            <div className="flex-1 flex flex-col items-center space-y-1.5 w-full px-1 justify-center">
+              <button
+                onClick={() => handleSelectSection('live')}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition ${
+                  activeSection === 'live'
+                    ? 'bg-tv-focus text-white ring-1 ring-tv-accent shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-tv-card/50'
+                }`}
+                title="Direct"
+              >
+                <Tv className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => handleSelectSection('vod')}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition ${
+                  activeSection === 'vod'
+                    ? 'bg-purple-600 text-white ring-1 ring-purple-400 shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-tv-card/50'
+                }`}
+                title="Films (VOD)"
+              >
+                <Film className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => handleSelectSection('series')}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition ${
+                  activeSection === 'series'
+                    ? 'bg-pink-600 text-white ring-1 ring-pink-400 shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-tv-card/50'
+                }`}
+                title="Séries"
+              >
+                <Clapperboard className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => handleSelectSection('fav')}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition ${
+                  activeSection === 'fav'
+                    ? 'bg-amber-500 text-white ring-1 ring-amber-300 shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-tv-card/50'
+                }`}
+                title="Favoris"
+              >
+                <Star className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => setIsSearchModalOpen(true)}
+                className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-tv-accent hover:bg-tv-card/50 transition"
+                title="Rechercher"
+              >
+                <Search className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Bottom: Settings & Orientation Toggle */}
+            <div className="flex flex-col items-center space-y-1.5 w-full px-1 pt-1 border-t border-tv-border/50">
+              <button
+                onClick={() => setIsSettingsModalOpen(true)}
+                className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-tv-accent hover:bg-tv-card/50 transition"
+                title="Paramètres"
+              >
+                <Settings className="w-4 h-4 text-tv-accent" />
+              </button>
+
+              <button
+                onClick={handleToggleOrientation}
+                className="w-9 h-9 rounded-lg flex items-center justify-center text-slate-400 hover:text-sky-300 hover:bg-tv-card/50 transition"
+                title="Passer en mode portrait"
+              >
+                <Smartphone className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+
+          {/* B. Center Pane: Channel / Bouquet List */}
+          <div className="flex-1 min-w-[260px] border-r border-tv-border flex flex-col bg-tv-bg overflow-hidden">
+            {/* Top Bar of Channel list */}
+            <div className="px-2.5 py-1.5 bg-tv-surface border-b border-tv-border flex items-center justify-between flex-shrink-0">
+              <button
+                onClick={() => setIsCategoryModalOpen(true)}
+                className="flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-left transition min-w-0 mr-2 max-w-[200px]"
+                title="Changer de bouquet"
+              >
+                <Layers className="w-3.5 h-3.5 text-tv-accent flex-shrink-0" />
+                <span className="text-xs font-bold text-white truncate">
+                  {selectedCategory?.name || 'Groupes'}
+                </span>
+                <span className="text-[10px] text-slate-400 font-mono flex-shrink-0">
+                  ({filteredChannels.length})
+                </span>
+                <ChevronDown className="w-3 h-3 text-slate-400 ml-0.5 flex-shrink-0" />
+              </button>
+
+              {/* Sort buttons */}
+              <div className="flex items-center space-x-0.5 bg-black/40 p-0.5 rounded-md border border-white/5 text-[9px] flex-shrink-0">
+                <button
+                  onClick={() => handleChannelSortChange('playlist')}
+                  className={`px-1.5 py-0.5 rounded font-semibold ${
+                    channelSort === 'playlist' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Ordre Playlist"
+                >
+                  Playlist
+                </button>
+                <button
+                  onClick={() => handleChannelSortChange('alpha')}
+                  className={`px-1.5 py-0.5 rounded font-semibold ${
+                    channelSort === 'alpha' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="A-Z"
+                >
+                  A-Z
+                </button>
+                <button
+                  onClick={() => handleChannelSortChange('num')}
+                  className={`px-1.5 py-0.5 rounded font-semibold ${
+                    channelSort === 'num' ? 'bg-tv-focus text-white' : 'text-slate-400 hover:text-white'
+                  }`}
+                  title="Numéro"
+                >
+                  N°
+                </button>
+              </div>
+            </div>
+
+            {/* Horizontal category chips bar for rapid 1-tap switching */}
+            <div className="flex items-center space-x-1.5 px-2.5 py-1 bg-tv-surface/40 border-b border-tv-border overflow-x-auto scrollbar-none flex-shrink-0">
+              {sortedCategories.map((cat, idx) => {
+                const isSelected = selectedCategory?.id === cat.id;
+                return (
+                  <button
+                    key={cat.id}
+                    onClick={() => handleSelectCategory(cat, idx, true)}
+                    className={`flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap transition-all ${
+                      isSelected
+                        ? 'bg-tv-focus text-white shadow-sm'
+                        : 'bg-tv-card text-slate-400 hover:text-white border border-tv-border/60'
+                    }`}
+                  >
+                    <span>{cat.name}</span>
+                    {cat.count > 0 && <span className="text-[9px] opacity-75 font-mono">({cat.count})</span>}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Scrollable channels list */}
+            <div className="flex-1 overflow-y-auto px-2 py-1.5 space-y-1">
+              {isLoadingCategory ? (
+                <div className="py-12 flex flex-col items-center justify-center text-center space-y-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-tv-accent" />
+                  <p className="text-xs text-slate-300 font-semibold">Chargement des flux...</p>
+                </div>
+              ) : filteredChannels.length === 0 ? (
+                <div className="py-10 flex flex-col items-center justify-center text-center space-y-2 px-3">
+                  <AlertCircle className="w-6 h-6 text-sky-400" />
+                  <p className="text-xs font-bold text-white">Aucun flux dans ce bouquet</p>
+                  <button
+                    onClick={() => handleResyncPlaylist()}
+                    disabled={isResyncing}
+                    className="px-3 py-1 bg-tv-focus hover:bg-sky-500 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1.5 shadow"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isResyncing ? 'animate-spin' : ''}`} />
+                    <span>Recharger</span>
+                  </button>
+                </div>
+              ) : (
+                filteredChannels.map((ch, idx) => {
+                  const isActive = activeChannel?.id === ch.id;
+                  const chEpg = getMockEpgForChannel(ch.id);
+                  const isVodOrSeries =
+                    ch.stream_type === 'vod' ||
+                    ch.stream_type === 'series' ||
+                    activeSection === 'vod' ||
+                    activeSection === 'series';
+
+                  return (
+                    <div
+                      key={ch.id}
+                      onClick={() => {
+                        setFocusedChannelIndex(idx);
+                        handleSelectChannel(ch, false);
+                      }}
+                      className={`flex items-center justify-between p-2 rounded-lg border transition cursor-pointer ${
+                        isActive
+                          ? 'bg-tv-card border-tv-accent shadow-md text-white'
+                          : 'bg-tv-card/50 border-tv-border/50 text-slate-300 hover:bg-tv-cardHover'
+                      }`}
+                    >
+                      <div className="flex items-center space-x-2.5 min-w-0 flex-1">
+                        <span
+                          className={`text-xs font-mono font-bold w-5 text-right flex-shrink-0 ${
+                            isActive ? 'text-tv-accent' : 'text-slate-500'
+                          }`}
+                        >
+                          {ch.num}
+                        </span>
+                        <div
+                          className={`${
+                            isVodOrSeries ? 'w-8 h-11' : 'w-8 h-8'
+                          } rounded-md bg-black/40 border border-white/5 flex items-center justify-center flex-shrink-0 overflow-hidden`}
+                        >
+                          {ch.logo ? (
+                            <img
+                              src={ch.logo}
+                              alt={ch.name}
+                              className={`w-full h-full ${
+                                isVodOrSeries ? 'object-cover' : 'object-contain p-0.5'
+                              }`}
+                              onError={(e) => {
+                                (e.target as HTMLElement).style.display = 'none';
+                              }}
+                            />
+                          ) : isVodOrSeries ? (
+                            <Film className="w-4 h-4 text-slate-500" />
+                          ) : (
+                            <span className="text-[10px] font-bold text-slate-400">
+                              {ch.name.slice(0, 3)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-center space-x-1.5">
+                            <h4 className="text-xs font-semibold truncate text-white">
+                              {ch.name}
+                            </h4>
+                            {ch.resolution && (
+                              <span className="text-[8px] bg-sky-500/10 text-tv-accent border border-sky-500/20 px-1 rounded font-bold font-mono">
+                                {ch.resolution}
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-slate-400 truncate mt-0.5">
+                            {isVodOrSeries
+                              ? ch.group_name || 'VOD'
+                              : chEpg.current.title}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleToggleFavorite(ch);
+                        }}
+                        className="p-1.5 text-slate-400 hover:text-amber-400 flex-shrink-0 ml-1"
+                        title={ch.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+                      >
+                        <Star className={`w-3.5 h-3.5 ${ch.is_favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* C. Right Pane: Video Player + Program Details Card */}
+          <div className="w-[320px] md:w-[360px] lg:w-[400px] flex flex-col bg-tv-surface/60 border-l border-tv-border overflow-y-auto flex-shrink-0">
+            {/* 1. Live Video Player (Aspect 16:9) */}
+            <div
+              className={`bg-black flex-shrink-0 transition-all ${
+                isFullscreen
+                  ? 'fixed inset-0 z-50 w-screen h-screen'
+                  : 'w-full aspect-video relative rounded-lg overflow-hidden border border-white/10 shadow-lg'
+              }`}
+            >
+              <LiveVideoPlayer
+                channel={activeChannel}
+                currentEpg={currentEpg}
+                nextEpg={nextEpg}
+                isFullscreen={isFullscreen}
+                onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
+                isStopped={isStopped}
+                onTogglePlayStop={() => setIsStopped(!isStopped)}
+              />
+            </div>
+
+            {/* 2. Channel & Program Details Info */}
+            <div className="flex-1 p-2.5 flex flex-col justify-between">
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <div className="flex items-center space-x-1.5 min-w-0 mr-2">
+                    {activeChannel?.num && (
+                      <span className="text-xs font-mono font-bold text-tv-accent">
+                        #{activeChannel.num}
+                      </span>
+                    )}
+                    <h3 className="text-sm font-bold text-white truncate">
+                      {activeChannel?.name || 'Aucune chaîne sélectionnée'}
+                    </h3>
+                  </div>
+                  {activeChannel?.resolution && (
+                    <span className="text-[9px] bg-sky-500/10 text-tv-accent border border-sky-500/20 px-1.5 py-0.5 rounded font-bold font-mono flex-shrink-0">
+                      {activeChannel.resolution}
+                    </span>
+                  )}
+                </div>
+
+                {/* EPG / Program Title */}
+                <p className="text-xs font-semibold text-slate-200 truncate">
+                  {currentEpg?.title || 'Flux en direct'}
+                </p>
+
+                {/* Progress bar */}
+                {currentEpg && currentEpg.start && currentEpg.end && (
+                  <div className="mt-1.5">
+                    <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
+                      <div
+                        className="bg-tv-accent h-1 rounded-full transition-all"
+                        style={{ width: `${Math.min(100, Math.max(5, getEpgProgressPercent(currentEpg)))}%` }}
+                      />
+                    </div>
+                    <div className="flex justify-between text-[9px] text-slate-400 font-mono mt-0.5">
+                      <span>{currentEpg.start}</span>
+                      <span>{currentEpg.end}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Next program */}
+                {nextEpg && (
+                  <div className="mt-2 text-[11px] text-slate-400">
+                    <span className="text-slate-500 font-semibold mr-1">À suivre :</span>
+                    <span className="text-slate-300 font-medium truncate">{nextEpg.title}</span>
+                    <span className="text-slate-500 font-mono text-[10px] ml-1">({nextEpg.start})</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons Toolbar */}
+              <div className="flex items-center space-x-1.5 pt-2 border-t border-tv-border/40 mt-2 flex-shrink-0">
+                <button
+                  onClick={() => setIsFullscreen(true)}
+                  className="flex-1 py-1.5 px-2 rounded-lg bg-tv-focus hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center space-x-1.5 shadow-md transition"
+                  title="Plein écran"
+                >
+                  <Maximize className="w-3.5 h-3.5" />
+                  <span>Plein écran</span>
+                </button>
+
+                <button
+                  onClick={() => activeChannel && handleToggleFavorite(activeChannel)}
+                  className={`p-1.5 rounded-lg border transition ${
+                    activeChannel?.is_favorite
+                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                      : 'bg-tv-card text-slate-400 hover:text-white border-tv-border'
+                  }`}
+                  title={activeChannel?.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+                >
+                  <Star className={`w-4 h-4 ${activeChannel?.is_favorite ? 'fill-amber-400 text-amber-400' : ''}`} />
+                </button>
+
+                <button
+                  onClick={() => setIsStopped(!isStopped)}
+                  className={`p-1.5 rounded-lg border transition ${
+                    isStopped
+                      ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
+                      : 'bg-rose-500/10 text-rose-400 border-rose-500/20 hover:bg-rose-500/20'
+                  }`}
+                  title={isStopped ? 'Reprendre' : 'Pause'}
+                >
+                  {isStopped ? <Play className="w-4 h-4 fill-emerald-400" /> : <Square className="w-4 h-4 fill-rose-400" />}
+                </button>
+
+                {activeChannel && (
+                  <button
+                    onClick={() => {
+                      setContextMenuItem(activeChannel);
+                      setContextMenuCategory(null);
+                      setIsContextMenuOpen(true);
+                    }}
+                    className="p-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover text-slate-300 hover:text-white border border-tv-border transition"
+                    title="Options"
+                  >
+                    <Sliders className="w-4 h-4" />
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================== */}
+      {/* 3. TV / DESKTOP VIEW (Android TV 16:9, Monitors, Large Screens) */}
+      {/* ============================================================== */}
+      {isTvMode && (
         <div className="flex flex-col h-full w-full">
           <TopBar
             currentCategoryName={selectedCategory?.name}
