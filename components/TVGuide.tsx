@@ -102,9 +102,9 @@ const CategoryRow = React.memo<CategoryRowProps>(
         type="button"
         id={`category-item-${index}`}
         onClick={() => onSelect(category, index)}
-        className={`flex items-center justify-between px-3 py-2.5 mx-2 my-0.5 rounded-xl text-left text-sm border cursor-pointer select-none ${
+        className={`flex items-center justify-between px-3 py-2.5 mx-2 my-0.5 rounded-xl text-left text-sm border cursor-pointer select-none outline-none ${
           isFocused
-            ? 'bg-tv-focus border-tv-accent text-white font-black ring-2 ring-tv-accent ring-offset-1 ring-offset-tv-bg z-10'
+            ? 'bg-tv-focus border-white text-white font-black ring-4 ring-white z-10 shadow-lg scale-[1.02] transition-transform duration-75'
             : isSelected
             ? 'bg-tv-card/90 text-tv-accent font-bold border-l-4 border-tv-accent pl-2.5 shadow-sm'
             : 'text-slate-300 hover:bg-tv-cardHover/70 border-transparent hover:text-white'
@@ -220,9 +220,9 @@ const ChannelRow = React.memo<ChannelRowProps>(
         onMouseDown={handlePressStart}
         onMouseUp={handlePressEnd}
         onMouseLeave={handlePressEnd}
-        className={`flex items-center justify-between px-3.5 py-2 mx-2 my-0.5 rounded-xl cursor-pointer border select-none ${
+        className={`flex items-center justify-between px-3.5 py-2 mx-2 my-0.5 rounded-xl cursor-pointer border select-none outline-none ${
           isFocused
-            ? 'bg-tv-focus border-tv-accent text-white font-bold ring-2 ring-tv-accent ring-offset-1 ring-offset-tv-bg z-10'
+            ? 'bg-tv-focus border-white text-white font-bold ring-4 ring-white z-10 shadow-lg scale-[1.02] transition-transform duration-75'
             : isActive
             ? 'bg-tv-card border-tv-accent/50 text-slate-100'
             : 'bg-tv-card/40 border-transparent hover:bg-tv-cardHover/50 text-slate-300'

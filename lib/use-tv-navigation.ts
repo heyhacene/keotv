@@ -95,8 +95,8 @@ export function useTVNavigation({
         return true;
       }
 
-      // Ignore rapid switch debounce chatter < 70ms
-      if (elapsed < 70) {
+      // Ignore rapid switch debounce chatter < 40ms for faster scrolling
+      if (elapsed < 40) {
         return false;
       }
 
@@ -123,7 +123,7 @@ export function useTVNavigation({
             onJumpToChannelNumber(channelNum);
           }
           numberBufferRef.current = '';
-        }, 900);
+        }, 600);
         return;
       }
 
