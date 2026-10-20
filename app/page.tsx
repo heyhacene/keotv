@@ -501,7 +501,7 @@ export default function KeoTVHome() {
             for (const s of mergedSeries) {
               countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
-            for (const [gid, cnt] of countsByGroup.entries()) {
+            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
               await db.categories.update(gid, { count: cnt });
             }
             setCategories((prev) =>

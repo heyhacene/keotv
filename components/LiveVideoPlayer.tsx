@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { Channel, EpgProgram } from '@/types/iptv';
-import { Maximize2, Minimize2, Volume2, VolumeX, Radio, Clock, Sparkles, Square, Play } from 'lucide-react';
+import { Maximize2, Minimize2, Volume2, VolumeX, Radio, Clock, Sparkles, Square, Play, FastForward, Rewind } from 'lucide-react';
 import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
 
 interface LiveVideoPlayerProps {
@@ -175,6 +175,14 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
     }
   };
 
+  const skipTime = (delta: number, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (videoRef.current) {
+      videoRef.current.currentTime += delta;
+      triggerOsd();
+    }
+  };
+
   const triggerOsd = () => {
     setShowOsd(true);
     if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
@@ -296,6 +304,28 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
             )}
           </button>
 
+          {/* Rewind Button (VOD/Series only) */}
+          {!isStopped && channel?.stream_type !== 'live' && (
+            <button
+              onClick={(e) => skipTime(-10, e)}
+              className="p-1.5 text-slate-200 hover:text-white hover:bg-white/10 rounded transition"
+              title="Reculer de 10s"
+            >
+              <Rewind className="w-4 h-4 text-tv-accent" />
+            </button>
+          )}
+
+          {/* Fast Forward Button (VOD/Series only) */}
+          {!isStopped && channel?.stream_type !== 'live' && (
+            <button
+              onClick={(e) => skipTime(10, e)}
+              className="p-1.5 text-slate-200 hover:text-white hover:bg-white/10 rounded transition"
+              title="Avancer de 10s"
+            >
+              <FastForward className="w-4 h-4 text-tv-accent" />
+            </button>
+          )}
+
           {/* Mute Button */}
           {!isStopped && (
             <button
@@ -341,6 +371,17 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
                 {new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
               </span>
 
+              {/* Rewind Button in fullscreen (VOD/Series only) */}
+              {!isStopped && channel?.stream_type !== 'live' && (
+                <button
+                  onClick={(e) => skipTime(-10, e)}
+                  className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"
+                  title="Reculer de 10s"
+                >
+                  <Rewind className="w-5 h-5 text-tv-accent" />
+                </button>
+              )}
+
               {/* Stop in fullscreen */}
               <button
                 onClick={toggleStopPlay}
@@ -349,6 +390,17 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
               >
                 {isStopped ? <Play className="w-5 h-5 fill-white" /> : <Square className="w-5 h-5 fill-rose-400 text-rose-400" />}
               </button>
+
+              {/* Fast Forward Button in fullscreen (VOD/Series only) */}
+              {!isStopped && channel?.stream_type !== 'live' && (
+                <button
+                  onClick={(e) => skipTime(10, e)}
+                  className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"
+                  title="Avancer de 10s"
+                >
+                  <FastForward className="w-5 h-5 text-tv-accent" />
+                </button>
+              )}
 
               <button
                 onClick={onToggleFullscreen}

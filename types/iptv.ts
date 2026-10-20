@@ -14,6 +14,7 @@ export interface Channel {
   resolution?: string; // '4K' | 'FHD' | 'HD' | 'SD'
   is_adult?: boolean;
   is_separator?: boolean;
+  type?: string;
 }
 
 export interface Category {

@@ -744,6 +744,22 @@ public class PlayerActivity extends AppCompatActivity {
                 return true;
             }
 
+            // Fast Forward / Rewind for VODs
+            if (!isLive) {
+                if (key == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    long currentPos = player.getCurrentPosition();
+                    player.seekTo(currentPos + 10000);
+                    showOsd();
+                    return true;
+                }
+                if (key == KeyEvent.KEYCODE_MEDIA_REWIND || key == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    long currentPos = player.getCurrentPosition();
+                    player.seekTo(Math.max(0, currentPos - 10000));
+                    showOsd();
+                    return true;
+                }
+            }
+
             // Toggle Pause/Play on Media buttons
             if (key == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || key == KeyEvent.KEYCODE_MEDIA_PLAY || key == KeyEvent.KEYCODE_MEDIA_PAUSE) {
                 if (player.isPlaying()) {
