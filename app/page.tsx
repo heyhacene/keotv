@@ -1377,6 +1377,23 @@ export default function KeoTVHome() {
     [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession]
   );
 
+  // Next / Previous Channel Switchers (for mobile gestures and on-screen controls)
+  const handleNextChannel = useCallback(() => {
+    if (filteredChannels.length === 0) return;
+    const currentIndex = activeChannel ? filteredChannels.findIndex((c) => c.id === activeChannel.id) : -1;
+    const nextIndex = currentIndex < filteredChannels.length - 1 ? currentIndex + 1 : 0;
+    setFocusedChannelIndex(nextIndex);
+    handleSelectChannel(filteredChannels[nextIndex]);
+  }, [filteredChannels, activeChannel, handleSelectChannel]);
+
+  const handlePreviousChannel = useCallback(() => {
+    if (filteredChannels.length === 0) return;
+    const currentIndex = activeChannel ? filteredChannels.findIndex((c) => c.id === activeChannel.id) : -1;
+    const prevIndex = currentIndex > 0 ? currentIndex - 1 : filteredChannels.length - 1;
+    setFocusedChannelIndex(prevIndex);
+    handleSelectChannel(filteredChannels[prevIndex]);
+  }, [filteredChannels, activeChannel, handleSelectChannel]);
+
   // Jump directly to channel by number
   const handleJumpToChannelNumber = useCallback(
     (channelNum: number) => {
@@ -2186,6 +2203,8 @@ export default function KeoTVHome() {
             onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
             isStopped={isStopped}
             onTogglePlayStop={() => setIsStopped(!isStopped)}
+            onNextChannel={handleNextChannel}
+            onPreviousChannel={handlePreviousChannel}
           />
         </div>
 
@@ -2790,6 +2809,8 @@ export default function KeoTVHome() {
                 onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
                 isStopped={isStopped}
                 onTogglePlayStop={() => setIsStopped(!isStopped)}
+                onNextChannel={handleNextChannel}
+                onPreviousChannel={handlePreviousChannel}
               />
             </div>
 
