@@ -204,7 +204,8 @@ public class PlayerActivity extends AppCompatActivity {
         btn.setTypeface(Typeface.DEFAULT_BOLD);
         btn.setPadding(dp(14), dp(8), dp(14), dp(8));
         btn.setFocusable(true);
-        btn.setFocusableInTouchMode(true);
+        btn.setFocusableInTouchMode(false);
+        btn.setClickable(true);
         btn.setGravity(Gravity.CENTER);
 
         GradientDrawable bg = new GradientDrawable();
@@ -429,7 +430,8 @@ public class PlayerActivity extends AppCompatActivity {
         skipIntroBtn.setTypeface(Typeface.DEFAULT_BOLD);
         skipIntroBtn.setPadding(dp(20), dp(10), dp(20), dp(10));
         skipIntroBtn.setFocusable(true);
-        skipIntroBtn.setFocusableInTouchMode(true);
+        skipIntroBtn.setFocusableInTouchMode(false);
+        skipIntroBtn.setClickable(true);
 
         GradientDrawable skipIntroBg = new GradientDrawable();
         skipIntroBg.setColor(Color.parseColor("#E60F172A"));
@@ -497,7 +499,8 @@ public class PlayerActivity extends AppCompatActivity {
         btnPlayNextNow.setTypeface(Typeface.DEFAULT_BOLD);
         btnPlayNextNow.setPadding(dp(16), dp(10), dp(16), dp(10));
         btnPlayNextNow.setFocusable(true);
-        btnPlayNextNow.setFocusableInTouchMode(true);
+        btnPlayNextNow.setFocusableInTouchMode(false);
+        btnPlayNextNow.setClickable(true);
         GradientDrawable playBg = new GradientDrawable();
         playBg.setColor(Color.parseColor("#0284C7"));
         playBg.setCornerRadius(dp(10));
@@ -524,7 +527,8 @@ public class PlayerActivity extends AppCompatActivity {
         btnCancelNext.setTypeface(Typeface.DEFAULT_BOLD);
         btnCancelNext.setPadding(dp(16), dp(10), dp(16), dp(10));
         btnCancelNext.setFocusable(true);
-        btnCancelNext.setFocusableInTouchMode(true);
+        btnCancelNext.setFocusableInTouchMode(false);
+        btnCancelNext.setClickable(true);
         GradientDrawable cancelBg = new GradientDrawable();
         cancelBg.setColor(Color.parseColor("#334155"));
         cancelBg.setCornerRadius(dp(10));
