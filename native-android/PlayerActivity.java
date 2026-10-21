@@ -834,7 +834,6 @@ public class PlayerActivity extends AppCompatActivity {
         trackIndices.add(-1);
 
         int selectedIndex = 0;
-        boolean isDisabled = player.getTrackSelectionParameters().isTrackTypeDisabled(C.TRACK_TYPE_TEXT);
 
         for (Tracks.Group group : tracks.getGroups()) {
             if (group.getType() == C.TRACK_TYPE_TEXT) {
@@ -847,7 +846,7 @@ public class PlayerActivity extends AppCompatActivity {
                     String label = format.label != null && !format.label.isEmpty() ? format.label : "Sous-titre " + trackNames.size();
                     trackNames.add(label + " [" + lang + "]");
 
-                    if (!isDisabled && group.isTrackSelected(i)) {
+                    if (group.isTrackSelected(i)) {
                         selectedIndex = trackNames.size() - 1;
                     }
                 }
