@@ -18,6 +18,7 @@ import {
   Sliders,
   Check,
 } from 'lucide-react';
+import { ParentalPinModal } from './ParentalPinModal';
 
 interface CategoryManagerModalProps {
   isOpen: boolean;
@@ -26,6 +27,8 @@ interface CategoryManagerModalProps {
   onUpdateCategory: (catId: string, updates: Partial<Category>) => Promise<void>;
   onReorderCategories: (reordered: Category[]) => Promise<void>;
   onResetOrder?: () => Promise<void>;
+  parentalPin?: string;
+  parentalEnabled?: boolean;
 }
 
 export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
@@ -35,6 +38,8 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
   onUpdateCategory,
   onReorderCategories,
   onResetOrder,
+  parentalPin = '0000',
+  parentalEnabled = false,
 }) => {
   const [activeTab, setActiveTab] = useState<'live' | 'vod' | 'series'>('live');
   const [searchQuery, setSearchQuery] = useState('');
@@ -110,11 +115,33 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
     await onUpdateCategory(cat.id, { is_hidden: nextHidden });
   };
 
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const pendingActionRef = useRef<(() => void) | null>(null);
+
+  const requirePin = (action: () => void) => {
+    if (parentalEnabled) {
+      pendingActionRef.current = action;
+      setIsPinModalOpen(true);
+    } else {
+      action();
+    }
+  };
+
+  const handlePinSuccess = () => {
+    setIsPinModalOpen(false);
+    if (pendingActionRef.current) {
+      pendingActionRef.current();
+      pendingActionRef.current = null;
+    }
+  };
+
   const handleToggleAdult = async (cat: Category) => {
-    const nextAdult = !cat.is_adult;
-    const nextAll = localCategories.map((c) => (c.id === cat.id ? { ...c, is_adult: nextAdult } : c));
-    setLocalCategories(nextAll);
-    await onUpdateCategory(cat.id, { is_adult: nextAdult });
+    requirePin(async () => {
+      const nextAdult = !cat.is_adult;
+      const nextAll = localCategories.map((c) => (c.id === cat.id ? { ...c, is_adult: nextAdult } : c));
+      setLocalCategories(nextAll);
+      await onUpdateCategory(cat.id, { is_adult: nextAdult });
+    });
   };
 
   // TV Remote controls
@@ -183,13 +210,16 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
+    if (!isPinModalOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, displayedCategories, focusedIndex, focusedAction, onClose]);
+  }, [isOpen, isPinModalOpen, displayedCategories, focusedIndex, focusedAction, onClose]);
 
   if (!isOpen) return null;
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-2 sm:p-6 animate-in fade-in duration-150">
       <div className="w-full max-w-3xl bg-tv-surface border border-tv-border rounded-3xl shadow-2xl flex flex-col h-[90vh] overflow-hidden text-slate-100">
         {/* Header */}
@@ -428,5 +458,12 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
         </div>
       </div>
     </div>
+      <ParentalPinModal
+        isOpen={isPinModalOpen}
+        onClose={() => setIsPinModalOpen(false)}
+        onSuccess={handlePinSuccess}
+        correctPin={parentalPin}
+      />
+    </>
   );
 };

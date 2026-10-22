@@ -3082,6 +3082,8 @@ export default function KeoTVHome() {
         onUpdateCategory={handleUpdateCategory}
         onReorderCategories={handleReorderCategories}
         onResetOrder={handleResetCategoryOrder}
+        parentalPin={parentalPin}
+        parentalEnabled={parentalEnabled}
       />
 
       {/* Parental PIN Verification Modal */}
