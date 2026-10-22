@@ -23,6 +23,7 @@ import {
 } from 'lucide-react';
 import { PlaylistConfig } from '@/types/iptv';
 import { submitAppFeedback } from '@/lib/supabase';
+import { ParentalPinModal } from "./ParentalPinModal";
 import { checkForAppUpdate, AppUpdateInfo, CURRENT_BUILD_NUMBER, DOWNLOADER_CODE, DIRECT_APK_URL } from '@/lib/update-service';
 
 interface SettingsModalProps {
@@ -101,8 +102,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
+
   const [editingPin, setEditingPin] = useState(parentalPin);
   const [pinSavedFeedback, setPinSavedFeedback] = useState(false);
+
+  const [isPinModalOpen, setIsPinModalOpen] = useState(false);
+  const pendingActionRef = useRef<(() => void) | null>(null);
+
+  const requirePin = (action: () => void) => {
+    if (parentalEnabled) {
+      pendingActionRef.current = action;
+      setIsPinModalOpen(true);
+    } else {
+      action();
+    }
+  };
+
+  const handlePinSuccess = () => {
+    setIsPinModalOpen(false);
+    if (pendingActionRef.current) {
+      pendingActionRef.current();
+      pendingActionRef.current = null;
+    }
+  };
+
 
   // TV Remote & Zapping configurable settings
   const [zappingMode, setZappingMode] = useState<'direct' | 'banner'>('direct');
@@ -186,6 +209,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (!isOpen) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isPinModalOpen) return;
       const keyCode = (e as any).keyCode || 0;
       const key = e.key || '';
 
@@ -364,7 +388,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     };
   }, [isOpen, focusArea, selectedTabNavIndex, contentFocusIndex, getContentFocusableElements, onClose]);
 
-  if (!isOpen) return null;
+  if (!isOpen && !isPinModalOpen) return null;
 
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true);
@@ -408,8 +432,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  if (!isOpen) return null;
+
   return (
-    <div className="fixed inset-0 z-50 bg-[#080c14] text-slate-100 flex flex-col w-full h-full animate-in fade-in duration-150 select-none">
+    <>
+    <div className={`fixed inset-0 z-50 bg-[#080c14] text-slate-100 flex flex-col w-full h-full animate-in fade-in duration-150 select-none ${isPinModalOpen ? 'hidden' : ''}`}>
       <div className="w-full h-full bg-[#080c14] text-slate-100 flex flex-col">
         {/* Full-Screen TV Header */}
         <div className="flex items-center justify-between px-8 md:px-12 py-5 border-b border-tv-border/80 bg-tv-card/80 flex-shrink-0">
@@ -679,8 +706,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      onClose();
-                      onOpenCategoryManager();
+                      requirePin(() => {
+                        onClose();
+                        onOpenCategoryManager();
+                      });
                     }}
                     className="px-5 py-3 rounded-xl bg-tv-accent text-slate-950 font-black text-xs hover:bg-sky-400 transition flex items-center justify-center space-x-2 shadow-lg shadow-sky-500/20 flex-shrink-0"
                   >
@@ -767,7 +796,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => onToggleParentalEnabled && onToggleParentalEnabled(!parentalEnabled)}
+                  onClick={() => { requirePin(() => { if (onToggleParentalEnabled) { onToggleParentalEnabled(!parentalEnabled); } }); }}
                   className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
                     parentalEnabled ? 'bg-tv-accent justify-end' : 'bg-slate-700 justify-start'
                   }`}
@@ -786,7 +815,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
                 <button
                   type="button"
-                  onClick={() => onToggleParentalHideAdult && onToggleParentalHideAdult(!parentalHideAdult)}
+                  onClick={() => { requirePin(() => { if (onToggleParentalHideAdult) { onToggleParentalHideAdult(!parentalHideAdult); } }); }}
                   className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
                     parentalHideAdult ? 'bg-tv-accent justify-end' : 'bg-slate-700 justify-start'
                   }`}
@@ -816,13 +845,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     disabled={editingPin.length !== 4}
-                    onClick={() => {
-                      if (onUpdateParentalPin) {
-                        onUpdateParentalPin(editingPin);
-                        setPinSavedFeedback(true);
-                        setTimeout(() => setPinSavedFeedback(false), 2500);
-                      }
-                    }}
+                    onClick={() => { requirePin(() => { if (onUpdateParentalPin) { onUpdateParentalPin(editingPin); setPinSavedFeedback(true); setTimeout(() => setPinSavedFeedback(false), 2500); } }); }}
                     className="px-4 py-2 rounded-xl bg-tv-focus text-white text-xs font-bold hover:bg-sky-500 transition disabled:opacity-40"
                   >
                     Enregistrer le PIN
@@ -1478,5 +1501,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
       </div>
     </div>
+      <ParentalPinModal
+        isOpen={isPinModalOpen}
+        onClose={() => setIsPinModalOpen(false)}
+        onSuccess={handlePinSuccess}
+        correctPin={parentalPin}
+      />
+    </>
   );
 };
