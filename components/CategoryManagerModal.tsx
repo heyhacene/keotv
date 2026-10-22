@@ -240,7 +240,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition"
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition focus:ring-2 focus:ring-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:outline-none"
           >
             <X className="w-5 h-5" />
           </button>
@@ -305,7 +305,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
               <button
                 type="button"
                 onClick={onResetOrder}
-                className="px-3 py-1.5 rounded-xl border border-white/10 bg-tv-card hover:bg-tv-cardHover text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition"
+                className="px-3 py-1.5 rounded-xl border border-white/10 bg-tv-card hover:bg-tv-cardHover text-slate-300 text-xs font-semibold flex items-center space-x-1.5 transition focus:ring-2 focus:ring-sky-500 focus:outline-none"
                 title="Rétablir l'ordre d'origine de la playlist"
               >
                 <RotateCcw className="w-3 h-3 text-slate-400" />
@@ -451,7 +451,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-tv-accent text-slate-950 font-bold hover:bg-sky-400 transition"
+            className="px-4 py-2 rounded-xl bg-tv-accent text-slate-950 font-bold hover:bg-sky-400 transition focus:ring-2 focus:ring-sky-500 focus:outline-none"
           >
             Terminer
           </button>

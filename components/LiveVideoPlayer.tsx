@@ -3,7 +3,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import Hls from 'hls.js';
 import { Channel, EpgProgram } from '@/types/iptv';
-import { Maximize2, Minimize2, Volume2, VolumeX, Radio, Clock, Sparkles, Square, Play, FastForward, Rewind, SkipBack, SkipForward } from 'lucide-react';
+import { Maximize2, Minimize2, Volume2, VolumeX, Radio, Clock, Sparkles, Square, Play, FastForward, Rewind } from 'lucide-react';
 import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
 
 interface LiveVideoPlayerProps {
@@ -14,8 +14,6 @@ interface LiveVideoPlayerProps {
   onToggleFullscreen: () => void;
   isStopped?: boolean;
   onTogglePlayStop?: () => void;
-  onNextChannel?: () => void;
-  onPreviousChannel?: () => void;
 }
 
 export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
@@ -26,8 +24,6 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   onToggleFullscreen,
   isStopped: externalIsStopped,
   onTogglePlayStop: externalTogglePlayStop,
-  onNextChannel,
-  onPreviousChannel,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
@@ -39,49 +35,6 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   const [showOsd, setShowOsd] = useState<boolean>(true);
   const [streamError, setStreamError] = useState<string | null>(null);
   const osdTimerRef = useRef<NodeJS.Timeout | null>(null);
-
-  const touchStartY = useRef<number | null>(null);
-  const touchStartX = useRef<number | null>(null);
-  const [zapNotice, setZapNotice] = useState<string | null>(null);
-  const zapNoticeTimer = useRef<NodeJS.Timeout | null>(null);
-
-  const showZapFeedback = (text: string) => {
-    setZapNotice(text);
-    if (zapNoticeTimer.current) clearTimeout(zapNoticeTimer.current);
-    zapNoticeTimer.current = setTimeout(() => {
-      setZapNotice(null);
-    }, 1600);
-  };
-
-  const handleTouchStart = (e: React.TouchEvent) => {
-    if (e.touches.length > 0) {
-      touchStartY.current = e.touches[0].clientY;
-      touchStartX.current = e.touches[0].clientX;
-    }
-  };
-
-  const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartY.current === null || touchStartX.current === null || e.changedTouches.length === 0) return;
-    const deltaY = e.changedTouches[0].clientY - touchStartY.current;
-    const deltaX = e.changedTouches[0].clientX - touchStartX.current;
-
-    // Vertical swipe: change channel (Swipe up = next, swipe down = prev)
-    if (Math.abs(deltaY) > Math.abs(deltaX) && Math.abs(deltaY) > 35) {
-      if (deltaY < 0) {
-        if (onNextChannel) {
-          onNextChannel();
-          showZapFeedback('▲ Chaîne suivante');
-        }
-      } else {
-        if (onPreviousChannel) {
-          onPreviousChannel();
-          showZapFeedback('▼ Chaîne précédente');
-        }
-      }
-    }
-    touchStartY.current = null;
-    touchStartX.current = null;
-  };
 
   // On Android the stream is played by the native ExoPlayer (opened full screen), not by hls.js
   const [nativeMode, setNativeMode] = useState<boolean>(false);
@@ -261,8 +214,6 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   return (
     <div
       onClick={triggerOsd}
-      onTouchStart={handleTouchStart}
-      onTouchEnd={handleTouchEnd}
       className={`relative overflow-hidden bg-black transition-all duration-300 ${
         isFullscreen
           ? 'fixed inset-0 z-50 w-screen h-screen'
@@ -414,41 +365,11 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
                 {channel?.group_name || 'IPTV Direct'}
               </span>
             </div>
-            <div className="flex items-center space-x-3">
+            <div className="flex items-center space-x-4">
               <span className="text-slate-400 text-sm font-mono flex items-center">
                 <Clock className="w-4 h-4 mr-1.5 text-tv-accent" />
                 {new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
               </span>
-
-              {/* Previous Channel Button */}
-              {onPreviousChannel && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onPreviousChannel();
-                    showZapFeedback('▼ Chaîne précédente');
-                  }}
-                  className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition active:scale-95"
-                  title="Chaîne précédente (Glisser bas)"
-                >
-                  <SkipBack className="w-5 h-5 text-tv-accent" />
-                </button>
-              )}
-
-              {/* Next Channel Button */}
-              {onNextChannel && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onNextChannel();
-                    showZapFeedback('▲ Chaîne suivante');
-                  }}
-                  className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition active:scale-95"
-                  title="Chaîne suivante (Glisser haut)"
-                >
-                  <SkipForward className="w-5 h-5 text-tv-accent" />
-                </button>
-              )}
 
               {/* Rewind Button in fullscreen (VOD/Series only) */}
               {!isStopped && channel?.stream_type !== 'live' && (
@@ -481,15 +402,6 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
                 </button>
               )}
 
-              {/* Mute Button */}
-              <button
-                onClick={toggleMute}
-                className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"
-                title={isMuted ? 'Activer le son' : 'Couper le son'}
-              >
-                {isMuted ? <VolumeX className="w-5 h-5 text-rose-400" /> : <Volume2 className="w-5 h-5 text-emerald-400" />}
-              </button>
-
               <button
                 onClick={onToggleFullscreen}
                 className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"
@@ -499,16 +411,6 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
               </button>
             </div>
           </div>
-
-          {/* Centered Zap Feedback */}
-          {zapNotice && (
-            <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-40">
-              <div className="bg-black/90 backdrop-blur-md border border-tv-accent/50 rounded-2xl px-6 py-3 shadow-2xl flex flex-col items-center">
-                <span className="text-tv-accent text-sm font-bold tracking-wider">{zapNotice}</span>
-                <span className="text-white text-base font-bold mt-0.5">{channel?.name}</span>
-              </div>
-            </div>
-          )}
 
           {/* Bottom Info Banner */}
           <div className="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/95 via-black/80 to-transparent p-6 pt-16">

@@ -178,7 +178,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // TV Remote Navigation states
   const [focusArea, setFocusArea] = useState<'tabs' | 'content'>('tabs');
   const [selectedTabNavIndex, setSelectedTabNavIndex] = useState<number>(0); // 0..4 = tabs, 5 = close button
-  const [contentFocusIndex, setContentFocusIndex] = useState<number>(0);
+  const contentFocusIndexRef = useRef<number>(0);
   const modalBodyRef = useRef<HTMLDivElement | null>(null);
 
   // Helper to fetch all focusable interactive elements inside the active tab content
@@ -196,7 +196,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (isOpen) {
       setFocusArea('tabs');
       setSelectedTabNavIndex(0);
-      setContentFocusIndex(0);
+      contentFocusIndexRef.current = 0;
       const timer = setTimeout(() => {
         document.getElementById('settings-tab-0')?.focus();
       }, 100);
@@ -294,7 +294,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           const items = getContentFocusableElements();
           if (items.length > 0) {
             setFocusArea('content');
-            setContentFocusIndex(0);
+            contentFocusIndexRef.current = 0;
             items[0].focus();
             items[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
           }
@@ -310,7 +310,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             const items = getContentFocusableElements();
             if (items.length > 0) {
               setFocusArea('content');
-              setContentFocusIndex(0);
+              contentFocusIndexRef.current = 0;
               items[0].focus();
               items[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
             }
@@ -333,28 +333,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         if (isDown) {
           e.preventDefault();
-          setContentFocusIndex((prev) => {
-            const next = Math.min(items.length - 1, prev + 1);
+          const next = Math.min(items.length - 1, contentFocusIndexRef.current + 1);
             items[next]?.focus();
             items[next]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            return next;
-          });
+            contentFocusIndexRef.current = next;
           return;
         }
 
         if (isUp) {
           e.preventDefault();
-          if (contentFocusIndex === 0) {
+          if (contentFocusIndexRef.current === 0) {
             // Return to top tabs
             setFocusArea('tabs');
             document.getElementById(`settings-tab-${selectedTabNavIndex}`)?.focus();
           } else {
-            setContentFocusIndex((prev) => {
-              const next = Math.max(0, prev - 1);
-              items[next]?.focus();
-              items[next]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-              return next;
-            });
+            const next = Math.max(0, contentFocusIndexRef.current - 1);
+            items[next]?.focus();
+            items[next]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            contentFocusIndexRef.current = next;
           }
           return;
         }
@@ -362,17 +358,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         if (isLeft || isRight) {
           // Allow horizontal navigation between side-by-side buttons
           e.preventDefault();
-          setContentFocusIndex((prev) => {
-            const next = isLeft ? Math.max(0, prev - 1) : Math.min(items.length - 1, prev + 1);
+          const next = isLeft ? Math.max(0, contentFocusIndexRef.current - 1) : Math.min(items.length - 1, contentFocusIndexRef.current + 1);
             items[next]?.focus();
             items[next]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            return next;
-          });
+            contentFocusIndexRef.current = next;
           return;
         }
 
         if (isEnter) {
-          const current = items[contentFocusIndex];
+          const current = items[contentFocusIndexRef.current];
           if (current && current.tagName !== 'INPUT' && current.tagName !== 'TEXTAREA') {
             e.preventDefault();
             current.click();
@@ -386,7 +380,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [isOpen, focusArea, selectedTabNavIndex, contentFocusIndex, getContentFocusableElements, onClose]);
+  }, [isOpen, focusArea, selectedTabNavIndex, getContentFocusableElements, onClose]);
 
   if (!isOpen && !isPinModalOpen) return null;
 
@@ -519,7 +513,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     onClose();
                     onOpenXtreamModal();
                   }}
-                  className="px-4 py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 shadow-lg flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                  className="px-4 py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 shadow-lg flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none"
                 >
                   <PlusCircle className="w-4 h-4" />
                   <span>Ajouter une Playlist</span>
@@ -535,7 +529,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </p>
                     <button
                       onClick={onRestoreDemoPlaylist}
-                      className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                      className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none"
                     >
                       Restaurer la playlist de test gratuite
                     </button>
@@ -566,13 +560,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               onDeletePlaylist(pl.id);
                               setDeletingId(null);
                             }}
-                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold shadow-md transition focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-tv-surface"
+                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold shadow-md transition focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none"
                           >
                             Confirmer
                           </button>
                           <button
                             onClick={() => setDeletingId(null)}
-                            className="px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-slate-300 rounded-lg text-xs transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                            className="px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-slate-300 rounded-lg text-xs transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none"
                           >
                             Annuler
                           </button>
@@ -582,7 +576,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           {onEditPlaylist && (
                             <button
                               onClick={() => onEditPlaylist(pl)}
-                              className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                              className="p-2 text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:outline-none"
                               title="Modifier les paramètres de cette playlist"
                             >
                               <Pencil className="w-4 h-4" />
@@ -592,7 +586,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <button
                               onClick={() => onResyncPlaylist(pl)}
                               disabled={isResyncing}
-                              className="p-2 text-slate-400 hover:text-tv-accent hover:bg-sky-500/10 rounded-lg transition disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                              className="p-2 text-slate-400 hover:text-tv-accent hover:bg-sky-500/10 rounded-lg transition disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:outline-none"
                               title="Re-synchroniser et recharger les chaînes"
                             >
                               <RefreshCw className={`w-4 h-4 ${isResyncing ? 'animate-spin text-tv-accent' : ''}`} />
@@ -600,7 +594,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           )}
                           <button
                             onClick={() => setDeletingId(pl.id)}
-                            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-tv-surface"
+                            className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 rounded-lg transition focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:outline-none"
                             title="Supprimer cette playlist"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -668,7 +662,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       type="button"
                       onClick={onTriggerSilentRefresh}
                       disabled={isSilentRefreshing}
-                      className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-medium transition flex items-center space-x-1.5 focus:outline-none focus:ring-2 focus:ring-tv-accent disabled:opacity-50"
+                      className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-medium transition flex items-center space-x-1.5 focus:outline-none focus:ring-2 focus:ring-tv-accent disabled:opacity-50 focus:ring-2 focus:ring-sky-500 focus:outline-none"
                     >
                       <RefreshCw className={`w-3.5 h-3.5 ${isSilentRefreshing ? 'animate-spin text-tv-accent' : ''}`} />
                       <span>{isSilentRefreshing ? 'Actualisation...' : 'Actualiser maintenant'}</span>
@@ -711,7 +705,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         onOpenCategoryManager();
                       });
                     }}
-                    className="px-5 py-3 rounded-xl bg-tv-accent text-slate-950 font-black text-xs hover:bg-sky-400 transition flex items-center justify-center space-x-2 shadow-lg shadow-sky-500/20 flex-shrink-0"
+                    className="px-5 py-3 rounded-xl bg-tv-accent text-slate-950 font-black text-xs hover:bg-sky-400 transition flex items-center justify-center space-x-2 shadow-lg shadow-sky-500/20 flex-shrink-0 focus:ring-2 focus:ring-sky-500 focus:outline-none"
                   >
                     <Sliders className="w-4 h-4" />
                     <span>Gérer les bouquets</span>
@@ -824,42 +818,70 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </button>
               </div>
 
-              {/* PIN Code Configuration */}
-              <div className="bg-tv-card/60 border border-tv-border p-4 rounded-2xl space-y-3">
+              {/* PIN Code Configuration (TV Optimized) */}
+              <div className="bg-tv-card/60 border border-tv-border p-4 rounded-2xl space-y-4">
                 <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
                   Code PIN de déverrouillage (4 chiffres)
                 </h4>
-                <div className="flex items-center space-x-3">
-                  <input
-                    type="password"
-                    maxLength={4}
-                    value={editingPin}
-                    onChange={(e) => {
-                      const val = e.target.value.replace(/[^0-9]/g, '');
-                      setEditingPin(val);
-                      setPinSavedFeedback(false);
-                    }}
-                    className="w-32 bg-black/50 border border-tv-border focus:border-tv-accent text-white px-3 py-2 rounded-xl text-center font-mono text-base tracking-widest focus:outline-none"
-                    placeholder="0000"
-                  />
-                  <button
-                    type="button"
-                    disabled={editingPin.length !== 4}
-                    onClick={() => { requirePin(() => { if (onUpdateParentalPin) { onUpdateParentalPin(editingPin); setPinSavedFeedback(true); setTimeout(() => setPinSavedFeedback(false), 2500); } }); }}
-                    className="px-4 py-2 rounded-xl bg-tv-focus text-white text-xs font-bold hover:bg-sky-500 transition disabled:opacity-40"
-                  >
-                    Enregistrer le PIN
-                  </button>
-                  {pinSavedFeedback && (
-                    <span className="text-xs font-bold text-emerald-400 flex items-center space-x-1">
-                      <CheckCircle2 className="w-4 h-4" />
-                      <span>PIN mis à jour !</span>
-                    </span>
-                  )}
+
+                <div className="flex flex-col md:flex-row md:items-start gap-6">
+                  {/* Custom Pin Pad */}
+                  <div className="grid grid-cols-3 gap-2 w-full max-w-[200px]">
+                    {['1','2','3','4','5','6','7','8','9','C','0','⌫'].map((k) => (
+                      <button
+                        key={k}
+                        type="button"
+                        onClick={() => {
+                          if (k === 'C') {
+                            setEditingPin('');
+                            setPinSavedFeedback(false);
+                          } else if (k === '⌫') {
+                            setEditingPin(prev => prev.slice(0, -1));
+                            setPinSavedFeedback(false);
+                          } else {
+                            if (editingPin.length < 4) {
+                              setEditingPin(prev => prev + k);
+                              setPinSavedFeedback(false);
+                            }
+                          }
+                        }}
+                        className="h-10 bg-slate-800/80 hover:bg-slate-700 text-white rounded-lg font-bold text-sm focus:ring-2 focus:ring-tv-accent focus:bg-tv-focus transition outline-none focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                      >
+                        {k}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-col space-y-4">
+                    <div className="flex items-center space-x-2">
+                      <div className="flex space-x-2">
+                        {[0,1,2,3].map(i => (
+                          <div key={i} className={`w-8 h-8 rounded-lg border-2 flex items-center justify-center font-bold text-white transition-colors ${i < editingPin.length ? 'bg-tv-accent border-tv-accent' : 'border-slate-700 bg-black/50'}`}>
+                            {i < editingPin.length ? editingPin[i] : ''}
+                          </div>
+                        ))}
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={editingPin.length !== 4}
+                        onClick={() => { requirePin(() => { if (onUpdateParentalPin) { onUpdateParentalPin(editingPin); setPinSavedFeedback(true); setTimeout(() => setPinSavedFeedback(false), 2500); } }); }}
+                        className="px-4 py-2 h-8 rounded-xl bg-tv-focus text-white text-xs font-bold hover:bg-sky-500 focus:ring-2 focus:ring-sky-300 transition disabled:opacity-40 outline-none focus:ring-2 focus:ring-sky-500 focus:outline-none"
+                      >
+                        Enregistrer
+                      </button>
+                    </div>
+                    {pinSavedFeedback && (
+                      <span className="text-xs font-bold text-emerald-400 flex items-center space-x-1">
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>PIN mis à jour !</span>
+                      </span>
+                    )}
+                    <p className="text-[10px] text-slate-500">
+                      Le code PIN est mémorisé sur votre appareil et permet de protéger votre foyer.
+                    </p>
+                  </div>
                 </div>
-                <p className="text-[11px] text-slate-500">
-                  Le code PIN est mémorisé sur votre appareil et permet de protéger votre foyer.
-                </p>
               </div>
             </div>
           )}
@@ -1166,7 +1188,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     onClose();
                     onOpenSyncModal();
                   }}
-                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none"
                 >
                   Gérer la synchro
                 </button>
@@ -1216,7 +1238,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     onClick={handleCheckUpdate}
                     disabled={checkingUpdate}
-                    className="flex-1 py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                    className="flex-1 py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none"
                   >
                     <RefreshCw className={`w-4 h-4 ${checkingUpdate ? 'animate-spin' : ''}`} />
                     <span>{checkingUpdate ? 'Vérification...' : 'Vérifier les mises à jour'}</span>
@@ -1226,7 +1248,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     href="https://tinyurl.com/keo-apk"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                    className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none"
                   >
                     <Download className="w-4 h-4" />
                     <span>Télécharger l&apos;APK ({updateInfo?.hasUpdate ? `Build ${updateInfo.latestBuild}` : `Build ${currentBuildNumber || 22}`})</span>
@@ -1457,7 +1479,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <button
                       type="submit"
                       disabled={feedbackSubmitting || !feedbackMessage.trim()}
-                      className="w-full py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 shadow-lg disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                      className="w-full py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2 shadow-lg disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none"
                     >
                       <Send className="w-3.5 h-3.5" />
                       <span>{feedbackSubmitting ? 'Envoi en cours...' : 'Envoyer mon message'}</span>
@@ -1479,7 +1501,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   href="https://github.com/sponsors/heyhacene"
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="inline-flex items-center space-x-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-lg focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-tv-surface"
+                  className="inline-flex items-center space-x-1.5 px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold transition shadow-lg focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none"
                 >
                   <Heart className="w-4 h-4 fill-white" />
                   <span>Faire un don / Soutenir</span>
@@ -1494,7 +1516,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <span className="text-[11px] text-slate-500 font-mono">KeoTV IPTV • v1.0.0 (Build {currentBuildNumber})</span>
           <button
             onClick={onClose}
-            className="px-4 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+            className="px-4 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface focus:ring-2 focus:ring-sky-500 focus:outline-none"
           >
             Fermer
           </button>

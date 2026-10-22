@@ -147,13 +147,13 @@ export function isAdultCategoryName(name: string): boolean {
   if (!name) return false;
   const lower = name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
   const adultKeywords = [
-    'adult', 'adulte', 'xxx', 'porn', 'porno', '+18', '18+', 'for adult',
-    'erotic', 'erotique', 'redlight', 'playboy', 'penthouse',
-    'dorcel', 'hustler', 'brazzers', 'sexy', 'sex'
+    'adult', 'adulte', 'xxx', 'porn', '+18', '18+', 'for adult',
+    'erotic', 'erotique', 'hot', 'redlight', 'playboy', 'penthouse',
+    'dorcel', 'hustler', 'brazzers', 'vivid', 'passion', 'sexy', 'venus'
   ];
   return adultKeywords.some((kw) => {
     const escaped = kw.replace('+', '\\+');
-    const regex = new RegExp(`(^|[^a-z0-9])${escaped}s?([^a-z0-9]|$)`, 'i');
+    const regex = new RegExp(`(^|[^a-z0-9])${escaped}([^a-z0-9]|$)`, 'i');
     return regex.test(lower);
   });
 }

@@ -151,7 +151,7 @@ jobs:
       - name: Configuration de la version Android strictement incrémentale
         run: |
           sed -i 's/versionCode [0-9]\+/versionCode ${{ github.run_number }}/g' android/app/build.gradle
-          sed -i 's/versionName "[0-9.]\+"/versionName "1.3.${{ github.run_number }}"/g' android/app/build.gradle
+          sed -i 's/versionName "[0-9.]\+"/versionName "1.4.${{ github.run_number }}"/g' android/app/build.gradle
 
       - name: Compilation Release et Signature Cryptographique Officielle Permanente
         working-directory: android

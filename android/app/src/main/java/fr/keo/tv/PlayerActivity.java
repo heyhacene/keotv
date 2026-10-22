@@ -372,8 +372,19 @@ public class PlayerActivity extends AppCompatActivity {
                 .setConnectTimeoutMs(15000)
                 .setReadTimeoutMs(20000);
 
+        // Configure DefaultDataSourceFactory to handle both HTTP and standard data sources
+        androidx.media3.datasource.DefaultDataSource.Factory dataSourceFactory =
+            new androidx.media3.datasource.DefaultDataSource.Factory(this, httpFactory);
+
+        // Add custom RenderersFactory to prefer MediaCodec (Hardware decoding) for TV
+        androidx.media3.exoplayer.DefaultRenderersFactory renderersFactory =
+            new androidx.media3.exoplayer.DefaultRenderersFactory(this)
+                .setEnableDecoderFallback(true)
+                .setExtensionRendererMode(androidx.media3.exoplayer.DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER);
+
         player = new ExoPlayer.Builder(this)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(httpFactory))
+                .setRenderersFactory(renderersFactory)
+                .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory))
                 .build();
         playerView.setPlayer(player);
 
