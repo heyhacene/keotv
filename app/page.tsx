@@ -33,6 +33,7 @@ import {
   fetchAllSeriesCatalog,
   SeriesEpisode,
   isSeparatorChannel,
+  isAdultCategoryName,
 } from '@/lib/iptv-service';
 import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
 
@@ -1010,6 +1011,50 @@ export default function KeoTVHome() {
     initDB();
   }, [triggerSilentRefresh, handleResyncPlaylist, startBackgroundLiveLoad, loadCategoryChannels]);
 
+  // ---- Parental control: auto-detect explicit adult bouquets + user manual overrides ----
+  // Overrides are stored separately ({ [categoryId]: boolean }) so they survive playlist resyncs.
+  const adultOverridesRef = useRef<Record<string, boolean> | null>(null);
+  const loadAdultOverrides = useCallback(async () => {
+    if (!adultOverridesRef.current) {
+      adultOverridesRef.current = (await getSetting<Record<string, boolean>>('adult_overrides', {})) || {};
+    }
+    return adultOverridesRef.current;
+  }, []);
+
+  useEffect(() => {
+    if (categories.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      const overrides = await loadAdultOverrides();
+      const changed: Category[] = [];
+      const next = categories.map((c) => {
+        if (c.id === 'fav' || c.id.startsWith('fav_')) return c;
+        const desired = overrides[c.id] !== undefined ? overrides[c.id] : isAdultCategoryName(c.name);
+        if (Boolean(c.is_adult) !== desired) {
+          const updated = { ...c, is_adult: desired };
+          changed.push(updated);
+          return updated;
+        }
+        return c;
+      });
+      if (cancelled || changed.length === 0) return;
+      setCategories(next);
+      for (const c of changed) {
+        try {
+          await db.categories.update(c.id, { is_adult: c.is_adult });
+        } catch {}
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [categories, loadAdultOverrides]);
+
+  const adultCategoryIds = useMemo(
+    () => new Set(categories.filter((c) => c.is_adult).map((c) => c.id)),
+    [categories]
+  );
+
   // Compute sorted categories based on user's preference and activeSection (Direct / Films / Séries / Favoris)
   const sortedCategories = useMemo(() => {
     // 1. If activeSection === 'fav', return the dedicated favorites categories split by universe
@@ -1280,6 +1325,14 @@ export default function KeoTVHome() {
       const targetChannel = typeof target === 'number' ? filteredChannels[target] : target;
       if (!targetChannel) return;
 
+      // Parental control: protected if the item itself or its bouquet is marked adult
+      const isAdultItem = Boolean(targetChannel.is_adult) || adultCategoryIds.has(targetChannel.group_id);
+      if (isAdultItem && parentalEnabled && !unlockedAdultSession) {
+        setPendingChannelToUnlock(targetChannel);
+        setIsParentalPinModalOpen(true);
+        return;
+      }
+
       setIsStopped(false);
       setActiveChannel(targetChannel);
       const epg = getMockEpgForChannel(targetChannel.id);
@@ -1340,13 +1393,6 @@ export default function KeoTVHome() {
         return;
       }
 
-      // Check if targetChannel is in an adult category & locked
-      if (targetChannel.is_adult && parentalEnabled && !unlockedAdultSession) {
-        setPendingChannelToUnlock(targetChannel);
-        setIsParentalPinModalOpen(true);
-        return;
-      }
-
       // ---- Native Android player (Live TV: reliable IPTV playback, no CORS, custom User-Agent) ----
       if (isNativePlayerAvailable()) {
         try {
@@ -1374,8 +1420,25 @@ export default function KeoTVHome() {
         setIsFullscreen(true);
       }
     },
-    [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession]
+    [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession, adultCategoryIds]
   );
+
+  // Next / Previous Channel Switchers (for mobile gestures and on-screen controls)
+  const handleNextChannel = useCallback(() => {
+    if (filteredChannels.length === 0) return;
+    const currentIndex = activeChannel ? filteredChannels.findIndex((c) => c.id === activeChannel.id) : -1;
+    const nextIndex = currentIndex < filteredChannels.length - 1 ? currentIndex + 1 : 0;
+    setFocusedChannelIndex(nextIndex);
+    handleSelectChannel(filteredChannels[nextIndex]);
+  }, [filteredChannels, activeChannel, handleSelectChannel]);
+
+  const handlePreviousChannel = useCallback(() => {
+    if (filteredChannels.length === 0) return;
+    const currentIndex = activeChannel ? filteredChannels.findIndex((c) => c.id === activeChannel.id) : -1;
+    const prevIndex = currentIndex > 0 ? currentIndex - 1 : filteredChannels.length - 1;
+    setFocusedChannelIndex(prevIndex);
+    handleSelectChannel(filteredChannels[prevIndex]);
+  }, [filteredChannels, activeChannel, handleSelectChannel]);
 
   // Jump directly to channel by number
   const handleJumpToChannelNumber = useCallback(
@@ -1512,6 +1575,11 @@ export default function KeoTVHome() {
   };
 
   const handleUpdateCategory = async (catId: string, updates: Partial<Category>) => {
+    if (updates.is_adult !== undefined) {
+      const overrides = { ...(await loadAdultOverrides()), [catId]: Boolean(updates.is_adult) };
+      adultOverridesRef.current = overrides;
+      await setSetting('adult_overrides', overrides);
+    }
     await db.categories.update(catId, updates);
     setCategories((prev) =>
       prev.map((c) => (c.id === catId ? { ...c, ...updates } : c))
@@ -2186,6 +2254,8 @@ export default function KeoTVHome() {
             onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
             isStopped={isStopped}
             onTogglePlayStop={() => setIsStopped(!isStopped)}
+            onNextChannel={handleNextChannel}
+            onPreviousChannel={handlePreviousChannel}
           />
         </div>
 
@@ -2790,6 +2860,8 @@ export default function KeoTVHome() {
                 onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
                 isStopped={isStopped}
                 onTogglePlayStop={() => setIsStopped(!isStopped)}
+                onNextChannel={handleNextChannel}
+                onPreviousChannel={handlePreviousChannel}
               />
             </div>
 
@@ -3005,6 +3077,8 @@ export default function KeoTVHome() {
         onToggleParentalEnabled={handleToggleParentalEnabled}
         onToggleParentalHideAdult={handleToggleParentalHideAdult}
         onOpenCategoryManager={() => setIsCategoryManagerOpen(true)}
+        parentalCategories={categories}
+        onToggleAdultCategory={handleToggleAdultCategory}
       />
 
       <CategoryDrawerModal
