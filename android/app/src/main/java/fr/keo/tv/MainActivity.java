@@ -16,13 +16,19 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
 
         // Set window background to dark TV surface (#080c14) immediately to prevent any white or default splash flash
-        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF080C14));
+
+        try {
+            getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.parseColor("#080C14")));
+        } catch (Exception e) {}
 
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            getSplashScreen().setOnExitAnimationListener(splashScreenView -> {
-                splashScreenView.remove();
-            });
+            try {
+                getSplashScreen().setOnExitAnimationListener(splashScreenView -> {
+                    splashScreenView.remove();
+                });
+            } catch (Exception e) {}
         }
+
 
         // Orientation management:
         // - Force landscape orientation on Android TV devices
