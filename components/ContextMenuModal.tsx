@@ -88,9 +88,11 @@ export const ContextMenuModal: React.FC<ContextMenuModalProps> = ({
   }
 
   if (item && onExcludePrefix) {
-    // Extract candidate prefix (e.g. "FR |", "AR :", "VIP -", "24/7")
-    const match = item.name.match(/^([A-Za-z0-9+]+(?:\s*[|:\-–—/]\s*|\s+))/);
-    const candidatePrefix = match ? match[0].trim() : '';
+    // Extract candidate prefix (e.g. "[FR]", "(AR)", "FR |", "AR :", "VIP -", "24/7")
+    const match =
+      item.name.match(/^(\[[^\]]+\]|\([^)]+\))/)?.[0] ||
+      item.name.match(/^([A-Za-z0-9+]+(?:\s*[|:\-–—/]\s*|\s+))/)?.[0];
+    const candidatePrefix = match ? match.trim() : '';
     if (candidatePrefix) {
       options.push({
         id: 'exclude_prefix',

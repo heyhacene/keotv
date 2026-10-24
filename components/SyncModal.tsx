@@ -189,8 +189,9 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     setStatusMessage({ type: 'success', text: 'Vous avez été déconnecté.' });
   };
 
-  const originUrl = typeof window !== 'undefined' ? window.location.origin : 'https://keotv.vercel.app';
-  const portalUrl = `${originUrl}/sync`;
+  // Fixed public web portal URL for easy keyboard configuration from phone/PC
+  const portalUrl = 'https://keotv.vercel.app/sync';
+  const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(portalUrl)}&margin=6&color=38-189-248&bgcolor=8-12-20`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-150">
@@ -386,27 +387,42 @@ export const SyncModal: React.FC<SyncModalProps> = ({
             </div>
           )}
 
-          {/* Web Portal Link Info Card */}
-          <div className="bg-black/40 border border-white/5 p-4 rounded-2xl space-y-2">
+          {/* Web Portal Link Info Card with QR Code */}
+          <div className="bg-black/40 border border-white/5 p-4 rounded-2xl space-y-3">
             <div className="flex items-center justify-between text-xs text-slate-300 font-bold">
               <span className="flex items-center space-x-1.5 text-tv-accent">
-                <ExternalLink className="w-3.5 h-3.5" />
-                <span>Portail de configuration Web (Vercel)</span>
+                <QrCode className="w-4 h-4 text-sky-400" />
+                <span>Portail de configuration Web & Mobile</span>
               </span>
             </div>
-            <p className="text-[11px] text-slate-400">
-              Vous pouvez vous connecter avec ce même identifiant et mot de passe sur le site web pour saisir vos abonnements IPTV au clavier :
-            </p>
-            <div className="p-2.5 bg-tv-card rounded-xl border border-white/10 flex items-center justify-between text-xs font-mono text-white">
-              <span className="truncate">{portalUrl}</span>
-              <a
-                href={portalUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="px-2.5 py-1 bg-white/10 hover:bg-white/20 rounded-lg text-[10px] text-tv-accent font-bold transition ml-2 flex-shrink-0"
-              >
-                Ouvrir
-              </a>
+
+            <div className="flex flex-col sm:flex-row items-center gap-4 bg-tv-card/60 p-3 rounded-2xl border border-white/10">
+              {/* QR Code image for smartphone scanning */}
+              <div className="w-28 h-28 bg-[#080c14] p-1.5 rounded-xl border border-sky-500/30 shadow-lg flex-shrink-0 flex items-center justify-center">
+                <img
+                  src={qrCodeUrl}
+                  alt="QR Code Portail KeoTV"
+                  className="w-full h-full object-contain rounded-lg"
+                  loading="lazy"
+                />
+              </div>
+
+              <div className="flex-1 space-y-1.5 min-w-0 text-center sm:text-left">
+                <p className="text-[11px] text-slate-300 font-medium">
+                  Scannez ce QR Code avec l&apos;appareil photo de votre smartphone pour ouvrir le portail sans rien taper :
+                </p>
+                <div className="p-2 bg-black/50 rounded-xl border border-white/10 flex items-center justify-between text-[11px] font-mono text-white">
+                  <span className="truncate text-sky-300 font-bold">{portalUrl}</span>
+                  <a
+                    href={portalUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="px-2.5 py-1 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 rounded-lg text-[10px] font-bold transition ml-2 flex-shrink-0"
+                  >
+                    Ouvrir
+                  </a>
+                </div>
+              </div>
             </div>
           </div>
         </div>

@@ -201,10 +201,32 @@ export function cleanSeparatorName(name: string): string {
  */
 export function shouldExcludeChannelByPrefix(channelName: string, excludedPrefixes: string[]): boolean {
   if (!channelName || !excludedPrefixes || excludedPrefixes.length === 0) return false;
-  const lowerName = channelName.trim().toLowerCase();
+  const rawLower = channelName.trim().toLowerCase();
+  const normalizedChannel = rawLower
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
   return excludedPrefixes.some((p) => {
-    const cleanP = p.trim().toLowerCase();
-    return cleanP.length > 0 && lowerName.startsWith(cleanP);
+    const rawP = p.trim().toLowerCase();
+    if (!rawP) return false;
+    const cleanP = rawP
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+    // 1. Direct prefix match
+    if (rawLower.startsWith(rawP) || normalizedChannel.startsWith(cleanP)) return true;
+
+    // 2. Direct inclusion anywhere in name (e.g. user typed "AR :" or "[FR]" or "4K")
+    if (rawLower.includes(rawP) || normalizedChannel.includes(cleanP)) return true;
+
+    // 3. Punctuation-stripped start match (e.g. prefix "FR" matches "FR: TF1" or "FR | TF1" or "[FR] TF1")
+    const cleanPrefixChars = cleanP.replace(/[^a-z0-9]/g, '');
+    const cleanChannelChars = normalizedChannel.replace(/^[^a-z0-9]+/, '');
+    if (cleanPrefixChars.length >= 2 && cleanChannelChars.startsWith(cleanPrefixChars)) {
+      return true;
+    }
+
+    return false;
   });
 }
 
