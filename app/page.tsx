@@ -2257,22 +2257,46 @@ export default function KeoTVHome() {
     if (!account) return;
 
     try {
-      // 1. If account has playlists, import and activate the first playlist!
+      // 1. If account has playlists, import credentials and configurations directly WITHOUT attempting to connect/fetch streams
       if (account.playlists && account.playlists.length > 0) {
-        const pl = account.playlists[0];
-        showToast(`Synchronisation de la playlist « ${pl.name} »...`);
-        if (pl.type === 'xtream' && pl.server_url && pl.username && pl.password) {
-          await handleSavePlaylist(
-            {
-              type: 'xtream',
+        for (const pl of account.playlists) {
+          const playlistConfig: PlaylistConfig = {
+            id: pl.id || 'pl_' + Date.now(),
+            name: pl.name || 'Playlist Cloud',
+            type: pl.type || 'xtream',
+            server_url: pl.server_url || '',
+            username: pl.username || '',
+            password: pl.password || '',
+            m3u_url: pl.m3u_url || '',
+            status: 'idle',
+            channel_count: pl.channel_count || 0,
+            last_sync_at: pl.last_sync_at || new Date().toISOString(),
+          };
+
+          await db.playlists.put(playlistConfig);
+
+          if (pl.type === 'xtream') {
+            await setSetting('last_xtream_config', {
               server_url: pl.server_url,
               username: pl.username,
               password: pl.password,
               name: pl.name,
-            },
-            (step) => setSyncStatusBanner(step)
-          );
+            });
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('keotv_saved_xtream_creds', JSON.stringify({
+                server_url: pl.server_url,
+                username: pl.username,
+                password: pl.password,
+                name: pl.name,
+              }));
+              localStorage.setItem('keotv_has_configured_playlist', 'true');
+              localStorage.setItem('keotv_saved_playlist_v1', JSON.stringify(playlistConfig));
+            }
+          }
         }
+
+        const allPls = await db.playlists.toArray();
+        setPlaylists(allPls);
       }
 
       // 2. Restore user favorites
