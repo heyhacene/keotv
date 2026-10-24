@@ -18,6 +18,11 @@ const STREAM_EQUIDIA = 'https://raw.githubusercontent.com/Paradise-91/ParaTV/mai
 const STREAM_MUX = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
 const STREAM_SINTEL = 'https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8';
 
+// Fallback aliases for other channels
+const SAMPLE_STREAM_BBB = STREAM_MUX;
+const SAMPLE_STREAM_F24 = STREAM_EURONEWS;
+const SAMPLE_STREAM_BIP = STREAM_SINTEL;
+
 export const INITIAL_CHANNELS: Channel[] = [
   // ================= 1. TNT & INFORMATION =================
   {
