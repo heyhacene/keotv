@@ -255,13 +255,17 @@ export default function WebSyncDashboard() {
               </p>
             </div>
           </div>
-          <a
-            href="/"
-            className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-bold transition text-slate-300 hover:text-white"
-          >
-            <span>Lancer le Web Player</span>
-            <ExternalLink className="w-3.5 h-3.5" />
-          </a>
+          <div className="flex items-center space-x-2">
+            <a
+              href="https://tinyurl.com/keo-apk"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center space-x-2 px-4 py-2.5 rounded-xl bg-tv-accent hover:bg-tv-accent/80 text-black text-xs font-black transition shadow-lg shadow-tv-accent/20"
+            >
+              <Tv className="w-4 h-4" />
+              <span>Télécharger l&apos;APK Android (Code Downloader : 4317787)</span>
+            </a>
+          </div>
         </div>
 
         {/* Section 1: User Account Authentication (ID + Mot de passe) */}

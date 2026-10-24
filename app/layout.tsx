@@ -4,6 +4,11 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'KeoTV - Lecteur IPTV Android TV & Mobile',
   description: 'Application IPTV moderne haute performance inspirée de TiviMate.',
+  icons: {
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/icon.svg',
+  },
 };
 
 export const viewport: Viewport = {
@@ -20,8 +25,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="fr" className="dark h-full w-full bg-[#0a0d14] overflow-hidden">
-      <body className="h-full w-full bg-[#0a0d14] text-slate-100 overflow-hidden font-tv antialiased select-none">
+    <html lang="fr" className="dark min-h-full w-full bg-[#0a0d14]">
+      <body className="min-h-full w-full bg-[#0a0d14] text-slate-100 font-tv antialiased select-none">
         {children}
       </body>
     </html>
