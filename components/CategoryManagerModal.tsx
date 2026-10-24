@@ -176,9 +176,17 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
         e.key === 'Select' ||
         (e as any).keyCode === 13 ||
         (e as any).keyCode === 23;
+      const target = e.target as HTMLElement | null;
+      const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+
+      // If user is editing text in an input field (e.g. bouquet filter), allow Backspace for deletion without closing modal
+      if (e.key === 'Backspace' && isInputFocused) {
+        return;
+      }
+
       const isBack =
         e.key === 'Escape' ||
-        e.key === 'Backspace' ||
+        (!isInputFocused && e.key === 'Backspace') ||
         (e as any).keyCode === 27 ||
         (e as any).keyCode === 4;
 

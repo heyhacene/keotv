@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Server, Link, Shield, CheckCircle2, AlertCircle, Loader2, Pencil, RefreshCw } from 'lucide-react';
+import { X, Server, Link, Shield, CheckCircle2, AlertCircle, Loader2, Pencil, RefreshCw, Eye, EyeOff } from 'lucide-react';
 import { PlaylistConfig } from '@/types/iptv';
 
 interface XtreamModalProps {
@@ -52,6 +52,7 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({
   const [progressMessage, setProgressMessage] = useState<string>('');
   const [error, setError] = useState<string | null>(null);
 
+  const [showPassword, setShowPassword] = useState(false);
   const firstInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -80,11 +81,18 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
+      // If user is editing text in an input field, allow Backspace for deletion without closing modal
+      const target = e.target as HTMLElement | null;
+      const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+
+      if (e.key === 'Backspace' && isInputFocused) {
+        return;
+      }
+
       const isBack =
         e.key === 'Escape' ||
-        e.key === 'Backspace' ||
+        (!isInputFocused && e.key === 'Backspace') ||
         e.key === 'GoBack' ||
-        e.key === 'Back' ||
         (e as any).keyCode === 27 ||
         (e as any).keyCode === 4;
 
@@ -246,13 +254,24 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({
                   <label className="block text-xs font-medium text-slate-300 mb-1">
                     Mot de passe
                   </label>
-                  <input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-tv-card border border-tv-border rounded-xl px-3.5 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-tv-accent focus:ring-1 focus:ring-tv-accent"
-                    required
-                  />
+                  <div className="relative">
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full bg-tv-card border border-tv-border rounded-xl pl-3.5 pr-10 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-tv-accent focus:ring-1 focus:ring-tv-accent"
+                      required
+                    />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition p-1"
+                      title={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
                 </div>
               </div>
             </>

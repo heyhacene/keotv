@@ -15,6 +15,8 @@ import {
   QrCode,
   LogOut,
   Sparkles,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import {
   registerKeoUser,
@@ -48,6 +50,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  const [showPassword, setShowPassword] = useState(false);
   const usernameInputRef = useRef<HTMLInputElement | null>(null);
 
   // Check currently active logged in user
@@ -60,13 +63,21 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     }
   }, [isOpen]);
 
-  // TV Remote Back button
+  // TV Remote Back button (ensuring Backspace in text fields does not exit modal!)
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
+      // If user is typing in an input and presses Backspace, do NOT close modal!
+      const target = e.target as HTMLElement | null;
+      const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+
+      if (e.key === 'Backspace' && isInputFocused) {
+        return; // Allow native backspace deletion without closing modal
+      }
+
       const isBack =
         e.key === 'Escape' ||
-        e.key === 'Backspace' ||
+        (!isInputFocused && e.key === 'Backspace') ||
         e.key === 'GoBack' ||
         (e as any).keyCode === 27 ||
         (e as any).keyCode === 4;
@@ -282,12 +293,21 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                   <div className="relative">
                     <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
-                      type="password"
+                      type={showPassword ? 'text' : 'password'}
                       placeholder="••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full bg-tv-card border border-tv-border rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-tv-accent"
+                      className="w-full bg-tv-card border border-tv-border rounded-xl pl-9 pr-10 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-tv-accent"
                     />
+                    <button
+                      type="button"
+                      tabIndex={-1}
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition p-1"
+                      title={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+                    >
+                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
 

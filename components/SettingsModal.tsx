@@ -22,7 +22,7 @@ import {
   Clock,
 } from 'lucide-react';
 import { PlaylistConfig } from '@/types/iptv';
-import { submitAppFeedback } from '@/lib/supabase';
+import { submitAppFeedback, getActiveKeoUser, logoutKeoUser, KeoUserAccount } from '@/lib/supabase';
 import { ParentalPinModal } from "./ParentalPinModal";
 import { checkForAppUpdate, AppUpdateInfo, CURRENT_BUILD_NUMBER, DOWNLOADER_CODE, DIRECT_APK_URL } from '@/lib/update-service';
 
@@ -258,9 +258,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         keyCode === 39 ||
         keyCode === 22;   // Android DPAD_RIGHT
 
+      const target = e.target as HTMLElement | null;
+      const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+
+      // If user is editing text in an input or textarea, allow Backspace for deletion without closing modal
+      if (e.key === 'Backspace' && isInputFocused) {
+        return;
+      }
+
       const isBack =
         key === 'Escape' ||
-        key === 'Backspace' ||
+        (!isInputFocused && key === 'Backspace') ||
         key === 'GoBack' ||
         key === 'Back' ||
         keyCode === 27 ||
@@ -1235,36 +1243,68 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* ============================================================== */}
           {/* TAB 3: SYNCHRONISATION                                         */}
           {/* ============================================================== */}
-          {activeTab === 'sync' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-sm font-bold text-white">Profil & Synchronisation Cloud</h3>
-                <p className="text-xs text-slate-400">
-                  Partagez vos favoris et playlists entre votre télévision et votre smartphone.
-                </p>
-              </div>
-
-              <div className="bg-tv-card/80 border border-tv-border p-4 rounded-xl flex items-center justify-between">
+          {activeTab === 'sync' && (() => {
+            const activeUser = getActiveKeoUser();
+            return (
+              <div className="space-y-4">
                 <div>
-                  <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
-                    Votre Code d&apos;Appairage KeoTV
-                  </span>
-                  <span className="text-2xl font-mono font-extrabold text-tv-accent tracking-widest mt-1 block">
-                    {syncCode || 'KEO-7842'}
-                  </span>
+                  <h3 className="text-sm font-bold text-white">Compte & Synchronisation Multi-Écrans</h3>
+                  <p className="text-xs text-slate-400">
+                    Connectez-vous pour synchroniser automatiquement vos abonnements, bouquets et favoris entre votre TV, mobile et le portail Web.
+                  </p>
                 </div>
-                <button
-                  onClick={() => {
-                    onClose();
-                    onOpenSyncModal();
-                  }}
-                  className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
-                >
-                  Gérer la synchro
-                </button>
+
+                <div className="bg-tv-card/80 border border-tv-border p-4 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider block">
+                        Statut du compte
+                      </span>
+                      <div className="flex items-center space-x-2 mt-1">
+                        <span className={`w-2.5 h-2.5 rounded-full ${activeUser ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+                        <span className="text-base font-bold text-white">
+                          {activeUser ? activeUser.username : 'Non connecté'}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      {activeUser ? (
+                        <button
+                          onClick={() => {
+                            logoutKeoUser();
+                            onClose();
+                            onOpenSyncModal();
+                          }}
+                          className="px-3 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-300 border border-red-500/30 rounded-xl text-xs font-bold transition focus:outline-none focus:ring-2 focus:ring-red-400"
+                        >
+                          Déconnexion
+                        </button>
+                      ) : null}
+                      <button
+                        onClick={() => {
+                          onClose();
+                          onOpenSyncModal();
+                        }}
+                        className="px-4 py-2 bg-tv-accent hover:bg-tv-accent/80 text-black rounded-xl text-xs font-extrabold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                      >
+                        {activeUser ? 'Gérer la synchro' : 'Se connecter / Créer un compte'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="p-3 bg-black/40 rounded-xl border border-white/5 space-y-1.5">
+                    <div className="text-xs font-semibold text-slate-300 flex items-center">
+                      <ExternalLink className="w-3.5 h-3.5 mr-1.5 text-tv-accent" />
+                      Configuration depuis votre ordinateur ou mobile
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      Rendez-vous sur le portail Web de configuration (<span className="text-sky-300 font-mono">keotv.vercel.app/sync</span> ou votre domaine). Connectez-vous avec le même identifiant pour gérer et injecter vos playlists sans rien taper sur la télécommande !
+                    </p>
+                  </div>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ============================================================== */}
           {/* TAB 4: MISES À JOUR                                            */}

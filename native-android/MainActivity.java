@@ -18,6 +18,9 @@ public class MainActivity extends BridgeActivity {
         // Set window background to dark TV surface (#080c14) immediately to prevent any white or default splash flash
         getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF080C14));
 
+        // Soft keyboard: display as an overlay (adjustPan) instead of crushing/resizing the TV layout in half
+        getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
+
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
             getSplashScreen().setOnExitAnimationListener(splashScreenView -> {
                 splashScreenView.remove();

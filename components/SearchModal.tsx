@@ -255,9 +255,17 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         e.key === 'Select' ||
         (e as any).keyCode === 13 ||
         (e as any).keyCode === 23;
+      const target = e.target as HTMLElement | null;
+      const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
+
+      // If user is editing text in search input, allow Backspace for deletion without closing modal
+      if (e.key === 'Backspace' && isInputFocused) {
+        return;
+      }
+
       const isBack =
         e.key === 'Escape' ||
-        e.key === 'Backspace' ||
+        (!isInputFocused && e.key === 'Backspace') ||
         e.key === 'GoBack' ||
         e.key === 'Back' ||
         (e as any).keyCode === 27 ||
