@@ -78,6 +78,19 @@ export default function KeoTVHome() {
   const [forcedOrientation, setForcedOrientation] = useState<'portrait' | 'landscape' | null>(null);
 
   useEffect(() => {
+    // If user is accessing from a regular PC web browser (Vercel) outside of the Android/iOS native app,
+    // redirect them to the Web Configuration Dashboard where they can manage their playlists comfortably!
+    if (typeof window !== 'undefined' && !Capacitor.isNativePlatform()) {
+      const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+      const isMobile = /Android|iPhone|iPad|iPod/i.test(ua);
+      if (!isMobile && window.location.pathname === '/' && !window.location.search.includes('player=true')) {
+        window.location.replace('/sync');
+        return;
+      }
+    }
+  }, []);
+
+  useEffect(() => {
     const updateLayoutMode = () => {
       if (typeof window === 'undefined') return;
 

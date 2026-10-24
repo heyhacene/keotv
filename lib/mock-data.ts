@@ -9,19 +9,23 @@ export const INITIAL_CATEGORIES: Category[] = [
   { id: 'doc', name: '🌍 Découverte & Doc', type: 'live', count: 4, is_hidden: false, custom_order: 5, icon: 'Compass' },
 ];
 
-// Test streams using reliable public HLS streams
-const SAMPLE_STREAM_F24 = 'https://static.france24.com/live/F24_FR_LO/live-apple.m3u8';
-const SAMPLE_STREAM_BBB = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
-const SAMPLE_STREAM_BIP = 'https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8';
+// Test streams using verified reliable public streams
+const STREAM_BFMTV = 'https://live-cdn-stream-euw1.bfmtv.bct.nextradiotv.com/master.m3u8';
+const STREAM_CNEWS = 'https://raw.githubusercontent.com/Paradise-91/ParaTV/main/streams/canalplus/cnews-dm.m3u8';
+const STREAM_CSTAR = 'https://raw.githubusercontent.com/Paradise-91/ParaTV/refs/heads/main/streams/canalplus/cstar-dm.m3u8';
+const STREAM_EURONEWS = 'https://cdn-euronews.akamaized.net/live/eds/euronews-fr/25026/index.m3u8';
+const STREAM_EQUIDIA = 'https://raw.githubusercontent.com/Paradise-91/ParaTV/main/streams/equidia/live2.m3u8';
+const STREAM_MUX = 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8';
+const STREAM_SINTEL = 'https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8';
 
 export const INITIAL_CHANNELS: Channel[] = [
-  // ================= 1. TNT FRANCE =================
+  // ================= 1. TNT & INFORMATION =================
   {
-    id: 'ch_tf1',
+    id: 'ch_bfm',
     num: 1,
-    name: 'TF1 HD',
-    logo: '',
-    stream_url: SAMPLE_STREAM_BBB,
+    name: 'BFM TV HD',
+    logo: 'https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/france/bfm-tv-fr.png',
+    stream_url: STREAM_BFMTV,
     stream_type: 'live',
     group_id: 'tnt',
     group_name: 'France TNT',
@@ -31,11 +35,11 @@ export const INITIAL_CHANNELS: Channel[] = [
     resolution: 'FHD',
   },
   {
-    id: 'ch_fr2',
+    id: 'ch_cnews',
     num: 2,
-    name: 'France 2 HD',
-    logo: '',
-    stream_url: SAMPLE_STREAM_F24,
+    name: 'CNews HD',
+    logo: 'https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/france/cnews-fr.png',
+    stream_url: STREAM_CNEWS,
     stream_type: 'live',
     group_id: 'tnt',
     group_name: 'France TNT',
@@ -45,18 +49,88 @@ export const INITIAL_CHANNELS: Channel[] = [
     resolution: 'FHD',
   },
   {
-    id: 'ch_fr3',
+    id: 'ch_cstar',
     num: 3,
-    name: 'France 3 National',
-    logo: '',
-    stream_url: SAMPLE_STREAM_BIP,
+    name: 'CStar HD',
+    logo: 'https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/france/cstar-fr.png',
+    stream_url: STREAM_CSTAR,
     stream_type: 'live',
     group_id: 'tnt',
     group_name: 'France TNT',
-    is_favorite: false,
+    is_favorite: true,
     is_hidden: false,
     custom_order: 3,
     resolution: 'HD',
+  },
+  {
+    id: 'ch_euronews',
+    num: 4,
+    name: 'Euronews Français',
+    logo: 'https://raw.githubusercontent.com/tv-logo/tv-logos/main/countries/france/euronews-fr.png',
+    stream_url: STREAM_EURONEWS,
+    stream_type: 'live',
+    group_id: 'news',
+    group_name: 'Information 24/7',
+    is_favorite: false,
+    is_hidden: false,
+    custom_order: 4,
+    resolution: 'HD',
+  },
+  {
+    id: 'ch_equidia',
+    num: 5,
+    name: 'Equidia Direct HD',
+    logo: '',
+    stream_url: STREAM_EQUIDIA,
+    stream_type: 'live',
+    group_id: 'sport',
+    group_name: 'Sports Direct',
+    is_favorite: false,
+    is_hidden: false,
+    custom_order: 5,
+    resolution: 'FHD',
+  },
+  {
+    id: 'ch_mux',
+    num: 6,
+    name: 'Canal Test 4K MUX',
+    logo: '',
+    stream_url: STREAM_MUX,
+    stream_type: 'live',
+    group_id: 'cinema',
+    group_name: 'Cinéma & Séries',
+    is_favorite: false,
+    is_hidden: false,
+    custom_order: 6,
+    resolution: '4K',
+  },
+  {
+    id: 'ch_vod_sintel',
+    num: 7,
+    name: 'Sintel - Le Film (VOD)',
+    logo: '',
+    stream_url: STREAM_SINTEL,
+    stream_type: 'vod',
+    group_id: 'cinema',
+    group_name: 'Cinéma & Séries',
+    is_favorite: false,
+    is_hidden: false,
+    custom_order: 7,
+    resolution: 'FHD',
+  },
+  {
+    id: 'ch_vod_mux',
+    num: 8,
+    name: 'Animation Mux Demo (VOD)',
+    logo: '',
+    stream_url: STREAM_MUX,
+    stream_type: 'vod',
+    group_id: 'cinema',
+    group_name: 'Cinéma & Séries',
+    is_favorite: false,
+    is_hidden: false,
+    custom_order: 8,
+    resolution: 'FHD',
   },
   {
     id: 'ch_cplus',

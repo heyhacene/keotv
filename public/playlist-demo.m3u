@@ -1,0 +1,37 @@
+#EXTM3U
+
+#EXTINF:-1 tvg-id="BFMTV.fr" group-title="France Direct",BFM TV HD
+https://live-cdn-stream-euw1.bfmtv.bct.nextradiotv.com/master.m3u8
+
+#EXTINF:-1 tvg-id="CNews.fr" group-title="France Direct",CNews HD
+https://raw.githubusercontent.com/Paradise-91/ParaTV/main/streams/canalplus/cnews-dm.m3u8
+
+#EXTINF:-1 tvg-id="CStar.fr" group-title="France Direct",CStar Direct
+https://raw.githubusercontent.com/Paradise-91/ParaTV/refs/heads/main/streams/canalplus/cstar-dm.m3u8
+
+#EXTINF:-1 tvg-id="BFMBusiness.fr" group-title="France Direct",BFM Business HD
+https://live-cdn-stream-euw1.bfmb.bct.nextradiotv.com/master.m3u8
+
+#EXTINF:-1 tvg-id="EuronewsFrench.fr" group-title="France Direct",Euronews Français
+https://cdn-euronews.akamaized.net/live/eds/euronews-fr/25026/index.m3u8
+
+#EXTINF:-1 tvg-id="AfricanewsFrench.fr" group-title="France Direct",Africanews Français
+https://cdn-euronews.akamaized.net/live/eds/africanews-fr/25050/index.m3u8
+
+#EXTINF:-1 tvg-id="Equidia.fr" group-title="Sport",Equidia Direct
+https://raw.githubusercontent.com/Paradise-91/ParaTV/main/streams/equidia/live2.m3u8
+
+#EXTINF:-1 tvg-id="20MinutesTV.fr" group-title="France Direct",20 Minutes TV
+https://live-20minutestv.digiteka.com/1961167769/index.m3u8
+
+#EXTINF:-1 tvg-id="CannesLerinsTV.fr" group-title="Régions",Cannes Lérins TV HD
+https://vdo2.pro-fhi.net:3628/live/uppodsfqlive.m3u8
+
+#EXTINF:-1 tvg-id="MuxDemo" group-title="Test 4K",Mux Test Stream HD
+https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+
+#EXTINF:-1 tvg-id="vod_bbb" tvg-name="Big Buck Bunny" group-title="Films VOD",Big Buck Bunny (Animation)
+https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+
+#EXTINF:-1 tvg-id="vod_sintel" tvg-name="Sintel Short Movie" group-title="Films VOD",Sintel le Film (Animation)
+https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8
