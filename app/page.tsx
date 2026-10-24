@@ -1400,6 +1400,11 @@ export default function KeoTVHome() {
           }
         }
         if (!serverUrl || !username || !password) {
+          if (targetChannel.stream_url) {
+            setSelectedSeriesForDetails(targetChannel);
+            setSeriesServerCreds({ serverUrl: targetChannel.stream_url, username: '', password: '' });
+            return;
+          }
           alert('Identifiants Xtream introuvables : rechargez votre playlist.');
           return;
         }

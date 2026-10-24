@@ -120,25 +120,67 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
     });
 
     const seriesId = series.epg_id || series.id.replace(/^ch_xtream_(?:series_)?/, '');
-    fetchSeriesInfo(serverUrl, username, password, seriesId)
-      .then((d) => {
-        if (cancelled) return;
-        setDetails(d);
-        if (d.seasons.length > 0) {
-          setOpenSeason(d.seasons[0].season);
-          setFocusedSeasonIndex(0);
-          setFocusedEpisodeIndex(0);
-          setFocusedSection('episodes');
-        }
-        if (d.seasons.length === 0) setError('Aucun épisode disponible pour cette série sur ce serveur.');
-      })
-      .catch((err: any) => {
-        if (cancelled) return;
-        setError(`Impossible de charger la série : ${err?.message || err}`);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+    if (serverUrl && username && password && !series.id.startsWith('ch_m3u_')) {
+      fetchSeriesInfo(serverUrl, username, password, seriesId)
+        .then((d) => {
+          if (cancelled) return;
+          setDetails(d);
+          if (d.seasons.length > 0) {
+            setOpenSeason(d.seasons[0].season);
+            setFocusedSeasonIndex(0);
+            setFocusedEpisodeIndex(0);
+            setFocusedSection('episodes');
+          }
+          if (d.seasons.length === 0) setError('Aucun épisode disponible pour cette série sur ce serveur.');
+        })
+        .catch((err: any) => {
+          if (cancelled) return;
+          console.warn('Series info fetch failed, fallback to standalone series item:', err);
+          createFallbackDetails();
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    } else {
+      createFallbackDetails();
+      setLoading(false);
+    }
+
+    function createFallbackDetails() {
+      if (!series) return;
+      const sNum = 1;
+      const epNum = 1;
+      setDetails({
+        name: series.name,
+        cover: series.logo,
+        plot: 'Épisode disponible dans votre sélection.',
+        genre: 'Série',
+        rating: '8.0',
+        audioLanguages: ['Français (VF)'],
+        subtitles: [],
+        seasons: [
+          {
+            season: sNum,
+            name: `Saison ${sNum}`,
+            episodes: [
+              {
+                id: Number(series.epg_id) || 1,
+                episodeNum: epNum,
+                title: series.name,
+                url: series.stream_url,
+                duration: '45 min',
+                plot: series.name,
+                image: series.logo,
+              },
+            ],
+          },
+        ],
       });
+      setOpenSeason(sNum);
+      setFocusedSeasonIndex(0);
+      setFocusedEpisodeIndex(0);
+      setFocusedSection('episodes');
+    }
 
     return () => {
       cancelled = true;

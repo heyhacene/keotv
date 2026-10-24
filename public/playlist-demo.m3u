@@ -1,10 +1,10 @@
 #EXTM3U
 
-#EXTINF:-1 tvg-id="BFMTV.fr" group-title="France Direct",BFM TV HD
+#EXTINF:-1 tvg-id="BFMTV.fr" tvg-logo="https://upload.wikimedia.org/wikipedia/commons/e/e2/BFM_TV_logo_2017.svg" group-title="France Direct",BFM TV HD
 https://live-cdn-stream-euw1.bfmtv.bct.nextradiotv.com/master.m3u8
 
-#EXTINF:-1 tvg-id="CNews.fr" group-title="France Direct",CNews HD
-https://raw.githubusercontent.com/Paradise-91/ParaTV/main/streams/canalplus/cnews-dm.m3u8
+#EXTINF:-1 tvg-id="Arte.fr" tvg-logo="https://upload.wikimedia.org/wikipedia/commons/2/23/Logo_ARTE_2017.svg" group-title="France Direct",Arte Français HD
+https://artesimulcast.akamaized.net/hls/live/2031003/artelive_fr/master_v720.m3u8
 
 #EXTINF:-1 tvg-id="CStar.fr" group-title="France Direct",CStar Direct
 https://raw.githubusercontent.com/Paradise-91/ParaTV/refs/heads/main/streams/canalplus/cstar-dm.m3u8
@@ -27,11 +27,23 @@ https://live-20minutestv.digiteka.com/1961167769/index.m3u8
 #EXTINF:-1 tvg-id="CannesLerinsTV.fr" group-title="Régions",Cannes Lérins TV HD
 https://vdo2.pro-fhi.net:3628/live/uppodsfqlive.m3u8
 
-#EXTINF:-1 tvg-id="MuxDemo" group-title="Test 4K",Mux Test Stream HD
+#EXTINF:-1 tvg-id="vod_bbb" tvg-name="Big Buck Bunny" group-title="Films VOD",Big Buck Bunny (Court-métrage)
 https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
 
-#EXTINF:-1 tvg-id="vod_bbb" tvg-name="Big Buck Bunny" group-title="Films VOD",Big Buck Bunny (Animation)
-https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+#EXTINF:-1 tvg-id="vod_tos" tvg-name="Tears of Steel" group-title="Films VOD",Tears of Steel (Science-Fiction)
+https://test-streams.mux.dev/tos_ismc/main.m3u8
 
-#EXTINF:-1 tvg-id="vod_sintel" tvg-name="Sintel Short Movie" group-title="Films VOD",Sintel le Film (Animation)
-https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8
+#EXTINF:-1 tvg-id="vod_elephants" tvg-name="Elephants Dream" group-title="Films VOD",Elephants Dream (Animation 3D)
+https://cdn.theoplayer.com/video/elephants-dream/playlist.m3u8
+
+#EXTINF:-1 tvg-id="series_cosmos_e01" tvg-name="Cosmos Laundromat S01E01" group-title="Séries VOD",Cosmos Laundromat S01 E01 - First Cycle
+https://test-streams.mux.dev/test_001/stream.m3u8
+
+#EXTINF:-1 tvg-id="series_cosmos_e02" tvg-name="Cosmos Laundromat S01E02" group-title="Séries VOD",Cosmos Laundromat S01 E02 - Second Cycle
+https://test-streams.mux.dev/pts_shift/master.m3u8
+
+#EXTINF:-1 tvg-id="series_bipbop_e01" tvg-name="BipBop S01E01" group-title="Séries VOD",BipBop S01 E01 - Épisode Pilote
+https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_16x9/bipbop_16x9_variant.m3u8
+
+#EXTINF:-1 tvg-id="series_bipbop_e02" tvg-name="BipBop S01E02" group-title="Séries VOD",BipBop S01 E02 - Épisode Deux
+https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/bipbop_4x3_variant.m3u8
