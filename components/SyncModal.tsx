@@ -53,44 +53,134 @@ export const SyncModal: React.FC<SyncModalProps> = ({
 
   const [showPassword, setShowPassword] = useState(false);
   const usernameInputRef = useRef<HTMLInputElement | null>(null);
+  const modalContainerRef = useRef<HTMLDivElement | null>(null);
 
-  // Check currently active logged in user
+  // Focusable elements helper
+  const getFocusableElements = useCallback((): HTMLElement[] => {
+    if (!modalContainerRef.current) return [];
+    return Array.from(
+      modalContainerRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), a[href]:not([disabled]), [tabindex="0"]'
+      )
+    ).filter((el) => el.offsetParent !== null);
+  }, []);
+
+  // Check currently active logged in user and initialize focus
   useEffect(() => {
     if (isOpen) {
       const user = getActiveKeoUser();
       setActiveUser(user);
       setStatusMessage(null);
-      setTimeout(() => usernameInputRef.current?.focus(), 150);
+      setTimeout(() => {
+        const els = getFocusableElements();
+        if (els.length > 0) {
+          // If username input exists, focus it, otherwise focus first actionable button
+          if (usernameInputRef.current) {
+            usernameInputRef.current.focus();
+          } else {
+            els[0].focus();
+          }
+        }
+      }, 150);
     }
-  }, [isOpen]);
+  }, [isOpen, getFocusableElements]);
 
-  // TV Remote Back button (ensuring Backspace in text fields does not exit modal!)
+  // Full TV Remote D-Pad Navigation inside SyncModal
   useEffect(() => {
     if (!isOpen) return;
+
     const handleKeyDown = (e: KeyboardEvent) => {
-      // If user is typing in an input and presses Backspace, do NOT close modal!
+      const keyCode = (e as any).keyCode || 0;
+      const key = e.key || '';
+
+      const isEnter =
+        key === 'Enter' ||
+        key === 'Select' ||
+        key === 'Ok' ||
+        keyCode === 13 ||
+        keyCode === 23 || // DPAD_CENTER
+        keyCode === 66;
+
+      const isUp =
+        key === 'ArrowUp' ||
+        key === 'Up' ||
+        keyCode === 38 ||
+        keyCode === 19;   // DPAD_UP
+
+      const isDown =
+        key === 'ArrowDown' ||
+        key === 'Down' ||
+        keyCode === 40 ||
+        keyCode === 20;   // DPAD_DOWN
+
+      const isLeft =
+        key === 'ArrowLeft' ||
+        key === 'Left' ||
+        keyCode === 37 ||
+        keyCode === 21;   // DPAD_LEFT
+
+      const isRight =
+        key === 'ArrowRight' ||
+        key === 'Right' ||
+        keyCode === 39 ||
+        keyCode === 22;   // DPAD_RIGHT
+
       const target = e.target as HTMLElement | null;
       const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
 
+      // If user is editing text in an input and presses Backspace, do NOT close modal
       if (e.key === 'Backspace' && isInputFocused) {
-        return; // Allow native backspace deletion without closing modal
+        return;
       }
 
       const isBack =
-        e.key === 'Escape' ||
-        (!isInputFocused && e.key === 'Backspace') ||
-        e.key === 'GoBack' ||
-        (e as any).keyCode === 27 ||
-        (e as any).keyCode === 4;
+        key === 'Escape' ||
+        (!isInputFocused && key === 'Backspace') ||
+        key === 'GoBack' ||
+        key === 'Back' ||
+        keyCode === 27 ||
+        keyCode === 4;
 
       if (isBack) {
         e.preventDefault();
+        e.stopPropagation();
         onClose();
+        return;
+      }
+
+      // Handle D-Pad movement across focusable buttons/inputs
+      if (isUp || isDown || isLeft || isRight) {
+        const els = getFocusableElements();
+        if (els.length === 0) return;
+
+        const currentIndex = target ? els.indexOf(target) : -1;
+
+        if (isDown || (isRight && !isInputFocused)) {
+          e.preventDefault();
+          const nextIndex = currentIndex < els.length - 1 ? currentIndex + 1 : 0;
+          els[nextIndex].focus();
+          els[nextIndex].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          return;
+        }
+
+        if (isUp || (isLeft && !isInputFocused)) {
+          e.preventDefault();
+          const prevIndex = currentIndex > 0 ? currentIndex - 1 : els.length - 1;
+          els[prevIndex].focus();
+          els[prevIndex].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          return;
+        }
+      }
+
+      if (isEnter && target && target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        target.click();
       }
     };
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, getFocusableElements]);
 
   if (!isOpen) return null;
 
@@ -195,7 +285,10 @@ export const SyncModal: React.FC<SyncModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-150">
-      <div className="w-full max-w-lg bg-tv-surface border border-tv-border rounded-3xl shadow-2xl overflow-hidden text-slate-100 flex flex-col">
+      <div
+        ref={modalContainerRef}
+        className="w-full max-w-lg bg-tv-surface border border-tv-border rounded-3xl shadow-2xl overflow-hidden text-slate-100 flex flex-col focus:outline-none"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-tv-border bg-tv-card/60 flex-shrink-0">
           <div className="flex items-center space-x-3">
