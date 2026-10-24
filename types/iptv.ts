@@ -65,6 +65,9 @@ export interface UserSettings {
   parental_pin?: string;
   parental_enabled?: boolean;
   parental_hide_adult?: boolean;
+  show_favorites_category?: boolean;
+  excluded_prefixes?: string[];
+  hidden_channel_ids?: string[];
 }
 
 export type NavigationPane = 'menu' | 'categories' | 'channels' | 'player_osd' | 'settings' | 'modal';

@@ -647,7 +647,23 @@ public class PlayerActivity extends AppCompatActivity {
             items.add(buildItem(pendingUrls.get(i), title));
         }
         int start = Math.max(0, Math.min(pendingIndex, items.size() - 1));
-        player.setMediaItems(items, start, C.TIME_UNSET);
+
+        // Restore saved resume position for VOD/Series
+        long startPos = C.TIME_UNSET;
+        if (!isLive && start < pendingUrls.size()) {
+            String currentUrl = pendingUrls.get(start);
+            if (currentUrl != null && !currentUrl.isEmpty()) {
+                SharedPreferences posPrefs = getSharedPreferences("keotv_playback_positions", Context.MODE_PRIVATE);
+                long savedPos = posPrefs.getLong("pos_" + currentUrl, 0);
+                long savedDur = posPrefs.getLong("dur_" + currentUrl, 0);
+                // Resume if not finished (more than 10s into video and less than 95% watched)
+                if (savedPos > 10000 && (savedDur == 0 || savedPos < savedDur * 0.95)) {
+                    startPos = savedPos;
+                }
+            }
+        }
+
+        player.setMediaItems(items, start, startPos);
 
         player.addListener(new Player.Listener() {
             @Override
@@ -1187,15 +1203,15 @@ public class PlayerActivity extends AppCompatActivity {
                 }
             }
 
-            // Zapping to Previous Channel / Episode (Up, Channel Up, Page Up)
+            // Zapping according to user preference (Up = Next channel/num+, Down = Previous channel/num-)
             if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_CHANNEL_UP || key == KeyEvent.KEYCODE_PAGE_UP) {
-                zapPreviousChannel();
+                zapNextChannel();
                 return true;
             }
 
-            // Zapping to Next Channel / Episode (Down, Channel Down, Page Down)
+            // Zapping to Previous Channel / Episode (Down, Channel Down, Page Down)
             if (key == KeyEvent.KEYCODE_DPAD_DOWN || key == KeyEvent.KEYCODE_CHANNEL_DOWN || key == KeyEvent.KEYCODE_PAGE_DOWN) {
-                zapNextChannel();
+                zapPreviousChannel();
                 return true;
             }
 
@@ -1240,9 +1256,28 @@ public class PlayerActivity extends AppCompatActivity {
         controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
     }
 
+    private void saveCurrentPlaybackPosition() {
+        if (player == null || isLive) return;
+        long currentPos = player.getCurrentPosition();
+        long duration = player.getDuration();
+        int curIdx = player.getCurrentMediaItemIndex();
+        if (curIdx >= 0 && curIdx < pendingUrls.size()) {
+            String url = pendingUrls.get(curIdx);
+            if (url != null && !url.isEmpty()) {
+                SharedPreferences posPrefs = getSharedPreferences("keotv_playback_positions", Context.MODE_PRIVATE);
+                posPrefs.edit()
+                        .putLong("pos_" + url, currentPos)
+                        .putLong("dur_" + url, duration > 0 ? duration : 0)
+                        .putLong("time_" + url, System.currentTimeMillis())
+                        .apply();
+            }
+        }
+    }
+
     @Override
     protected void onStop() {
         super.onStop();
+        saveCurrentPlaybackPosition();
         mainHandler.removeCallbacks(progressRunnable);
         stopCountdown();
         if (player != null) {
@@ -1253,6 +1288,7 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        saveCurrentPlaybackPosition();
         mainHandler.removeCallbacks(progressRunnable);
         stopCountdown();
         osdHandler.removeCallbacks(hideOsdRunnable);

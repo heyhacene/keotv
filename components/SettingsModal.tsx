@@ -55,6 +55,10 @@ interface SettingsModalProps {
   onToggleParentalEnabled?: (enabled: boolean) => void;
   parentalHideAdult?: boolean;
   onToggleParentalHideAdult?: (hide: boolean) => void;
+  showFavoritesCategory?: boolean;
+  onToggleShowFavoritesCategory?: (show: boolean) => void;
+  excludedPrefixes?: string[];
+  onUpdateExcludedPrefixes?: (prefixes: string[]) => void;
 }
 
 const TABS: Array<{ id: 'playlists' | 'controls' | 'categories' | 'parental' | 'player' | 'sync' | 'update' | 'feedback'; label: string; icon: any }> = [
@@ -97,8 +101,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleParentalEnabled,
   parentalHideAdult = false,
   onToggleParentalHideAdult,
+  showFavoritesCategory = true,
+  onToggleShowFavoritesCategory,
+  excludedPrefixes = [],
+  onUpdateExcludedPrefixes,
 }) => {
   const [activeTab, setActiveTab] = useState<'playlists' | 'controls' | 'categories' | 'parental' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
+  const [editingPrefixInput, setEditingPrefixInput] = useState<string>(excludedPrefixes.join(', '));
+
+  useEffect(() => {
+    setEditingPrefixInput(excludedPrefixes.join(', '));
+  }, [excludedPrefixes]);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<string | null>(null);
   const [updateInfo, setUpdateInfo] = useState<AppUpdateInfo | null>(null);
@@ -769,6 +782,85 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </span>
                     </button>
                   </div>
+                </div>
+              )}
+
+              {/* Toggle Show Favorites in Main Categories View */}
+              {onToggleShowFavoritesCategory && (
+                <div className="bg-tv-card/60 border border-tv-border p-4 rounded-2xl flex items-center justify-between">
+                  <div>
+                    <h4 className="text-xs font-bold text-white">Afficher la section Favoris</h4>
+                    <p className="text-[11px] text-slate-400">
+                      Inclut ou masque les rubriques de favoris en tête des listes de chaînes, films et séries.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onToggleShowFavoritesCategory(!showFavoritesCategory)}
+                    className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors ${
+                      showFavoritesCategory ? 'bg-tv-accent justify-end' : 'bg-slate-700 justify-start'
+                    }`}
+                  >
+                    <div className="bg-white w-4 h-4 rounded-full shadow-md" />
+                  </button>
+                </div>
+              )}
+
+              {/* Exclude channels by prefix */}
+              {onUpdateExcludedPrefixes && (
+                <div className="bg-tv-card/60 border border-tv-border p-4 rounded-2xl space-y-3">
+                  <div>
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                      Exclusion de chaînes par préfixe
+                    </h4>
+                    <p className="text-[11px] text-slate-400 mt-0.5">
+                      Séparez les préfixes par des virgules (ex: <span className="font-mono text-tv-accent">FR |, AR |, VIP :, ---</span>). Toute chaîne commençant par ces préfixes sera automatiquement masquée.
+                    </p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <input
+                      type="text"
+                      value={editingPrefixInput}
+                      onChange={(e) => setEditingPrefixInput(e.target.value)}
+                      placeholder="FR |, AR |, ---, 24/7"
+                      className="flex-1 bg-black/50 border border-tv-border focus:border-tv-accent text-white px-3 py-2 rounded-xl text-xs font-mono focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const parsed = editingPrefixInput
+                          .split(',')
+                          .map((p) => p.trim())
+                          .filter((p) => p.length > 0);
+                        onUpdateExcludedPrefixes(parsed);
+                      }}
+                      className="px-4 py-2 rounded-xl bg-tv-focus text-white text-xs font-bold hover:bg-sky-500 transition shadow-md flex-shrink-0"
+                    >
+                      Enregistrer
+                    </button>
+                  </div>
+                  {excludedPrefixes.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      {excludedPrefixes.map((p, idx) => (
+                        <span
+                          key={idx}
+                          className="px-2 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px] font-mono flex items-center space-x-1"
+                        >
+                          <span>{p}</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = excludedPrefixes.filter((_, i) => i !== idx);
+                              onUpdateExcludedPrefixes(updated);
+                            }}
+                            className="hover:text-white"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

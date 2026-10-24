@@ -14,6 +14,8 @@ interface ContextMenuModalProps {
   onOpenDetails?: (item: Channel) => void;
   onToggleAdultCategory?: (category: Category) => void;
   onToggleHideCategory?: (category: Category) => void;
+  onHideChannel?: (item: Channel) => void;
+  onExcludePrefix?: (prefix: string) => void;
 }
 
 interface ContextOption {
@@ -34,6 +36,8 @@ export const ContextMenuModal: React.FC<ContextMenuModalProps> = ({
   onOpenDetails,
   onToggleAdultCategory,
   onToggleHideCategory,
+  onHideChannel,
+  onExcludePrefix,
 }) => {
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
 
@@ -68,6 +72,37 @@ export const ContextMenuModal: React.FC<ContextMenuModalProps> = ({
         onClose();
       },
     });
+  }
+
+  if (item && onHideChannel) {
+    options.push({
+      id: 'hide_channel',
+      label: 'Masquer cette chaîne',
+      icon: EyeOff,
+      color: 'text-rose-300',
+      action: () => {
+        onHideChannel(item);
+        onClose();
+      },
+    });
+  }
+
+  if (item && onExcludePrefix) {
+    // Extract candidate prefix (e.g. "FR |", "AR :", "VIP -", "24/7")
+    const match = item.name.match(/^([A-Za-z0-9+]+(?:\s*[|:\-–—/]\s*|\s+))/);
+    const candidatePrefix = match ? match[0].trim() : '';
+    if (candidatePrefix) {
+      options.push({
+        id: 'exclude_prefix',
+        label: `Exclure le préfixe "${candidatePrefix}"`,
+        icon: EyeOff,
+        color: 'text-amber-300',
+        action: () => {
+          onExcludePrefix(candidatePrefix);
+          onClose();
+        },
+      });
+    }
   }
 
   if (category && onToggleAdultCategory) {

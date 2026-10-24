@@ -10,53 +10,93 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   },
 });
 
+export interface WatchedItem {
+  id: string;
+  title: string;
+  url: string;
+  poster?: string;
+  stream_type: 'vod' | 'series';
+  position: number; // in seconds
+  duration: number; // in seconds
+  updated_at: string;
+}
+
 export interface CloudDeviceSync {
   sync_code: string;
   user_label?: string;
   favorites: string[];
   hidden_groups: string[];
+  hidden_channels?: string[];
+  excluded_prefixes?: string[];
+  watched_positions?: WatchedItem[];
   playlists: any[];
   updated_at: string;
 }
 
-// Push local preferences to cloud
+// Push local preferences to cloud (with local storage backup and sync endpoint support)
 export async function pushSyncToCloud(code: string, data: Partial<CloudDeviceSync>) {
+  const cleanCode = code.trim().toUpperCase();
+  if (!cleanCode) return false;
+
+  const payload = {
+    sync_code: cleanCode,
+    ...data,
+    updated_at: new Date().toISOString(),
+  };
+
+  // Always cache sync bundle locally for offline and fast restore
   try {
-    const payload = {
-      sync_code: code.trim().toUpperCase(),
-      ...data,
-      updated_at: new Date().toISOString(),
-    };
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`keotv_sync_${cleanCode}`, JSON.stringify(payload));
+    }
+  } catch {}
+
+  try {
     const { error } = await supabase
       .from('keotv_sync')
       .upsert(payload, { onConflict: 'sync_code' });
     if (error) {
-      console.warn('Cloud sync error (will retry or local only):', error.message);
+      console.warn('Cloud sync error (fallback to local cache):', error.message);
       return false;
     }
     return true;
   } catch (err) {
-    console.warn('Cloud sync unavailable:', err);
+    console.warn('Cloud sync unavailable (fallback to local cache):', err);
     return false;
   }
 }
 
 // Pull cloud preferences to local
 export async function pullSyncFromCloud(code: string): Promise<CloudDeviceSync | null> {
+  const cleanCode = code.trim().toUpperCase();
+  if (!cleanCode) return null;
+
   try {
     const { data, error } = await supabase
       .from('keotv_sync')
       .select('*')
-      .eq('sync_code', code.trim().toUpperCase())
+      .eq('sync_code', cleanCode)
       .single();
-    if (error || !data) {
-      return null;
+    if (!error && data) {
+      // Update local storage backup
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`keotv_sync_${cleanCode}`, JSON.stringify(data));
+      }
+      return data as CloudDeviceSync;
     }
-    return data as CloudDeviceSync;
   } catch (err) {
-    console.warn('Failed to pull from cloud:', err);
-    return null;
+    console.warn('Failed to pull from supabase, checking local cache:', err);
   }
+
+  // Fallback to local storage
+  try {
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem(`keotv_sync_${cleanCode}`);
+      if (cached) return JSON.parse(cached);
+    }
+  } catch {}
+
+  return null;
 }
 
 // Universal In-App Feedback submitter (reusable across KeoTV, KeoNote, KeoPass, Dar)

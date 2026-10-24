@@ -34,6 +34,7 @@ import {
   SeriesEpisode,
   isSeparatorChannel,
   isAdultCategoryName,
+  shouldExcludeChannelByPrefix,
 } from '@/lib/iptv-service';
 import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
 
@@ -231,6 +232,12 @@ export default function KeoTVHome() {
   const [pendingCategoryToUnlock, setPendingCategoryToUnlock] = useState<Category | null>(null);
   const [pendingChannelToUnlock, setPendingChannelToUnlock] = useState<Channel | null>(null);
 
+  // Channel classification, prefix exclusions, and favorite section toggles
+  const [showFavoritesCategory, setShowFavoritesCategory] = useState<boolean>(true);
+  const [excludedPrefixes, setExcludedPrefixes] = useState<string[]>([]);
+  const [hiddenChannelIds, setHiddenChannelIds] = useState<Set<string>>(new Set());
+  const [watchedPositions, setWatchedPositions] = useState<Array<{ id: string; title: string; url: string; poster?: string; position: number; duration: number; stream_type: 'vod' | 'series' }>>([]);
+
   // List boundary hit state for carousel blockage feedback
   const [boundaryHit, setBoundaryHit] = useState<{
     pane: string;
@@ -272,6 +279,19 @@ export default function KeoTVHome() {
     getSetting('parental_pin', '0000').then((pin) => setParentalPin(pin || '0000'));
     getSetting('parental_enabled', false).then((en) => setParentalEnabled(Boolean(en)));
     getSetting('parental_hide_adult', false).then((hd) => setParentalHideAdult(Boolean(hd)));
+    getSetting('show_favorites_category', true).then((show) => setShowFavoritesCategory(show ?? true));
+    getSetting<string[]>('excluded_prefixes', []).then((prefixes) => setExcludedPrefixes(prefixes || []));
+    getSetting<string[]>('hidden_channel_ids', []).then((ids) => setHiddenChannelIds(new Set(ids || [])));
+
+    // Load watched positions for VOD / series resume
+    try {
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('keotv_watched_history');
+        if (stored) {
+          setWatchedPositions(JSON.parse(stored));
+        }
+      }
+    } catch {}
   }, []);
 
   // Recalculate favorite counts by universe (live, vod, series, total)
@@ -1095,15 +1115,17 @@ export default function KeoTVHome() {
       sectionCats.sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0));
     }
 
-    // Prepend universe-specific favorites category at the top of the category list
-    if (activeSection === 'live') {
-      return [favLiveCategory, ...sectionCats];
-    }
-    if (activeSection === 'vod') {
-      return [favVodCategory, ...sectionCats];
-    }
-    if (activeSection === 'series') {
-      return [favSeriesCategory, ...sectionCats];
+    // Prepend universe-specific favorites category at the top of the category list (if enabled)
+    if (showFavoritesCategory) {
+      if (activeSection === 'live') {
+        return [favLiveCategory, ...sectionCats];
+      }
+      if (activeSection === 'vod') {
+        return [favVodCategory, ...sectionCats];
+      }
+      if (activeSection === 'series') {
+        return [favSeriesCategory, ...sectionCats];
+      }
     }
 
     return sectionCats;
@@ -1114,6 +1136,7 @@ export default function KeoTVHome() {
     parentalEnabled,
     parentalHideAdult,
     unlockedAdultSession,
+    showFavoritesCategory,
     favSeriesCategory,
     favVodCategory,
     favLiveCategory,
@@ -1209,8 +1232,14 @@ export default function KeoTVHome() {
     }
   };
 
-  // Filtered channels for currently active category
-  const filteredChannels = channels;
+  // Filtered channels for currently active category (excluding hidden channels & configured prefixes)
+  const filteredChannels = useMemo(() => {
+    return channels.filter((ch) => {
+      if (ch.is_hidden || hiddenChannelIds.has(ch.id)) return false;
+      if (shouldExcludeChannelByPrefix(ch.name, excludedPrefixes)) return false;
+      return true;
+    });
+  }, [channels, hiddenChannelIds, excludedPrefixes]);
 
   // Update EPG info whenever focused channel changes (debounced by 80ms for ultra-fluid DPAD navigation)
   useEffect(() => {
@@ -1422,6 +1451,45 @@ export default function KeoTVHome() {
     },
     [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession, adultCategoryIds]
   );
+
+  // Hide a single channel from view
+  const handleHideChannel = useCallback(async (target: Channel) => {
+    setHiddenChannelIds((prev) => {
+      const next = new Set(prev);
+      next.add(target.id);
+      setSetting('hidden_channel_ids', Array.from(next));
+      return next;
+    });
+    showToast(`Chaîne "${target.name}" masquée`);
+  }, [showToast]);
+
+  // Exclude a prefix across all channels
+  const handleExcludePrefix = useCallback(async (prefix: string) => {
+    const clean = prefix.trim();
+    if (!clean) return;
+    setExcludedPrefixes((prev) => {
+      if (prev.includes(clean)) return prev;
+      const next = [...prev, clean];
+      setSetting('excluded_prefixes', next);
+      return next;
+    });
+    showToast(`Préfixe "${clean}" exclu des listes`);
+  }, [showToast]);
+
+  // Save playback progress for resume watching
+  const handleSavePlaybackPosition = useCallback((item: { id: string; title: string; url: string; poster?: string; stream_type: 'vod' | 'series'; position: number; duration: number }) => {
+    if (item.position < 15) return; // Ignore very early aborts
+    setWatchedPositions((prev) => {
+      const filtered = prev.filter((p) => p.id !== item.id && p.url !== item.url);
+      const next = [{ ...item, updated_at: new Date().toISOString() }, ...filtered].slice(0, 30);
+      try {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('keotv_watched_history', JSON.stringify(next));
+        }
+      } catch {}
+      return next;
+    });
+  }, []);
 
   // Next / Previous Channel Switchers (for mobile gestures and on-screen controls)
   const handleNextChannel = useCallback(() => {
@@ -3076,6 +3144,16 @@ export default function KeoTVHome() {
         onUpdateParentalPin={handleUpdateParentalPin}
         onToggleParentalEnabled={handleToggleParentalEnabled}
         onToggleParentalHideAdult={handleToggleParentalHideAdult}
+        showFavoritesCategory={showFavoritesCategory}
+        onToggleShowFavoritesCategory={(show) => {
+          setShowFavoritesCategory(show);
+          setSetting('show_favorites_category', show);
+        }}
+        excludedPrefixes={excludedPrefixes}
+        onUpdateExcludedPrefixes={(prefixes) => {
+          setExcludedPrefixes(prefixes);
+          setSetting('excluded_prefixes', prefixes);
+        }}
         onOpenCategoryManager={() => setIsCategoryManagerOpen(true)}
         parentalCategories={categories}
         onToggleAdultCategory={handleToggleAdultCategory}
@@ -3188,6 +3266,8 @@ export default function KeoTVHome() {
         onOpenDetails={(ch) => handleSelectChannel(ch, false)}
         onToggleAdultCategory={handleToggleAdultCategory}
         onToggleHideCategory={handleToggleHideCategory}
+        onHideChannel={handleHideChannel}
+        onExcludePrefix={handleExcludePrefix}
       />
 
       {/* Startup Update Alert Modal (Automatically triggered if a newer build is released) */}

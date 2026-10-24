@@ -144,6 +144,24 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
     });
   };
 
+  const [focusArea, setFocusArea] = useState<'tabs' | 'list' | 'footer'>('tabs');
+  const [tabIndex, setTabIndex] = useState<number>(0); // 0: live, 1: vod, 2: series
+
+  // Reset focus to tabs or list upon opening
+  useEffect(() => {
+    if (isOpen) {
+      setFocusArea('tabs');
+      setFocusedIndex(0);
+    }
+  }, [isOpen]);
+
+  // Sync tabIndex when activeTab changes
+  useEffect(() => {
+    if (activeTab === 'live') setTabIndex(0);
+    else if (activeTab === 'vod') setTabIndex(1);
+    else if (activeTab === 'series') setTabIndex(2);
+  }, [activeTab]);
+
   // TV Remote controls
   useEffect(() => {
     if (!isOpen) return;
@@ -170,43 +188,99 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
         return;
       }
 
-      if (isUp) {
-        e.preventDefault();
-        setFocusedIndex((prev) => Math.max(0, prev - 1));
-        return;
-      }
+      if (focusArea === 'tabs') {
+        if (isLeft) {
+          e.preventDefault();
+          const nextTabIdx = Math.max(0, tabIndex - 1);
+          setTabIndex(nextTabIdx);
+          const tabKeys: Array<'live' | 'vod' | 'series'> = ['live', 'vod', 'series'];
+          setActiveTab(tabKeys[nextTabIdx]);
+          setFocusedIndex(0);
+          return;
+        }
+        if (isRight) {
+          e.preventDefault();
+          const nextTabIdx = Math.min(2, tabIndex + 1);
+          setTabIndex(nextTabIdx);
+          const tabKeys: Array<'live' | 'vod' | 'series'> = ['live', 'vod', 'series'];
+          setActiveTab(tabKeys[nextTabIdx]);
+          setFocusedIndex(0);
+          return;
+        }
+        if (isDown) {
+          e.preventDefault();
+          if (displayedCategories.length > 0) {
+            setFocusArea('list');
+            setFocusedIndex(0);
+          } else {
+            setFocusArea('footer');
+          }
+          return;
+        }
+      } else if (focusArea === 'list') {
+        if (isUp) {
+          e.preventDefault();
+          if (focusedIndex > 0) {
+            setFocusedIndex((prev) => prev - 1);
+          } else {
+            setFocusArea('tabs');
+          }
+          return;
+        }
 
-      if (isDown) {
-        e.preventDefault();
-        setFocusedIndex((prev) => Math.min(displayedCategories.length - 1, prev + 1));
-        return;
-      }
+        if (isDown) {
+          e.preventDefault();
+          if (focusedIndex < displayedCategories.length - 1) {
+            setFocusedIndex((prev) => prev + 1);
+          } else {
+            setFocusArea('footer');
+          }
+          return;
+        }
 
-      if (isLeft) {
-        e.preventDefault();
-        if (focusedAction === 'moveDown') setFocusedAction('moveUp');
-        else if (focusedAction === 'toggleHide') setFocusedAction('moveDown');
-        else if (focusedAction === 'toggleAdult') setFocusedAction('toggleHide');
-        return;
-      }
+        if (isLeft) {
+          e.preventDefault();
+          if (focusedAction === 'moveDown') setFocusedAction('moveUp');
+          else if (focusedAction === 'toggleHide') setFocusedAction('moveDown');
+          else if (focusedAction === 'toggleAdult') setFocusedAction('toggleHide');
+          return;
+        }
 
-      if (isRight) {
-        e.preventDefault();
-        if (focusedAction === 'moveUp') setFocusedAction('moveDown');
-        else if (focusedAction === 'moveDown') setFocusedAction('toggleHide');
-        else if (focusedAction === 'toggleHide') setFocusedAction('toggleAdult');
-        return;
-      }
+        if (isRight) {
+          e.preventDefault();
+          if (focusedAction === 'moveUp') setFocusedAction('moveDown');
+          else if (focusedAction === 'moveDown') setFocusedAction('toggleHide');
+          else if (focusedAction === 'toggleHide') setFocusedAction('toggleAdult');
+          return;
+        }
 
-      if (isEnter) {
-        e.preventDefault();
-        const currentCat = displayedCategories[focusedIndex];
-        if (!currentCat) return;
+        if (isEnter) {
+          e.preventDefault();
+          const currentCat = displayedCategories[focusedIndex];
+          if (!currentCat) return;
 
-        if (focusedAction === 'moveUp') handleMove(currentCat, 'up');
-        else if (focusedAction === 'moveDown') handleMove(currentCat, 'down');
-        else if (focusedAction === 'toggleHide') handleToggleHide(currentCat);
-        else if (focusedAction === 'toggleAdult') handleToggleAdult(currentCat);
+          if (focusedAction === 'moveUp') handleMove(currentCat, 'up');
+          else if (focusedAction === 'moveDown') handleMove(currentCat, 'down');
+          else if (focusedAction === 'toggleHide') handleToggleHide(currentCat);
+          else if (focusedAction === 'toggleAdult') handleToggleAdult(currentCat);
+          return;
+        }
+      } else if (focusArea === 'footer') {
+        if (isUp) {
+          e.preventDefault();
+          if (displayedCategories.length > 0) {
+            setFocusArea('list');
+            setFocusedIndex(displayedCategories.length - 1);
+          } else {
+            setFocusArea('tabs');
+          }
+          return;
+        }
+        if (isEnter) {
+          e.preventDefault();
+          onClose();
+          return;
+        }
       }
     };
 
@@ -214,7 +288,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
       window.addEventListener('keydown', handleKeyDown);
     }
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, isPinModalOpen, displayedCategories, focusedIndex, focusedAction, onClose]);
+  }, [isOpen, isPinModalOpen, focusArea, tabIndex, displayedCategories, focusedIndex, focusedAction, onClose]);
 
   if (!isOpen) return null;
 
@@ -253,10 +327,17 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
               type="button"
               onClick={() => {
                 setActiveTab('live');
+                setTabIndex(0);
                 setFocusedIndex(0);
               }}
               className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                activeTab === 'live' ? 'bg-tv-focus text-white shadow-md' : 'text-slate-400 hover:text-white'
+                activeTab === 'live'
+                  ? focusArea === 'tabs' && tabIndex === 0
+                    ? 'bg-tv-focus text-white shadow-md ring-2 ring-tv-accent'
+                    : 'bg-tv-focus text-white shadow-md'
+                  : focusArea === 'tabs' && tabIndex === 0
+                  ? 'bg-white/20 text-white ring-2 ring-tv-accent'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
               <Tv className="w-3.5 h-3.5 text-sky-400" />
@@ -266,10 +347,17 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
               type="button"
               onClick={() => {
                 setActiveTab('vod');
+                setTabIndex(1);
                 setFocusedIndex(0);
               }}
               className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                activeTab === 'vod' ? 'bg-tv-focus text-white shadow-md' : 'text-slate-400 hover:text-white'
+                activeTab === 'vod'
+                  ? focusArea === 'tabs' && tabIndex === 1
+                    ? 'bg-tv-focus text-white shadow-md ring-2 ring-tv-accent'
+                    : 'bg-tv-focus text-white shadow-md'
+                  : focusArea === 'tabs' && tabIndex === 1
+                  ? 'bg-white/20 text-white ring-2 ring-tv-accent'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
               <Film className="w-3.5 h-3.5 text-purple-400" />
@@ -279,10 +367,17 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
               type="button"
               onClick={() => {
                 setActiveTab('series');
+                setTabIndex(2);
                 setFocusedIndex(0);
               }}
               className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition ${
-                activeTab === 'series' ? 'bg-tv-focus text-white shadow-md' : 'text-slate-400 hover:text-white'
+                activeTab === 'series'
+                  ? focusArea === 'tabs' && tabIndex === 2
+                    ? 'bg-tv-focus text-white shadow-md ring-2 ring-tv-accent'
+                    : 'bg-tv-focus text-white shadow-md'
+                  : focusArea === 'tabs' && tabIndex === 2
+                  ? 'bg-white/20 text-white ring-2 ring-tv-accent'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
               <Clapperboard className="w-3.5 h-3.5 text-pink-400" />
@@ -323,7 +418,7 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
             </div>
           ) : (
             displayedCategories.map((cat, idx) => {
-              const isRowFocused = focusedIndex === idx;
+              const isRowFocused = focusArea === 'list' && focusedIndex === idx;
 
               return (
                 <div
@@ -451,7 +546,9 @@ export const CategoryManagerModal: React.FC<CategoryManagerModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl bg-tv-accent text-slate-950 font-bold hover:bg-sky-400 transition"
+            className={`px-4 py-2 rounded-xl bg-tv-accent text-slate-950 font-bold hover:bg-sky-400 transition ${
+              focusArea === 'footer' ? 'ring-4 ring-white ring-offset-2 ring-offset-black scale-105' : ''
+            }`}
           >
             Terminer
           </button>

@@ -212,15 +212,14 @@ export function useTVNavigation({
           e.preventDefault();
           if (channelCount <= 1) return;
           const current = focusedChannelIndexRef.current;
-          if (current <= 0) {
-            if (shouldAllowWrap('fullscreen', 'top', e.repeat)) {
-              const next = channelCount - 1;
-              setFocusedChannelIndex(next);
-              onSelectChannel(next, true);
+          if (current >= channelCount - 1) {
+            if (shouldAllowWrap('fullscreen', 'bottom', e.repeat)) {
+              setFocusedChannelIndex(0);
+              onSelectChannel(0, true);
             }
           } else {
             boundaryAttemptRef.current = null;
-            const next = current - 1;
+            const next = current + 1;
             setFocusedChannelIndex(next);
             onSelectChannel(next, true);
           }
@@ -230,14 +229,15 @@ export function useTVNavigation({
           e.preventDefault();
           if (channelCount <= 1) return;
           const current = focusedChannelIndexRef.current;
-          if (current >= channelCount - 1) {
-            if (shouldAllowWrap('fullscreen', 'bottom', e.repeat)) {
-              setFocusedChannelIndex(0);
-              onSelectChannel(0, true);
+          if (current <= 0) {
+            if (shouldAllowWrap('fullscreen', 'top', e.repeat)) {
+              const next = channelCount - 1;
+              setFocusedChannelIndex(next);
+              onSelectChannel(next, true);
             }
           } else {
             boundaryAttemptRef.current = null;
-            const next = current + 1;
+            const next = current - 1;
             setFocusedChannelIndex(next);
             onSelectChannel(next, true);
           }

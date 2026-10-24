@@ -194,6 +194,18 @@ export function cleanSeparatorName(name: string): string {
   return name.replace(/^[-=*#_~|.\s/\\+]+|[-=*#_~|.\s/\\+]+$/g, '').trim() || name;
 }
 
+/**
+ * Checks if a channel should be excluded based on configured prefixes (case-insensitive)
+ */
+export function shouldExcludeChannelByPrefix(channelName: string, excludedPrefixes: string[]): boolean {
+  if (!channelName || !excludedPrefixes || excludedPrefixes.length === 0) return false;
+  const lowerName = channelName.trim().toLowerCase();
+  return excludedPrefixes.some((p) => {
+    const cleanP = p.trim().toLowerCase();
+    return cleanP.length > 0 && lowerName.startsWith(cleanP);
+  });
+}
+
 // Detect video resolution from channel name
 export function detectResolution(name: string): '4K' | 'FHD' | 'HD' | 'SD' {
   const upper = (name || '').toUpperCase();
