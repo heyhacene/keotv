@@ -35,6 +35,8 @@ export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'js
         headers: {
           'User-Agent': IPTV_USER_AGENT,
           'Accept': responseType === 'json' ? 'application/json, text/plain, */*' : '*/*',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
           'Connection': 'keep-alive',
         },
         responseType: responseType === 'json' ? 'json' : 'text',

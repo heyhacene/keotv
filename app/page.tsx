@@ -2315,6 +2315,14 @@ export default function KeoTVHome() {
 
         const allPls = await db.playlists.toArray();
         setPlaylists(allPls);
+
+        const primaryPl = allPls[0];
+        if (primaryPl) {
+          // Trigger automatic channel loading in background or directly
+          handleResyncPlaylist(primaryPl).catch((resyncErr) => {
+            console.warn('Auto-resync on account sync failed:', resyncErr);
+          });
+        }
       }
 
       // 2. Restore user favorites
