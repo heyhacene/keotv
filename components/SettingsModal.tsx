@@ -190,7 +190,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // TV Remote Navigation states
   const [focusArea, setFocusArea] = useState<'tabs' | 'content'>('tabs');
-  const [selectedTabNavIndex, setSelectedTabNavIndex] = useState<number>(0); // 0..4 = tabs, 5 = close button
+  const [selectedTabNavIndex, setSelectedTabNavIndex] = useState<number>(0); // 0..TABS.length-1 = tabs, TABS.length = close button
   const [contentFocusIndex, setContentFocusIndex] = useState<number>(0);
   const modalBodyRef = useRef<HTMLDivElement | null>(null);
 
@@ -204,7 +204,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     );
   }, []);
 
-  // When opening, reset TV focus directly onto the first tab
+  // Sync visual TV focus attribute onto active content element
+  useEffect(() => {
+    if (!isOpen) return;
+    const items = getContentFocusableElements();
+    items.forEach((item, idx) => {
+      if (focusArea === 'content' && idx === contentFocusIndex) {
+        item.setAttribute('data-tv-focused', 'true');
+        item.focus();
+        item.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+      } else {
+        item.removeAttribute('data-tv-focused');
+      }
+    });
+  }, [isOpen, focusArea, contentFocusIndex, activeTab, getContentFocusableElements]);
+
+  // When opening or switching tabs, reset or align TV focus
   useEffect(() => {
     if (isOpen) {
       setFocusArea('tabs');
@@ -212,7 +227,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setContentFocusIndex(0);
       const timer = setTimeout(() => {
         document.getElementById('settings-tab-0')?.focus();
-      }, 100);
+      }, 50);
       return () => clearTimeout(timer);
     }
   }, [isOpen]);
@@ -274,37 +289,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         keyCode === 27 ||
         keyCode === 4;    // Android BACK
 
-      // Close modal on remote Back
+      // Close modal or return to sidebar on remote Back
       if (isBack) {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        if (focusArea === 'content') {
+          // Return focus to vertical tabs list
+          setFocusArea('tabs');
+          const target = document.getElementById(`settings-tab-${selectedTabNavIndex}`);
+          target?.focus();
+        } else {
+          onClose();
+        }
         return;
       }
 
-      // --- SECTION 1: TOP TABS NAVIGATION ---
+      // --- SECTION 1: MASTER SIDEBAR TABS (VERTICAL D-PAD) ---
       if (focusArea === 'tabs') {
-        const totalItems = TABS.length + 1; // tabs (0..TABS.length-1) + close button (TABS.length)
+        const totalItems = TABS.length + 1; // 0..TABS.length-1 = tabs, TABS.length = close button
 
-        if (isLeft) {
+        if (isUp) {
           e.preventDefault();
           setSelectedTabNavIndex((prev) => {
             const next = prev > 0 ? prev - 1 : totalItems - 1;
-            if (next < TABS.length) setActiveTab(TABS[next].id);
+            if (next < TABS.length) {
+              setActiveTab(TABS[next].id);
+              setContentFocusIndex(0);
+            }
             const target = document.getElementById(`settings-tab-${next}`);
             target?.focus();
-            return next;
-          });
-          return;
-        }
-
-        if (isRight) {
-          e.preventDefault();
-          setSelectedTabNavIndex((prev) => {
-            const next = prev < totalItems - 1 ? prev + 1 : 0;
-            if (next < TABS.length) setActiveTab(TABS[next].id);
-            const target = document.getElementById(`settings-tab-${next}`);
-            target?.focus();
+            target?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
             return next;
           });
           return;
@@ -312,43 +326,83 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         if (isDown) {
           e.preventDefault();
+          setSelectedTabNavIndex((prev) => {
+            const next = prev < totalItems - 1 ? prev + 1 : 0;
+            if (next < TABS.length) {
+              setActiveTab(TABS[next].id);
+              setContentFocusIndex(0);
+            }
+            const target = document.getElementById(`settings-tab-${next}`);
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+            return next;
+          });
+          return;
+        }
+
+        if (isRight) {
+          e.preventDefault();
+          if (selectedTabNavIndex === TABS.length) {
+            // On close button, do nothing on Right
+            return;
+          }
           const items = getContentFocusableElements();
           if (items.length > 0) {
             setFocusArea('content');
             setContentFocusIndex(0);
             items[0].focus();
-            items[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            items[0].scrollIntoView({ behavior: 'auto', block: 'nearest' });
           }
           return;
         }
 
         if (isEnter) {
+          e.preventDefault();
           if (selectedTabNavIndex === TABS.length) {
-            e.preventDefault();
             onClose();
           } else {
-            e.preventDefault();
             const items = getContentFocusableElements();
             if (items.length > 0) {
               setFocusArea('content');
               setContentFocusIndex(0);
               items[0].focus();
-              items[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              items[0].scrollIntoView({ behavior: 'auto', block: 'nearest' });
             }
           }
           return;
         }
       }
 
-      // --- SECTION 2: CONTENT AREA NAVIGATION ---
+      // --- SECTION 2: DETAIL CONTENT AREA (SPATIAL D-PAD) ---
       if (focusArea === 'content') {
         const items = getContentFocusableElements();
         if (items.length === 0) {
-          if (isUp) {
+          if (isLeft || isUp) {
             e.preventDefault();
             setFocusArea('tabs');
             document.getElementById(`settings-tab-${selectedTabNavIndex}`)?.focus();
           }
+          return;
+        }
+
+        if (isLeft) {
+          e.preventDefault();
+          // Returning to vertical tabs sidebar
+          setFocusArea('tabs');
+          const target = document.getElementById(`settings-tab-${selectedTabNavIndex}`);
+          target?.focus();
+          return;
+        }
+
+        if (isRight) {
+          e.preventDefault();
+          // Move forward to next interactive element if on horizontal row
+          setContentFocusIndex((prev) => {
+            const next = Math.min(items.length - 1, prev + 1);
+            items[next]?.focus();
+            items[next]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+            return next;
+          });
           return;
         }
 
@@ -357,7 +411,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           setContentFocusIndex((prev) => {
             const next = Math.min(items.length - 1, prev + 1);
             items[next]?.focus();
-            items[next]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            items[next]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
             return next;
           });
           return;
@@ -366,29 +420,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         if (isUp) {
           e.preventDefault();
           if (contentFocusIndex === 0) {
-            // Return to top tabs
+            // First item: Return to master tabs sidebar
             setFocusArea('tabs');
-            document.getElementById(`settings-tab-${selectedTabNavIndex}`)?.focus();
+            const target = document.getElementById(`settings-tab-${selectedTabNavIndex}`);
+            target?.focus();
           } else {
             setContentFocusIndex((prev) => {
               const next = Math.max(0, prev - 1);
               items[next]?.focus();
-              items[next]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              items[next]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
               return next;
             });
           }
-          return;
-        }
-
-        if (isLeft || isRight) {
-          // Allow horizontal navigation between side-by-side buttons
-          e.preventDefault();
-          setContentFocusIndex((prev) => {
-            const next = isLeft ? Math.max(0, prev - 1) : Math.min(items.length - 1, prev + 1);
-            items[next]?.focus();
-            items[next]?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            return next;
-          });
           return;
         }
 
@@ -407,7 +450,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [isOpen, focusArea, selectedTabNavIndex, contentFocusIndex, getContentFocusableElements, onClose]);
+  }, [isOpen, isPinModalOpen, focusArea, selectedTabNavIndex, contentFocusIndex, getContentFocusableElements, onClose]);
 
   if (!isOpen && !isPinModalOpen) return null;
 
@@ -490,42 +533,59 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        {/* Full-Width Navigation Tabs */}
-        <div className="flex border-b border-tv-border/80 bg-black/40 px-8 md:px-12 overflow-x-auto scrollbar-none flex-shrink-0">
-          {TABS.map((tab, idx) => {
-            const Icon = tab.icon;
-            const isTabActive = activeTab === tab.id;
-            const isTabFocused = focusArea === 'tabs' && selectedTabNavIndex === idx;
+        {/* Main Content Area: Split-Screen Master-Detail */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Master Sidebar (Vertical Navigation Tabs) */}
+          <div className="w-72 md:w-80 bg-tv-card/60 border-r border-tv-border/80 flex flex-col p-4 space-y-1.5 overflow-y-auto flex-shrink-0">
+            <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+              Rubriques
+            </div>
+            {TABS.map((tab, idx) => {
+              const Icon = tab.icon;
+              const isTabActive = activeTab === tab.id;
+              const isTabFocused = focusArea === 'tabs' && selectedTabNavIndex === idx;
 
-            return (
-              <button
-                key={tab.id}
-                id={`settings-tab-${idx}`}
-                onClick={() => {
-                  setActiveTab(tab.id);
-                  setSelectedTabNavIndex(idx);
-                  setFocusArea('tabs');
-                }}
-                className={`flex items-center space-x-3 px-6 py-4 text-xs font-bold tracking-wider uppercase border-b-2 transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
-                  isTabFocused
-                    ? 'bg-tv-focus text-white border-tv-accent ring-2 ring-tv-accent scale-[1.02] shadow-lg'
-                    : isTabActive
-                    ? 'border-tv-accent text-tv-accent bg-tv-accent/10'
-                    : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-white/5'
-                }`}
-              >
-                <Icon className="w-4 h-4" />
-                <span>{tab.label}</span>
-              </button>
-            );
-          })}
-        </div>
+              return (
+                <button
+                  key={tab.id}
+                  id={`settings-tab-${idx}`}
+                  onClick={() => {
+                    setActiveTab(tab.id);
+                    setSelectedTabNavIndex(idx);
+                    setFocusArea('tabs');
+                  }}
+                  className={`w-full flex items-center space-x-3.5 px-4 py-3.5 rounded-xl text-xs font-bold tracking-wide transition text-left focus:outline-none ${
+                    isTabFocused
+                      ? 'bg-tv-focus text-white ring-4 ring-white shadow-2xl scale-[1.02] z-10'
+                      : isTabActive
+                      ? 'bg-tv-accent/15 text-tv-accent border border-tv-accent/30 font-extrabold'
+                      : 'text-slate-300 hover:text-white hover:bg-white/5 border border-transparent'
+                  }`}
+                >
+                  <Icon className={`w-5 h-5 flex-shrink-0 ${isTabFocused ? 'text-white' : isTabActive ? 'text-tv-accent' : 'text-slate-400'}`} />
+                  <span className="truncate flex-1">{tab.label}</span>
+                  {isTabActive && (
+                    <span className="w-2 h-2 rounded-full bg-tv-accent flex-shrink-0 animate-pulse" />
+                  )}
+                </button>
+              );
+            })}
 
-        {/* Tab Content (Spacious, full screen height with elegant max-w) */}
-        <div ref={modalBodyRef} className="flex-1 overflow-y-auto px-8 md:px-12 py-8 max-w-5xl mx-auto w-full space-y-6">
-          {/* ============================================================== */}
-          {/* TAB 1: PLAYLISTS & ABONNEMENTS                                 */}
-          {/* ============================================================== */}
+            <div className="pt-4 mt-auto">
+              <div className="p-3 bg-black/40 rounded-xl border border-white/5 text-[11px] text-slate-400 space-y-1">
+                <span className="font-semibold text-slate-300 block">Navigation Télécommande :</span>
+                <p>• <strong>Haut / Bas :</strong> Changer de rubrique</p>
+                <p>• <strong>Droite / OK :</strong> Entrer dans les réglages</p>
+                <p>• <strong>Gauche / Retour :</strong> Revenir au menu</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Detail Pane (Settings Content) */}
+          <div ref={modalBodyRef} className="flex-1 overflow-y-auto p-6 md:p-10 space-y-6">
+            {/* ============================================================== */}
+            {/* TAB 1: PLAYLISTS & ABONNEMENTS                                 */}
+            {/* ============================================================== */}
           {activeTab === 'playlists' && (
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1619,6 +1679,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
           )}
+          </div>
         </div>
 
         {/* Footer */}

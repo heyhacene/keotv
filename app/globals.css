@@ -38,3 +38,13 @@ button:focus,
 div:focus {
   outline: none;
 }
+
+[data-tv-focused="true"] {
+  outline: 3px solid #38bdf8 !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.6) !important;
+  transform: scale(1.02);
+  transition: transform 0.15s ease, outline 0.15s ease, box-shadow 0.15s ease;
+  z-index: 30 !important;
+}
+
