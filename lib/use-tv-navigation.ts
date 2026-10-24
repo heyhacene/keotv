@@ -15,11 +15,19 @@ export interface TVNavOptions {
   setFocusedChannelIndex: (index: number | ((prev: number) => number)) => void;
   focusedMenuIndex: number;
   setFocusedMenuIndex: (index: number | ((prev: number) => number)) => void;
+  focusedCategoryHeaderIndex?: number;
+  setFocusedCategoryHeaderIndex?: (index: number | ((prev: number) => number)) => void;
+  focusedChannelHeaderIndex?: number;
+  setFocusedChannelHeaderIndex?: (index: number | ((prev: number) => number)) => void;
   onSelectCategory: (index: number, switchPane?: boolean) => void;
   onSelectChannel: (index: number, fullscreen: boolean) => void;
   onToggleFavorite: (channelIndex: number) => void;
   onOpenContextMenu?: (channelIndex: number) => void;
   onSelectMenuItem: (menuIndex: number) => void;
+  onOpenCategoryManager?: () => void;
+  onOpenSearch?: () => void;
+  onCategorySortChange?: (sort: 'playlist' | 'alpha' | 'count') => void;
+  onChannelSortChange?: (sort: 'playlist' | 'alpha' | 'num') => void;
   isFullscreen: boolean;
   setIsFullscreen: (full: boolean) => void;
   onJumpToChannelNumber: (num: number) => void;
@@ -40,11 +48,19 @@ export function useTVNavigation({
   setFocusedChannelIndex,
   focusedMenuIndex,
   setFocusedMenuIndex,
+  focusedCategoryHeaderIndex = 2,
+  setFocusedCategoryHeaderIndex,
+  focusedChannelHeaderIndex = 0,
+  setFocusedChannelHeaderIndex,
   onSelectCategory,
   onSelectChannel,
   onToggleFavorite,
   onOpenContextMenu,
   onSelectMenuItem,
+  onOpenCategoryManager,
+  onOpenSearch,
+  onCategorySortChange,
+  onChannelSortChange,
   isFullscreen,
   setIsFullscreen,
   onJumpToChannelNumber,
@@ -61,6 +77,10 @@ export function useTVNavigation({
   focusedChannelIndexRef.current = focusedChannelIndex;
   const focusedMenuIndexRef = useRef(focusedMenuIndex);
   focusedMenuIndexRef.current = focusedMenuIndex;
+  const focusedCategoryHeaderIndexRef = useRef(focusedCategoryHeaderIndex);
+  focusedCategoryHeaderIndexRef.current = focusedCategoryHeaderIndex;
+  const focusedChannelHeaderIndexRef = useRef(focusedChannelHeaderIndex);
+  focusedChannelHeaderIndexRef.current = focusedChannelHeaderIndex;
 
   // Track boundary attempts for list carousel blockage (gives user time to understand they are at the end)
   const boundaryAttemptRef = useRef<{
@@ -250,26 +270,33 @@ export function useTVNavigation({
       if (isUp) {
         e.preventDefault();
         if (activePane === 'channels') {
-          if (channelCount <= 1) return;
           const current = focusedChannelIndexRef.current;
           if (current <= 0) {
-            if (shouldAllowWrap('channels', 'top', e.repeat)) {
-              setFocusedChannelIndex(channelCount - 1);
-            }
+            // Move up into channel header sort bar!
+            setActivePane('channel_header');
+            setFocusedChannelHeaderIndex?.(0);
           } else {
             boundaryAttemptRef.current = null;
             setFocusedChannelIndex((prev) => Math.max(0, prev - 1));
           }
+        } else if (activePane === 'channel_header') {
+          // Already at top
         } else if (activePane === 'categories') {
-          if (categoryCount <= 1) return;
           const current = focusedCategoryIndexRef.current;
           if (current <= 0) {
-            if (shouldAllowWrap('categories', 'top', e.repeat)) {
-              setFocusedCategoryIndex(categoryCount - 1);
-            }
+            // Move up into category header sort bar (row 2: sort pills)
+            setActivePane('category_header');
+            setFocusedCategoryHeaderIndex?.(2);
           } else {
             boundaryAttemptRef.current = null;
             setFocusedCategoryIndex((prev) => Math.max(0, prev - 1));
+          }
+        } else if (activePane === 'category_header') {
+          const current = focusedCategoryHeaderIndexRef.current;
+          if (current >= 2) {
+            // Row 2 (2: playlist, 3: alpha, 4: count) -> move up to Row 1 (0: order, 1: search)
+            const next = current === 4 ? 1 : 0;
+            setFocusedCategoryHeaderIndex?.(next);
           }
         } else if (activePane === 'menu') {
           const current = focusedMenuIndexRef.current;
@@ -298,6 +325,10 @@ export function useTVNavigation({
             boundaryAttemptRef.current = null;
             setFocusedChannelIndex((prev) => prev + 1);
           }
+        } else if (activePane === 'channel_header') {
+          // Down from channel header enters channel list at index 0
+          setActivePane('channels');
+          setFocusedChannelIndex(0);
         } else if (activePane === 'categories') {
           if (categoryCount <= 1) return;
           const current = focusedCategoryIndexRef.current;
@@ -308,6 +339,17 @@ export function useTVNavigation({
           } else {
             boundaryAttemptRef.current = null;
             setFocusedCategoryIndex((prev) => prev + 1);
+          }
+        } else if (activePane === 'category_header') {
+          const current = focusedCategoryHeaderIndexRef.current;
+          if (current <= 1) {
+            // Row 1 -> Row 2 (0 -> 2: playlist, 1 -> 4: count)
+            const next = current === 0 ? 2 : 4;
+            setFocusedCategoryHeaderIndex?.(next);
+          } else {
+            // Row 2 -> Enter category list at index 0
+            setActivePane('categories');
+            setFocusedCategoryIndex(0);
           }
         } else if (activePane === 'menu') {
           const current = focusedMenuIndexRef.current;
@@ -331,8 +373,27 @@ export function useTVNavigation({
             onJumpToCurrentCategory();
           }
           setActivePane('categories');
+        } else if (activePane === 'channel_header') {
+          const current = focusedChannelHeaderIndexRef.current;
+          if (current > 0) {
+            setFocusedChannelHeaderIndex?.((prev) => Math.max(0, prev - 1));
+          } else {
+            setActivePane('category_header');
+            setFocusedCategoryHeaderIndex?.(4);
+          }
         } else if (activePane === 'categories') {
           setActivePane('menu');
+        } else if (activePane === 'category_header') {
+          const current = focusedCategoryHeaderIndexRef.current;
+          if (current === 1) {
+            setFocusedCategoryHeaderIndex?.(0);
+          } else if (current === 0) {
+            setActivePane('menu');
+          } else if (current > 2) {
+            setFocusedCategoryHeaderIndex?.((prev) => Math.max(2, prev - 1));
+          } else if (current === 2) {
+            setActivePane('menu');
+          }
         }
         return;
       }
@@ -345,6 +406,24 @@ export function useTVNavigation({
         } else if (activePane === 'categories') {
           onSelectCategory(focusedCategoryIndexRef.current, true);
           setActivePane('channels');
+        } else if (activePane === 'category_header') {
+          const current = focusedCategoryHeaderIndexRef.current;
+          if (current === 0) {
+            setFocusedCategoryHeaderIndex?.(1);
+          } else if (current === 1) {
+            setActivePane('channel_header');
+            setFocusedChannelHeaderIndex?.(0);
+          } else if (current < 4) {
+            setFocusedCategoryHeaderIndex?.((prev) => Math.min(4, prev + 1));
+          } else if (current === 4) {
+            setActivePane('channels');
+            setFocusedChannelIndex(0);
+          }
+        } else if (activePane === 'channel_header') {
+          const current = focusedChannelHeaderIndexRef.current;
+          if (current < 2) {
+            setFocusedChannelHeaderIndex?.((prev) => Math.min(2, prev + 1));
+          }
         }
         return;
       }
@@ -362,6 +441,28 @@ export function useTVNavigation({
         } else if (activePane === 'categories') {
           onSelectCategory(focusedCategoryIndexRef.current, true);
           setActivePane('channels');
+        } else if (activePane === 'category_header') {
+          const current = focusedCategoryHeaderIndexRef.current;
+          if (current === 0) {
+            onOpenCategoryManager?.();
+          } else if (current === 1) {
+            onOpenSearch?.();
+          } else if (current === 2) {
+            onCategorySortChange?.('playlist');
+          } else if (current === 3) {
+            onCategorySortChange?.('alpha');
+          } else if (current === 4) {
+            onCategorySortChange?.('count');
+          }
+        } else if (activePane === 'channel_header') {
+          const current = focusedChannelHeaderIndexRef.current;
+          if (current === 0) {
+            onChannelSortChange?.('playlist');
+          } else if (current === 1) {
+            onChannelSortChange?.('alpha');
+          } else if (current === 2) {
+            onChannelSortChange?.('num');
+          }
         } else if (activePane === 'channels') {
           onSelectChannel(focusedChannelIndexRef.current, false);
         }
@@ -375,9 +476,9 @@ export function useTVNavigation({
           onBack();
           return;
         }
-        if (activePane === 'channels') {
+        if (activePane === 'channels' || activePane === 'channel_header') {
           setActivePane('categories');
-        } else if (activePane === 'categories') {
+        } else if (activePane === 'categories' || activePane === 'category_header') {
           setActivePane('menu');
         }
         return;
@@ -392,14 +493,22 @@ export function useTVNavigation({
       focusedCategoryIndex,
       focusedChannelIndex,
       focusedMenuIndex,
+      focusedCategoryHeaderIndex,
+      focusedChannelHeaderIndex,
       setFocusedCategoryIndex,
       setFocusedChannelIndex,
       setFocusedMenuIndex,
+      setFocusedCategoryHeaderIndex,
+      setFocusedChannelHeaderIndex,
       onSelectCategory,
       onSelectChannel,
       onToggleFavorite,
       onOpenContextMenu,
       onSelectMenuItem,
+      onOpenCategoryManager,
+      onOpenSearch,
+      onCategorySortChange,
+      onChannelSortChange,
       setIsFullscreen,
       onJumpToChannelNumber,
       onBack,

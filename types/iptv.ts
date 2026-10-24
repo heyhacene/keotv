@@ -70,4 +70,12 @@ export interface UserSettings {
   hidden_channel_ids?: string[];
 }
 
-export type NavigationPane = 'menu' | 'categories' | 'channels' | 'player_osd' | 'settings' | 'modal';
+export type NavigationPane =
+  | 'menu'
+  | 'categories'
+  | 'channels'
+  | 'category_header'
+  | 'channel_header'
+  | 'player_osd'
+  | 'settings'
+  | 'modal';

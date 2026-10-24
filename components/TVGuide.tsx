@@ -56,6 +56,8 @@ interface TVGuideProps {
   onOpenSearch?: () => void;
   onOpenContextMenu?: (channel: Channel) => void;
   onOpenCategoryManager?: () => void;
+  focusedCategoryHeaderIndex?: number;
+  focusedChannelHeaderIndex?: number;
   activeSection?: 'live' | 'vod' | 'series' | 'fav';
   serverCreds?: { serverUrl: string; username: string; password: string } | null;
   boundaryHit?: { pane: string; boundary: 'top' | 'bottom'; time: number } | null;
@@ -351,6 +353,8 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   onOpenSearch,
   onOpenContextMenu,
   onOpenCategoryManager,
+  focusedCategoryHeaderIndex = 2,
+  focusedChannelHeaderIndex = 0,
   activeSection = 'live',
   serverCreds,
   boundaryHit,
@@ -563,7 +567,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
       {/* 1. CATEGORIES COLUMN */}
       <div
         className={`relative w-56 xl:w-64 border-r border-tv-border flex flex-col flex-shrink-0 ${
-          activePane === 'categories' ? 'bg-tv-surface/90' : 'bg-tv-surface/40'
+          activePane === 'categories' || activePane === 'category_header' ? 'bg-tv-surface/90' : 'bg-tv-surface/40'
         }`}
       >
         {/* Fixed Header with Groups Count and Sort Buttons */}
@@ -580,7 +584,11 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 <button
                   type="button"
                   onClick={onOpenCategoryManager}
-                  className="p-1 px-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-300 hover:text-white flex items-center space-x-1 text-[10px] font-bold focus:outline-none"
+                  className={`p-1 px-1.5 rounded-lg border text-[10px] font-bold transition flex items-center space-x-1 outline-none ${
+                    activePane === 'category_header' && focusedCategoryHeaderIndex === 0
+                      ? 'bg-tv-focus border-white text-white font-black ring-4 ring-white shadow-xl scale-105 z-20'
+                      : 'bg-tv-card hover:bg-tv-cardHover border-tv-border text-slate-300 hover:text-white'
+                  }`}
                   title="Organiser l'ordre et masquer des bouquets"
                 >
                   <Sliders className="w-3 h-3 text-sky-400" />
@@ -591,7 +599,11 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 <button
                   type="button"
                   onClick={onOpenSearch}
-                  className="p-1 px-1.5 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-300 hover:text-white flex items-center space-x-1 text-[10px] font-bold focus:outline-none"
+                  className={`p-1 px-1.5 rounded-lg border text-[10px] font-bold transition flex items-center space-x-1 outline-none ${
+                    activePane === 'category_header' && focusedCategoryHeaderIndex === 1
+                      ? 'bg-tv-focus border-white text-white font-black ring-4 ring-white shadow-xl scale-105 z-20'
+                      : 'bg-tv-card hover:bg-tv-cardHover border-tv-border text-slate-300 hover:text-white'
+                  }`}
                   title="Rechercher"
                 >
                   <Search className="w-3 h-3 text-tv-accent" />
@@ -605,8 +617,12 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               <button
                 type="button"
                 onClick={() => onCategorySortChange('playlist')}
-                className={`flex-1 py-1 rounded font-semibold text-center transition ${
-                  categorySort === 'playlist' ? 'bg-tv-focus text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                className={`flex-1 py-1 rounded font-semibold text-center transition outline-none ${
+                  activePane === 'category_header' && focusedCategoryHeaderIndex === 2
+                    ? 'bg-tv-focus text-white ring-4 ring-white shadow-xl scale-105 z-20 font-black'
+                    : categorySort === 'playlist'
+                    ? 'bg-tv-focus text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
                 }`}
                 title="Ordre Playlist par défaut"
               >
@@ -615,8 +631,12 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               <button
                 type="button"
                 onClick={() => onCategorySortChange('alpha')}
-                className={`flex-1 py-1 rounded font-semibold text-center transition ${
-                  categorySort === 'alpha' ? 'bg-tv-focus text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                className={`flex-1 py-1 rounded font-semibold text-center transition outline-none ${
+                  activePane === 'category_header' && focusedCategoryHeaderIndex === 3
+                    ? 'bg-tv-focus text-white ring-4 ring-white shadow-xl scale-105 z-20 font-black'
+                    : categorySort === 'alpha'
+                    ? 'bg-tv-focus text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
                 }`}
                 title="Ordre alphabétique"
               >
@@ -625,8 +645,12 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               <button
                 type="button"
                 onClick={() => onCategorySortChange('count')}
-                className={`flex-1 py-1 rounded font-semibold text-center transition ${
-                  categorySort === 'count' ? 'bg-tv-focus text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                className={`flex-1 py-1 rounded font-semibold text-center transition outline-none ${
+                  activePane === 'category_header' && focusedCategoryHeaderIndex === 4
+                    ? 'bg-tv-focus text-white ring-4 ring-white shadow-xl scale-105 z-20 font-black'
+                    : categorySort === 'count'
+                    ? 'bg-tv-focus text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
                 }`}
                 title="Trier par nombre de chaînes"
               >
@@ -684,7 +708,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
       {/* 2. CHANNELS LIST COLUMN */}
       <div
         className={`relative flex-1 min-w-[280px] border-r border-tv-border flex flex-col ${
-          activePane === 'channels' ? 'bg-tv-bg' : 'bg-tv-bg/80'
+          activePane === 'channels' || activePane === 'channel_header' ? 'bg-tv-bg' : 'bg-tv-bg/80'
         }`}
       >
         {/* Fixed Header with Channel Count and Sort Options */}
@@ -707,8 +731,12 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               <button
                 type="button"
                 onClick={() => onChannelSortChange('playlist')}
-                className={`px-2 py-1 rounded font-semibold transition ${
-                  channelSort === 'playlist' ? 'bg-tv-focus text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                className={`px-2 py-1 rounded font-semibold transition outline-none ${
+                  activePane === 'channel_header' && focusedChannelHeaderIndex === 0
+                    ? 'bg-tv-focus text-white ring-4 ring-white shadow-xl scale-105 z-20 font-black'
+                    : channelSort === 'playlist'
+                    ? 'bg-tv-focus text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
                 }`}
                 title="Ordre de la playlist par défaut"
               >
@@ -717,8 +745,12 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               <button
                 type="button"
                 onClick={() => onChannelSortChange('alpha')}
-                className={`px-2 py-1 rounded font-semibold transition ${
-                  channelSort === 'alpha' ? 'bg-tv-focus text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                className={`px-2 py-1 rounded font-semibold transition outline-none ${
+                  activePane === 'channel_header' && focusedChannelHeaderIndex === 1
+                    ? 'bg-tv-focus text-white ring-4 ring-white shadow-xl scale-105 z-20 font-black'
+                    : channelSort === 'alpha'
+                    ? 'bg-tv-focus text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
                 }`}
                 title="Alphabétique A à Z"
               >
@@ -727,8 +759,12 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               <button
                 type="button"
                 onClick={() => onChannelSortChange('num')}
-                className={`px-2 py-1 rounded font-semibold transition ${
-                  channelSort === 'num' ? 'bg-tv-focus text-white shadow-sm' : 'text-slate-400 hover:text-white'
+                className={`px-2 py-1 rounded font-semibold transition outline-none ${
+                  activePane === 'channel_header' && focusedChannelHeaderIndex === 2
+                    ? 'bg-tv-focus text-white ring-4 ring-white shadow-xl scale-105 z-20 font-black'
+                    : channelSort === 'num'
+                    ? 'bg-tv-focus text-white shadow-sm'
+                    : 'text-slate-400 hover:text-white'
                 }`}
                 title="Numéro de chaîne"
               >

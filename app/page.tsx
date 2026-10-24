@@ -71,6 +71,8 @@ export default function KeoTVHome() {
   const [activePane, setActivePane] = useState<NavigationPane>('channels');
   const [focusedCategoryIndex, setFocusedCategoryIndex] = useState<number>(0);
   const [focusedChannelIndex, setFocusedChannelIndex] = useState<number>(0);
+  const [focusedCategoryHeaderIndex, setFocusedCategoryHeaderIndex] = useState<number>(2);
+  const [focusedChannelHeaderIndex, setFocusedChannelHeaderIndex] = useState<number>(0);
   const [focusedMenuIndex, setFocusedMenuIndex] = useState<number>(0);
 
   // Responsive Layout Mode: 'mobile-portrait' | 'mobile-landscape' | 'tv'
@@ -1901,8 +1903,16 @@ export default function KeoTVHome() {
     setFocusedCategoryIndex,
     focusedChannelIndex,
     setFocusedChannelIndex,
+    focusedCategoryHeaderIndex,
+    setFocusedCategoryHeaderIndex,
+    focusedChannelHeaderIndex,
+    setFocusedChannelHeaderIndex,
     focusedMenuIndex,
     setFocusedMenuIndex,
+    onOpenCategoryManager: () => setIsCategoryManagerOpen(true),
+    onOpenSearch: () => setIsSearchModalOpen(true),
+    onCategorySortChange: handleCategorySortChange,
+    onChannelSortChange: handleChannelSortChange,
     onSelectCategory: (idx, switchPane = false) => {
       const cat = sortedCategories[idx];
       if (cat) {
@@ -3214,6 +3224,8 @@ export default function KeoTVHome() {
               onCategorySortChange={handleCategorySortChange}
               channelSort={channelSort}
               onChannelSortChange={handleChannelSortChange}
+              focusedCategoryHeaderIndex={focusedCategoryHeaderIndex}
+              focusedChannelHeaderIndex={focusedChannelHeaderIndex}
             />
           </div>
         </div>
