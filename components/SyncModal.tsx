@@ -153,8 +153,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({
       } else {
         setStatusMessage({ type: 'error', text: 'Impossible de récupérer les données du serveur.' });
       }
-    } catch {
-      setStatusMessage({ type: 'error', text: 'Erreur lors de la synchronisation.' });
+    } catch (err: any) {
+      setStatusMessage({ type: 'error', text: err?.message || 'Erreur lors de la synchronisation.' });
     } finally {
       setIsLoading(false);
     }
