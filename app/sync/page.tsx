@@ -308,23 +308,25 @@ export default function WebSyncDashboard() {
                 />
               </div>
 
-              <div className="relative">
-                <input
-                  type={showAuthPassword ? 'text' : 'password'}
-                  placeholder="••••••••"
-                  value={authPassword}
-                  onChange={(e) => setAuthPassword(e.target.value)}
-                  className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 pr-10 rounded-xl text-sm focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowAuthPassword(!showAuthPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                >
-                  {showAuthPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Mot de passe</label>
+                <div className="relative">
+                  <input
+                    type={showAuthPassword ? 'text' : 'password'}
+                    placeholder="••••••••"
+                    value={authPassword}
+                    onChange={(e) => setAuthPassword(e.target.value)}
+                    className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 pr-10 rounded-xl text-sm focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowAuthPassword(!showAuthPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                  >
+                    {showAuthPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
               </div>
-            </div>
 
             <div className="sm:col-span-2 flex justify-end pt-2">
               <button
