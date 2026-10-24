@@ -1,50 +1,78 @@
 'use client';
 
-import React, { useState } from 'react';
-import { X, RefreshCw, Smartphone, Tv, Copy, Check, Cloud, ArrowRight, ShieldCheck } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  X,
+  User,
+  KeyRound,
+  LogIn,
+  UserPlus,
+  RefreshCw,
+  CheckCircle2,
+  AlertCircle,
+  ExternalLink,
+  ShieldCheck,
+  QrCode,
+  LogOut,
+  Sparkles,
+} from 'lucide-react';
+import {
+  registerKeoUser,
+  loginKeoUser,
+  getActiveKeoUser,
+  logoutKeoUser,
+  saveUserCloudSync,
+  KeoUserAccount,
+} from '@/lib/supabase';
+import { PlaylistConfig } from '@/types/iptv';
 
 interface SyncModalProps {
   isOpen: boolean;
   onClose: () => void;
-  currentSyncCode: string;
-  onApplySyncCode: (code: string) => Promise<boolean>;
-  onForceSync: () => Promise<void>;
+  onApplyAccountSync: (account: KeoUserAccount) => Promise<void>;
+  currentPlaylists: PlaylistConfig[];
+  currentFavorites: string[];
 }
 
 export const SyncModal: React.FC<SyncModalProps> = ({
   isOpen,
   onClose,
-  currentSyncCode,
-  onApplySyncCode,
-  onForceSync,
+  onApplyAccountSync,
+  currentPlaylists,
+  currentFavorites,
 }) => {
-  const [inputCode, setInputCode] = useState('');
-  const [copied, setCopied] = useState(false);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [activeUser, setActiveUser] = useState<KeoUserAccount | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  const inputRef = React.useRef<HTMLInputElement | null>(null);
+  const usernameInputRef = useRef<HTMLInputElement | null>(null);
 
-  React.useEffect(() => {
+  // Check currently active logged in user
+  useEffect(() => {
     if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 150);
+      const user = getActiveKeoUser();
+      setActiveUser(user);
+      setStatusMessage(null);
+      setTimeout(() => usernameInputRef.current?.focus(), 150);
     }
   }, [isOpen]);
 
-  React.useEffect(() => {
+  // TV Remote Back button
+  useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       const isBack =
         e.key === 'Escape' ||
         e.key === 'Backspace' ||
         e.key === 'GoBack' ||
-        e.key === 'Back' ||
         (e as any).keyCode === 27 ||
         (e as any).keyCode === 4;
 
       if (isBack) {
         e.preventDefault();
-        e.stopPropagation();
         onClose();
       }
     };
@@ -54,142 +82,286 @@ export const SyncModal: React.FC<SyncModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(currentSyncCode);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handleApply = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!inputCode.trim()) return;
-    setIsSyncing(true);
+    if (!username.trim() || !password.trim()) {
+      setStatusMessage({ type: 'error', text: 'Veuillez saisir votre identifiant et votre mot de passe.' });
+      return;
+    }
+
+    setIsLoading(true);
     setStatusMessage(null);
 
-    const success = await onApplySyncCode(inputCode.trim());
-    setIsSyncing(false);
-    if (success) {
-      setStatusMessage('✓ Synchronisation réussie avec cet appareil !');
-      setTimeout(() => {
-        onClose();
-      }, 1500);
+    if (mode === 'login') {
+      const res = await loginKeoUser({ username, password });
+      setIsLoading(false);
+      if (res.user) {
+        setActiveUser(res.user);
+        setStatusMessage({ type: 'success', text: `Connecté en tant que ${res.user.username} ! Rapatriement de vos playlists...` });
+        await onApplyAccountSync(res.user);
+        setTimeout(() => onClose(), 1200);
+      } else {
+        setStatusMessage({ type: 'error', text: res.error || 'Erreur lors de la connexion.' });
+      }
     } else {
-      setStatusMessage('Code introuvable ou erreur de connexion.');
+      // Register new account with local current playlists & favorites pre-seeded
+      const res = await registerKeoUser({
+        username,
+        password,
+        data: {
+          playlists: currentPlaylists,
+          favorites: currentFavorites,
+        },
+      });
+      setIsLoading(false);
+      if (res.user) {
+        setActiveUser(res.user);
+        setStatusMessage({ type: 'success', text: 'Compte créé et playlists sauvegardées sur votre compte !' });
+        await onApplyAccountSync(res.user);
+        setTimeout(() => onClose(), 1200);
+      } else {
+        setStatusMessage({ type: 'error', text: res.error || 'Erreur lors de la création du compte.' });
+      }
     }
   };
 
-  const handleTriggerSync = async () => {
-    setIsSyncing(true);
-    await onForceSync();
-    setIsSyncing(false);
-    setStatusMessage('✓ Sauvegarde envoyée sur le Cloud.');
+  const handleManualSyncNow = async () => {
+    if (!activeUser) return;
+    setIsLoading(true);
+    try {
+      // Push current playlists & favorites to user account
+      const updated = {
+        ...activeUser,
+        playlists: currentPlaylists,
+        favorites: currentFavorites,
+      };
+      await saveUserCloudSync(updated);
+      setActiveUser(updated);
+      setStatusMessage({ type: 'success', text: 'Sauvegarde envoyée sur votre compte KeoTV.' });
+    } catch {
+      setStatusMessage({ type: 'error', text: 'Erreur lors de la sauvegarde.' });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
+  const handleLogout = () => {
+    logoutKeoUser();
+    setActiveUser(null);
+    setUsername('');
+    setPassword('');
+    setStatusMessage({ type: 'success', text: 'Vous avez été déconnecté.' });
+  };
+
+  const originUrl = typeof window !== 'undefined' ? window.location.origin : 'https://keotv.vercel.app';
+  const portalUrl = `${originUrl}/sync`;
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="w-full max-w-lg bg-tv-surface border border-tv-border rounded-2xl shadow-2xl overflow-hidden text-slate-100 animate-in fade-in zoom-in-95 duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-150">
+      <div className="w-full max-w-lg bg-tv-surface border border-tv-border rounded-3xl shadow-2xl overflow-hidden text-slate-100 flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-tv-border bg-tv-card/50">
-          <div className="flex items-center space-x-2.5">
-            <RefreshCw className="w-5 h-5 text-tv-accent" />
-            <h2 className="text-base font-bold text-white">Synchronisation Multi-Appareils</h2>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-tv-border bg-tv-card/60 flex-shrink-0">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-2xl bg-tv-accent/20 border border-tv-accent/30 flex items-center justify-center text-tv-accent">
+              <User className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-black text-white">Compte & Synchronisation KeoTV</h2>
+              <p className="text-xs text-slate-400">
+                Retrouvez vos playlists, bouquets et favoris sur votre TV, mobile et navigateur
+              </p>
+            </div>
           </div>
           <button
             onClick={onClose}
-            className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
-            title="Fermer (Retour)"
+            className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
-          {/* Card 1: Your Device Code */}
-          <div className="bg-tv-card/80 border border-tv-border p-4 rounded-xl">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-                Code de votre profil KeoTV
-              </span>
-              <span className="text-[11px] text-emerald-400 flex items-center">
-                <ShieldCheck className="w-3.5 h-3.5 mr-1" /> Cloud Actif
-              </span>
-            </div>
+        {/* Content */}
+        <div className="p-6 space-y-6 overflow-y-auto">
+          {/* If already logged in */}
+          {activeUser ? (
+            <div className="space-y-4">
+              <div className="bg-tv-card/80 border border-emerald-500/30 p-4 rounded-2xl flex items-center justify-between">
+                <div className="flex items-center space-x-3 min-w-0">
+                  <div className="w-12 h-12 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-lg">
+                    {activeUser.username.slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider block">
+                      Connecté au compte
+                    </span>
+                    <h3 className="text-sm font-bold text-white truncate">{activeUser.username}</h3>
+                    <p className="text-[11px] text-slate-400">
+                      {activeUser.playlists?.length || 0} playlists • {activeUser.favorites?.length || 0} favoris synchronisés
+                    </p>
+                  </div>
+                </div>
 
-            <div className="flex items-center justify-between bg-black/40 p-3 rounded-lg border border-white/5">
-              <span className="text-2xl font-mono font-extrabold tracking-widest text-tv-accent">
-                {currentSyncCode || 'KEO-7842'}
-              </span>
-              <button
-                onClick={handleCopy}
-                className="px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-semibold text-white flex items-center space-x-1.5 transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
-              >
-                {copied ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{copied ? 'Copié !' : 'Copier'}</span>
-              </button>
-            </div>
-            <p className="text-xs text-slate-400 mt-2">
-              Entrez ce code court sur votre autre TV ou sur votre smartphone pour retrouver instantanément vos favoris et playlists.
-            </p>
-          </div>
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="px-3 py-2 bg-white/10 hover:bg-rose-500/20 hover:text-rose-300 text-slate-300 rounded-xl text-xs font-semibold transition flex items-center space-x-1"
+                  title="Se déconnecter"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Déconnexion</span>
+                </button>
+              </div>
 
-          {/* Card 2: Link another device */}
-          <form onSubmit={handleApply} className="space-y-3">
-            <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-              Lier un autre appareil
-            </label>
-            <div className="flex space-x-2">
-              <input
-                ref={inputRef}
-                type="text"
-                placeholder="Ex: KEO-9123"
-                value={inputCode}
-                onChange={(e) => setInputCode(e.target.value.toUpperCase())}
-                className="flex-1 bg-tv-card border border-tv-border rounded-xl px-3.5 py-2.5 text-sm font-mono tracking-wider text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
-              />
-              <button
-                type="submit"
-                disabled={isSyncing || !inputCode.trim()}
-                className="px-4 py-2.5 bg-tv-focus hover:bg-sky-500 text-white font-bold rounded-xl text-xs shadow-lg transition flex items-center space-x-1.5 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
-              >
-                <span>Synchroniser</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
+              <div className="flex space-x-2">
+                <button
+                  type="button"
+                  onClick={handleManualSyncNow}
+                  disabled={isLoading}
+                  className="flex-1 py-3 bg-tv-focus hover:bg-sky-500 text-white font-bold rounded-xl text-xs shadow-lg transition flex items-center justify-center space-x-2 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+                  <span>{isLoading ? 'Synchronisation...' : 'Sauvegarder mes modifications'}</span>
+                </button>
+              </div>
             </div>
-          </form>
+          ) : (
+            /* Login / Register Form */
+            <div className="space-y-4">
+              {/* Tab Selector: Connexion vs Création de compte */}
+              <div className="flex items-center p-1 bg-black/40 rounded-xl border border-white/5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setStatusMessage(null);
+                  }}
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 ${
+                    mode === 'login' ? 'bg-tv-focus text-white shadow-md' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Se connecter</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('register');
+                    setStatusMessage(null);
+                  }}
+                  className={`flex-1 py-2 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1.5 ${
+                    mode === 'register' ? 'bg-tv-focus text-white shadow-md' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Créer un compte</span>
+                </button>
+              </div>
 
-          {statusMessage && (
-            <div className="p-3 bg-tv-card border border-tv-accent/30 rounded-xl text-center text-xs font-medium text-tv-accent">
-              {statusMessage}
+              <form onSubmit={handleSubmit} className="space-y-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Identifiant / Pseudo
+                  </label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      ref={usernameInputRef}
+                      type="text"
+                      placeholder="votre_pseudo"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="w-full bg-tv-card border border-tv-border rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-tv-accent"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Mot de passe
+                  </label>
+                  <div className="relative">
+                    <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="password"
+                      placeholder="••••••••"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      className="w-full bg-tv-card border border-tv-border rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-tv-accent"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isLoading || !username.trim() || !password.trim()}
+                  className="w-full py-3 bg-tv-accent text-slate-950 font-black rounded-xl text-xs hover:bg-sky-400 shadow-lg shadow-sky-500/20 transition flex items-center justify-center space-x-2 disabled:opacity-50"
+                >
+                  {isLoading ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : mode === 'login' ? (
+                    <LogIn className="w-4 h-4" />
+                  ) : (
+                    <Sparkles className="w-4 h-4" />
+                  )}
+                  <span>
+                    {isLoading
+                      ? 'Traitement...'
+                      : mode === 'login'
+                      ? 'Se connecter et charger mes playlists'
+                      : 'Créer mon compte et sauvegarder'}
+                  </span>
+                </button>
+              </form>
             </div>
           )}
 
-          {/* Visual Device Pair info */}
-          <div className="flex items-center justify-center space-x-6 py-2 text-slate-400 text-xs">
-            <div className="flex flex-col items-center">
-              <Tv className="w-6 h-6 text-sky-400 mb-1" />
-              <span>Android TV</span>
+          {statusMessage && (
+            <div
+              className={`p-3.5 rounded-xl border text-xs flex items-center space-x-2.5 ${
+                statusMessage.type === 'success'
+                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              }`}
+            >
+              {statusMessage.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+              )}
+              <span>{statusMessage.text}</span>
             </div>
-            <RefreshCw className="w-4 h-4 text-slate-600 animate-spin" style={{ animationDuration: '6s' }} />
-            <div className="flex flex-col items-center">
-              <Smartphone className="w-6 h-6 text-purple-400 mb-1" />
-              <span>Téléphone</span>
+          )}
+
+          {/* Web Portal Link Info Card */}
+          <div className="bg-black/40 border border-white/5 p-4 rounded-2xl space-y-2">
+            <div className="flex items-center justify-between text-xs text-slate-300 font-bold">
+              <span className="flex items-center space-x-1.5 text-tv-accent">
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>Portail de configuration Web (Vercel)</span>
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Vous pouvez vous connecter avec ce même identifiant et mot de passe sur le site web pour saisir vos abonnements IPTV au clavier :
+            </p>
+            <div className="p-2.5 bg-tv-card rounded-xl border border-white/10 flex items-center justify-between text-xs font-mono text-white">
+              <span className="truncate">{portalUrl}</span>
+              <a
+                href={portalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="px-2.5 py-1 bg-white/10 hover:bg-white/20 rounded-lg text-[10px] text-tv-accent font-bold transition ml-2 flex-shrink-0"
+              >
+                Ouvrir
+              </a>
             </div>
           </div>
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-3 border-t border-tv-border bg-black/20 flex justify-between items-center">
-          <button
-            onClick={handleTriggerSync}
-            disabled={isSyncing}
-            className="text-xs text-slate-400 hover:text-white flex items-center space-x-1 transition"
-          >
-            <Cloud className="w-3.5 h-3.5 text-tv-accent mr-1" />
-            <span>Forcer la sauvegarde</span>
-          </button>
+        <div className="px-6 py-3 border-t border-tv-border bg-black/40 flex justify-end flex-shrink-0">
           <button
             onClick={onClose}
-            className="px-4 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold transition"
+            className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition"
           >
             Fermer
           </button>

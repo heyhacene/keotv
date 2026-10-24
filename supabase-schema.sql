@@ -1,4 +1,30 @@
 -- ==============================================================
+-- KeoTV : Table des Comptes Utilisateurs (Identifiant + Mot de passe)
+-- ==============================================================
+
+CREATE TABLE IF NOT EXISTS public.keotv_users (
+  id TEXT PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  user_label TEXT,
+  playlists JSONB DEFAULT '[]'::jsonb,
+  favorites JSONB DEFAULT '[]'::jsonb,
+  hidden_groups JSONB DEFAULT '[]'::jsonb,
+  hidden_channels JSONB DEFAULT '[]'::jsonb,
+  excluded_prefixes JSONB DEFAULT '[]'::jsonb,
+  watched_positions JSONB DEFAULT '[]'::jsonb,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE public.keotv_users ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Accès public keotv_users" ON public.keotv_users
+  FOR ALL
+  USING (true)
+  WITH CHECK (true);
+
+-- ==============================================================
 -- KeoTV : Table de Synchronisation Multi-Appareils (Cloud Sync)
 -- ==============================================================
 

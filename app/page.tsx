@@ -2249,7 +2249,55 @@ export default function KeoTVHome() {
     }
   };
 
-  // Cloud Sync Handler
+  // User Account Sync Handler (username + password account login / registration)
+  const handleApplyAccountSync = async (account: any) => {
+    if (!account) return;
+
+    // 1. If account has playlists, import and activate the first playlist!
+    if (account.playlists && account.playlists.length > 0) {
+      const pl = account.playlists[0];
+      showToast(`Synchronisation de la playlist « ${pl.name} »...`);
+      if (pl.type === 'xtream' && pl.server_url && pl.username && pl.password) {
+        await handleSavePlaylist(
+          {
+            type: 'xtream',
+            server_url: pl.server_url,
+            username: pl.username,
+            password: pl.password,
+            name: pl.name,
+          },
+          (step) => setSyncStatusBanner(step)
+        );
+      }
+    }
+
+    // 2. Restore user favorites
+    if (account.favorites && account.favorites.length > 0) {
+      await db.channels.toCollection().modify({ is_favorite: false });
+      for (const favId of account.favorites) {
+        await db.channels.update(favId, { is_favorite: true });
+        await saveFavoriteChannelId(favId, true);
+      }
+      if (selectedCategory) {
+        await loadCategoryChannels(selectedCategory, channelSort);
+      }
+      await updateFavoriteCounts();
+    }
+
+    // 3. Restore hidden channels and prefixes
+    if (account.hidden_channels && Array.isArray(account.hidden_channels)) {
+      setHiddenChannelIds(new Set(account.hidden_channels));
+      await setSetting('hidden_channel_ids', account.hidden_channels);
+    }
+    if (account.excluded_prefixes && Array.isArray(account.excluded_prefixes)) {
+      setExcludedPrefixes(account.excluded_prefixes);
+      await setSetting('excluded_prefixes', account.excluded_prefixes);
+    }
+
+    showToast(`Compte « ${account.username} » synchronisé avec succès !`);
+  };
+
+  // Legacy sync code fallback
   const handleApplySyncCode = async (code: string) => {
     const data = await pullSyncFromCloud(code);
     if (!data) return false;
@@ -3183,9 +3231,9 @@ export default function KeoTVHome() {
       <SyncModal
         isOpen={isSyncModalOpen}
         onClose={() => setIsSyncModalOpen(false)}
-        currentSyncCode={syncCode}
-        onApplySyncCode={handleApplySyncCode}
-        onForceSync={handleForceSync}
+        onApplyAccountSync={handleApplyAccountSync}
+        currentPlaylists={playlists}
+        currentFavorites={Array.from(favCount > 0 ? channels.filter(c => c.is_favorite).map(c => c.id) : [])}
       />
 
       {/* Series Detail Full Page Modal (Seasons & Episodes) */}

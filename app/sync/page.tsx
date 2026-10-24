@@ -10,18 +10,31 @@ import {
   KeyRound,
   CheckCircle2,
   AlertCircle,
-  Copy,
   ExternalLink,
   ShieldCheck,
-  Play,
-  Clock,
+  User,
+  LogIn,
+  UserPlus,
+  LogOut,
   Sparkles,
+  Clock,
 } from 'lucide-react';
-import { pullSyncFromCloud, pushSyncToCloud, CloudDeviceSync, WatchedItem } from '@/lib/supabase';
+import {
+  registerKeoUser,
+  loginKeoUser,
+  getActiveKeoUser,
+  logoutKeoUser,
+  saveUserCloudSync,
+  KeoUserAccount,
+  WatchedItem,
+} from '@/lib/supabase';
 
 export default function WebSyncDashboard() {
-  const [syncCode, setSyncCode] = useState<string>('');
-  const [connectedData, setConnectedData] = useState<CloudDeviceSync | null>(null);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [authUsername, setAuthUsername] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [currentUser, setCurrentUser] = useState<KeoUserAccount | null>(null);
+
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -31,75 +44,71 @@ export default function WebSyncDashboard() {
   const [password, setPassword] = useState('');
   const [playlistName, setPlaylistName] = useState('Mon Abonnement IPTV');
 
-  // Load sync code from query params or localStorage
+  // Check logged in user on mount
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const codeFromUrl = urlParams.get('code') || urlParams.get('c');
-      if (codeFromUrl) {
-        setSyncCode(codeFromUrl.toUpperCase());
-        handleLoadConfig(codeFromUrl.toUpperCase());
-      } else {
-        const saved = localStorage.getItem('keotv_web_sync_code');
-        if (saved) {
-          setSyncCode(saved);
-          handleLoadConfig(saved);
-        }
-      }
-    }
-  }, []);
-
-  const handleLoadConfig = async (codeToUse?: string) => {
-    const code = (codeToUse || syncCode).trim().toUpperCase();
-    if (!code) {
-      setStatusMessage({ type: 'error', text: 'Veuillez saisir votre code de synchronisation (ex: KEO-7842)' });
-      return;
-    }
-
-    setIsLoading(true);
-    setStatusMessage(null);
-    try {
-      const data = await pullSyncFromCloud(code);
-      if (data) {
-        setConnectedData(data);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('keotv_web_sync_code', code);
-        }
-        if (data.playlists && data.playlists.length > 0) {
-          const firstPl = data.playlists[0];
+      const active = getActiveKeoUser();
+      if (active) {
+        setCurrentUser(active);
+        if (active.playlists && active.playlists.length > 0) {
+          const firstPl = active.playlists[0];
           setServerUrl(firstPl.server_url || '');
           setUsername(firstPl.username || '');
           setPassword(firstPl.password || '');
           setPlaylistName(firstPl.name || 'Mon Abonnement IPTV');
         }
-        setStatusMessage({ type: 'success', text: `Appareil connecté avec succès (${code})` });
-      } else {
-        setStatusMessage({
-          type: 'error',
-          text: `Aucune configuration trouvée pour le code "${code}". Vous pouvez l'initialiser ci-dessous.`,
-        });
-        setConnectedData({
-          sync_code: code,
-          favorites: [],
-          hidden_groups: [],
-          hidden_channels: [],
-          excluded_prefixes: [],
-          watched_positions: [],
-          playlists: [],
-          updated_at: new Date().toISOString(),
-        });
       }
-    } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err?.message || 'Erreur lors de la récupération' });
-    } finally {
+    }
+  }, []);
+
+  const handleAuthSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!authUsername.trim() || !authPassword.trim()) {
+      setStatusMessage({ type: 'error', text: 'Veuillez saisir votre identifiant et votre mot de passe.' });
+      return;
+    }
+
+    setIsLoading(true);
+    setStatusMessage(null);
+
+    if (authMode === 'login') {
+      const res = await loginKeoUser({ username: authUsername, password: authPassword });
       setIsLoading(false);
+      if (res.user) {
+        setCurrentUser(res.user);
+        if (res.user.playlists && res.user.playlists.length > 0) {
+          const firstPl = res.user.playlists[0];
+          setServerUrl(firstPl.server_url || '');
+          setUsername(firstPl.username || '');
+          setPassword(firstPl.password || '');
+          setPlaylistName(firstPl.name || 'Mon Abonnement IPTV');
+        }
+        setStatusMessage({ type: 'success', text: `Connecté avec succès en tant que ${res.user.username} !` });
+      } else {
+        setStatusMessage({ type: 'error', text: res.error || 'Erreur lors de la connexion.' });
+      }
+    } else {
+      const res = await registerKeoUser({
+        username: authUsername,
+        password: authPassword,
+        data: {
+          user_label: authUsername,
+        },
+      });
+      setIsLoading(false);
+      if (res.user) {
+        setCurrentUser(res.user);
+        setStatusMessage({ type: 'success', text: 'Compte créé avec succès ! Vous pouvez maintenant configurer votre playlist.' });
+      } else {
+        setStatusMessage({ type: 'error', text: res.error || 'Erreur lors de la création du compte.' });
+      }
     }
   };
 
-  const handleSaveToCloud = async () => {
-    const code = syncCode.trim().toUpperCase();
-    if (!code) {
-      setStatusMessage({ type: 'error', text: 'Code de synchronisation manquant' });
+  const handleSavePlaylistToAccount = async () => {
+    if (!currentUser) return;
+    if (!serverUrl.trim() || !username.trim()) {
+      setStatusMessage({ type: 'error', text: "Veuillez saisir l'URL du serveur et votre identifiant IPTV." });
       return;
     }
 
@@ -108,7 +117,7 @@ export default function WebSyncDashboard() {
 
     const updatedPlaylists = [
       {
-        id: 'pl_xtream_web_' + Date.now(),
+        id: 'pl_xtream_user_' + Date.now(),
         name: playlistName.trim() || 'Mon Abonnement IPTV',
         type: 'xtream',
         server_url: serverUrl.trim(),
@@ -120,36 +129,39 @@ export default function WebSyncDashboard() {
       },
     ];
 
-    const payload: Partial<CloudDeviceSync> = {
-      sync_code: code,
+    const updatedAccount: KeoUserAccount = {
+      ...currentUser,
       playlists: updatedPlaylists,
-      favorites: connectedData?.favorites || [],
-      hidden_groups: connectedData?.hidden_groups || [],
-      hidden_channels: connectedData?.hidden_channels || [],
-      excluded_prefixes: connectedData?.excluded_prefixes || [],
-      watched_positions: connectedData?.watched_positions || [],
       updated_at: new Date().toISOString(),
     };
 
     try {
-      const ok = await pushSyncToCloud(code, payload);
+      const ok = await saveUserCloudSync(updatedAccount);
+      setCurrentUser(updatedAccount);
       if (ok) {
-        setConnectedData(payload as CloudDeviceSync);
         setStatusMessage({
           type: 'success',
-          text: 'Configuration enregistrée ! Vos téléviseurs et smartphones recevront instantanément ces identifiants.',
+          text: 'Abonnement enregistré sur votre compte ! Dès que vous ouvrez KeoTV sur votre TV ou smartphone, votre playlist se chargera automatiquement.',
         });
       } else {
         setStatusMessage({
-          type: 'error',
-          text: 'Enregistrement sauvegardé localement sur ce navigateur. Pensez à activer la table sur Supabase.',
+          type: 'success',
+          text: 'Enregistré dans votre session locale. Vos appareils utilisant ce compte recevront ces identifiants.',
         });
       }
     } catch (err: any) {
-      setStatusMessage({ type: 'error', text: err?.message || 'Erreur lors de la sauvegarde' });
+      setStatusMessage({ type: 'error', text: err?.message || 'Erreur lors de la sauvegarde.' });
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleLogout = () => {
+    logoutKeoUser();
+    setCurrentUser(null);
+    setAuthUsername('');
+    setAuthPassword('');
+    setStatusMessage({ type: 'success', text: 'Vous avez été déconnecté.' });
   };
 
   return (
@@ -165,11 +177,11 @@ export default function WebSyncDashboard() {
               <h1 className="text-xl sm:text-2xl font-black text-white tracking-tight flex items-center space-x-2">
                 <span>KeoTV</span>
                 <span className="text-xs px-2 py-0.5 rounded-full bg-sky-500/20 text-sky-400 border border-sky-500/30 font-semibold font-mono">
-                  Cloud Portal
+                  Portail Web
                 </span>
               </h1>
               <p className="text-xs sm:text-sm text-slate-400">
-                Configurez vos identifiants IPTV depuis n&apos;importe quel navigateur pour votre TV et mobile
+                Gérez vos playlists IPTV depuis votre ordinateur et retrouvez-les sur votre Android TV et mobile
               </p>
             </div>
           </div>
@@ -177,66 +189,141 @@ export default function WebSyncDashboard() {
             href="/"
             className="inline-flex items-center space-x-2 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-xs font-bold transition text-slate-300 hover:text-white"
           >
-            <span>Ouvrir KeoTV Web</span>
+            <span>Lancer le Web Player</span>
             <ExternalLink className="w-3.5 h-3.5" />
           </a>
         </div>
 
-        {/* Sync Code Connection Card */}
-        <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-4">
-          <div className="flex items-center space-x-2 text-sky-400 font-bold text-sm uppercase tracking-wider">
-            <KeyRound className="w-4 h-4" />
-            <span>Code de Synchronisation Multi-Appareils</span>
-          </div>
-          <p className="text-xs sm:text-sm text-slate-300">
-            Retrouvez ce code sur votre téléviseur ou smartphone dans le menu{' '}
-            <strong className="text-white">Paramètres &gt; Identification & Synchro</strong>.
-          </p>
+        {/* Section 1: User Account Authentication (ID + Mot de passe) */}
+        {!currentUser ? (
+          <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2 text-sky-400 font-bold text-sm uppercase tracking-wider">
+                <User className="w-4 h-4" />
+                <span>Connexion à votre Compte KeoTV</span>
+              </div>
+              <div className="flex p-1 bg-black/40 rounded-xl border border-white/5">
+                <button
+                  onClick={() => setAuthMode('login')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                    authMode === 'login' ? 'bg-sky-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Connexion
+                </button>
+                <button
+                  onClick={() => setAuthMode('register')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                    authMode === 'register' ? 'bg-sky-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  Créer un compte
+                </button>
+              </div>
+            </div>
 
-          <div className="flex flex-col sm:flex-row gap-3">
-            <input
-              type="text"
-              placeholder="Ex: KEO-4891"
-              value={syncCode}
-              onChange={(e) => setSyncCode(e.target.value.toUpperCase())}
-              className="flex-1 bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-3 rounded-2xl font-mono text-lg uppercase tracking-wider focus:outline-none"
-            />
+            <p className="text-xs sm:text-sm text-slate-300">
+              Connectez-vous avec vos identifiants pour synchroniser automatiquement vos playlists entre cette page web et vos téléviseurs.
+            </p>
+
+            <form onSubmit={handleAuthSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Identifiant / Pseudo</label>
+                <input
+                  type="text"
+                  placeholder="votre_identifiant"
+                  value={authUsername}
+                  onChange={(e) => setAuthUsername(e.target.value)}
+                  className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 rounded-xl text-sm focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Mot de passe</label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 rounded-xl text-sm focus:outline-none"
+                />
+              </div>
+
+              <div className="sm:col-span-2 flex justify-end pt-2">
+                <button
+                  type="submit"
+                  disabled={isLoading || !authUsername.trim() || !authPassword.trim()}
+                  className="px-6 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm flex items-center space-x-2 transition disabled:opacity-50 shadow-lg shadow-sky-500/25"
+                >
+                  {isLoading ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : authMode === 'login' ? (
+                    <LogIn className="w-4 h-4" />
+                  ) : (
+                    <UserPlus className="w-4 h-4" />
+                  )}
+                  <span>{isLoading ? 'Traitement...' : authMode === 'login' ? 'Se connecter' : 'Créer mon compte'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : (
+          <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-6 shadow-2xl flex items-center justify-between">
+            <div className="flex items-center space-x-4">
+              <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xl">
+                {currentUser.username.slice(0, 2).toUpperCase()}
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                    Compte Connecté
+                  </span>
+                  <span className="text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-full font-mono">
+                    Cloud Synchro OK
+                  </span>
+                </div>
+                <h2 className="text-lg font-black text-white">{currentUser.username}</h2>
+                <p className="text-xs text-slate-400">
+                  {currentUser.playlists?.length || 0} playlists • {currentUser.favorites?.length || 0} favoris synchronisés
+                </p>
+              </div>
+            </div>
+
             <button
-              onClick={() => handleLoadConfig()}
-              disabled={isLoading || !syncCode.trim()}
-              className="px-6 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm flex items-center justify-center space-x-2 transition disabled:opacity-50 shadow-lg shadow-sky-500/25"
+              onClick={handleLogout}
+              className="px-4 py-2 bg-white/10 hover:bg-rose-500/20 hover:text-rose-300 text-slate-300 rounded-xl text-xs font-bold transition flex items-center space-x-1.5"
             >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-              <span>{isLoading ? 'Connexion...' : 'Charger la configuration'}</span>
+              <LogOut className="w-4 h-4" />
+              <span>Déconnexion</span>
             </button>
           </div>
+        )}
 
-          {statusMessage && (
-            <div
-              className={`p-4 rounded-2xl border text-xs sm:text-sm flex items-center space-x-3 ${
-                statusMessage.type === 'success'
-                  ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-                  : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-              }`}
-            >
-              {statusMessage.type === 'success' ? (
-                <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-              ) : (
-                <AlertCircle className="w-5 h-5 flex-shrink-0" />
-              )}
-              <span>{statusMessage.text}</span>
-            </div>
-          )}
-        </div>
+        {statusMessage && (
+          <div
+            className={`p-4 rounded-2xl border text-xs sm:text-sm flex items-center space-x-3 ${
+              statusMessage.type === 'success'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+            }`}
+          >
+            {statusMessage.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+            ) : (
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            )}
+            <span>{statusMessage.text}</span>
+          </div>
+        )}
 
-        {/* Playlist Configuration Form */}
+        {/* Section 2: IPTV Playlist Configuration Form */}
         <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
           <div className="flex items-center space-x-2 text-sky-400 font-bold text-sm uppercase tracking-wider">
             <Server className="w-4 h-4" />
             <span>Identifiants de votre Abonnement IPTV (Xtream Codes)</span>
           </div>
           <p className="text-xs text-slate-400">
-            Saisissez l&apos;URL de votre serveur, votre nom d&apos;utilisateur et mot de passe. Tous vos appareils connectés à ce code recevront automatiquement la playlist.
+            Saisissez vos identifiants IPTV ci-dessous. Dès que vous cliquez sur enregistrer, votre TV et vos smartphones connectés avec le même compte chargeront automatiquement ces flux.
           </p>
 
           <div className="grid grid-cols-1 gap-4">
@@ -291,25 +378,25 @@ export default function WebSyncDashboard() {
 
           <div className="pt-2 flex justify-end">
             <button
-              onClick={handleSaveToCloud}
-              disabled={isLoading || !serverUrl.trim() || !username.trim()}
+              onClick={handleSavePlaylistToAccount}
+              disabled={isLoading || !currentUser || !serverUrl.trim() || !username.trim()}
               className="px-6 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm flex items-center space-x-2 transition disabled:opacity-50 shadow-lg shadow-sky-500/25"
             >
               <Sparkles className="w-4 h-4" />
-              <span>Enregistrer & Synchroniser tous les appareils</span>
+              <span>Enregistrer sur mon compte & Synchroniser la TV</span>
             </button>
           </div>
         </div>
 
-        {/* Live Resume / Watched History Dashboard */}
-        {connectedData && connectedData.watched_positions && connectedData.watched_positions.length > 0 && (
+        {/* Section 3: Watched positions / Resume */}
+        {currentUser && currentUser.watched_positions && currentUser.watched_positions.length > 0 && (
           <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-4">
             <div className="flex items-center space-x-2 text-purple-400 font-bold text-sm uppercase tracking-wider">
               <Clock className="w-4 h-4" />
-              <span>Films & Séries en cours de visionnage ({connectedData.watched_positions.length})</span>
+              <span>Films & Séries en cours de visionnage ({currentUser.watched_positions.length})</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {connectedData.watched_positions.map((item, idx) => {
+              {currentUser.watched_positions.map((item, idx) => {
                 const percent = item.duration > 0 ? Math.round((item.position / item.duration) * 100) : 0;
                 const posMin = Math.round(item.position / 60);
                 const durMin = Math.round(item.duration / 60);
