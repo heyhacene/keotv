@@ -199,6 +199,31 @@ export function getActiveKeoUser(): KeoUserAccount | null {
   }
 }
 
+// Fetch freshest account data directly from cloud
+export async function fetchLatestKeoUser(username: string): Promise<KeoUserAccount | null> {
+  const cleanUser = username.trim().toLowerCase();
+  try {
+    const { data, error } = await supabase
+      .from('keotv_users')
+      .select('*')
+      .eq('username', cleanUser)
+      .single();
+
+    if (!error && data) {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(`keotv_account_${cleanUser}`, JSON.stringify(data));
+        localStorage.setItem('keotv_active_user', JSON.stringify(data));
+      }
+      return data as KeoUserAccount;
+    }
+  } catch (err) {
+    console.warn('Failed to fetch latest user from cloud:', err);
+  }
+
+  // Fallback to local
+  return getActiveKeoUser();
+}
+
 // Log out active user
 export function logoutKeoUser(): void {
   if (typeof window !== 'undefined') {

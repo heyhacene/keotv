@@ -22,6 +22,7 @@ import {
   registerKeoUser,
   loginKeoUser,
   getActiveKeoUser,
+  fetchLatestKeoUser,
   logoutKeoUser,
   saveUserCloudSync,
   KeoUserAccount,
@@ -136,9 +137,33 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     }
   };
 
+  const handlePullFromCloud = async () => {
+    if (!activeUser) return;
+    setIsLoading(true);
+    setStatusMessage(null);
+    try {
+      const freshUser = await fetchLatestKeoUser(activeUser.username);
+      if (freshUser) {
+        setActiveUser(freshUser);
+        await onApplyAccountSync(freshUser);
+        setStatusMessage({
+          type: 'success',
+          text: `Configuration à jour ! ${freshUser.playlists?.length || 0} playlist(s) et favoris récupérés du Cloud.`,
+        });
+      } else {
+        setStatusMessage({ type: 'error', text: 'Impossible de récupérer les données du serveur.' });
+      }
+    } catch {
+      setStatusMessage({ type: 'error', text: 'Erreur lors de la synchronisation.' });
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleManualSyncNow = async () => {
     if (!activeUser) return;
     setIsLoading(true);
+    setStatusMessage(null);
     try {
       // Push current playlists & favorites to user account
       const updated = {
@@ -223,15 +248,24 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                 </button>
               </div>
 
-              <div className="flex space-x-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={handlePullFromCloud}
+                  disabled={isLoading}
+                  className="py-3 px-4 bg-tv-focus hover:bg-sky-500 text-white font-bold rounded-xl text-xs shadow-lg transition flex items-center justify-center space-x-2 disabled:opacity-50"
+                >
+                  <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+                  <span>{isLoading ? 'Rapatriement...' : 'Rapatrier mes playlists'}</span>
+                </button>
                 <button
                   type="button"
                   onClick={handleManualSyncNow}
                   disabled={isLoading}
-                  className="flex-1 py-3 bg-tv-focus hover:bg-sky-500 text-white font-bold rounded-xl text-xs shadow-lg transition flex items-center justify-center space-x-2 disabled:opacity-50"
+                  className="py-3 px-4 bg-white/10 hover:bg-white/20 text-slate-200 font-bold rounded-xl text-xs border border-white/10 transition flex items-center justify-center space-x-2 disabled:opacity-50"
                 >
-                  <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-                  <span>{isLoading ? 'Synchronisation...' : 'Sauvegarder mes modifications'}</span>
+                  <Sparkles className="w-4 h-4 text-tv-accent" />
+                  <span>Envoyer vers le Cloud</span>
                 </button>
               </div>
             </div>
