@@ -161,10 +161,11 @@ interface ChannelRowProps {
   onSelect: (channel: Channel, index: number) => void;
   onToggleFavorite: (channel: Channel, explicitNewState?: boolean) => void;
   onOpenContextMenu?: (channel: Channel) => void;
+  onOpenCatchupModal?: (channel: Channel) => void;
 }
 
 const ChannelRow = React.memo<ChannelRowProps>(
-  ({ channel, index, isFocused, isActive, onSelect, onToggleFavorite, onOpenContextMenu }) => {
+  ({ channel, index, isFocused, isActive, onSelect, onToggleFavorite, onOpenContextMenu, onOpenCatchupModal }) => {
     const pressTimerRef = useRef<NodeJS.Timeout | null>(null);
 
     const handlePressStart = () => {
@@ -293,24 +294,46 @@ const ChannelRow = React.memo<ChannelRowProps>(
           </div>
         </div>
 
-        {/* Favorite Star */}
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onToggleFavorite(channel);
-          }}
-          className={`p-1.5 rounded-lg flex-shrink-0 ${
-            channel.is_favorite
-              ? 'text-amber-400 hover:text-amber-300'
-              : isFocused
-              ? 'text-white/60 hover:text-white'
-              : 'text-slate-600 hover:text-slate-400'
-          }`}
-          title={channel.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-        >
-          <Star className={`w-4 h-4 ${channel.is_favorite ? 'fill-amber-400' : ''}`} />
-        </button>
+        {/* Actions: Replay & Favorite */}
+        <div className="flex items-center space-x-1 flex-shrink-0">
+          {channel.stream_type === 'live' && onOpenCatchupModal && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onOpenCatchupModal(channel);
+              }}
+              className={`p-1.5 rounded-lg flex items-center space-x-1 transition ${
+                isFocused
+                  ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
+                  : 'text-slate-500 hover:text-emerald-400 hover:bg-white/5'
+              }`}
+              title="Voir le Replay de cette chaîne"
+            >
+              <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
+              <span className="text-[10px] font-bold text-emerald-300 hidden sm:inline">Replay</span>
+            </button>
+          )}
+
+          {/* Favorite Star */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavorite(channel);
+            }}
+            className={`p-1.5 rounded-lg flex-shrink-0 ${
+              channel.is_favorite
+                ? 'text-amber-400 hover:text-amber-300'
+                : isFocused
+                ? 'text-white/60 hover:text-white'
+                : 'text-slate-600 hover:text-slate-400'
+            }`}
+            title={channel.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+          >
+            <Star className={`w-4 h-4 ${channel.is_favorite ? 'fill-amber-400' : ''}`} />
+          </button>
+        </div>
       </div>
     );
   },
@@ -829,6 +852,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                     onSelect={onSelectChannel}
                     onToggleFavorite={onToggleFavorite}
                     onOpenContextMenu={onOpenContextMenu}
+                    onOpenCatchupModal={onOpenCatchupModal}
                   />
                 );
               })}
@@ -1116,9 +1140,30 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 </button>
               </div>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-center p-4">
-                <Clock className="w-8 h-8 mb-2 opacity-50" />
-                <p className="text-xs">Sélectionnez une chaîne pour afficher les détails.</p>
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-center p-4 space-y-4">
+                <div className="flex flex-col items-center justify-center">
+                  <Clock className="w-8 h-8 mb-2 opacity-50" />
+                  <p className="text-xs">
+                    {activeChannel ? activeChannel.name : 'Sélectionnez une chaîne pour afficher les détails.'}
+                  </p>
+                </div>
+
+                {activeChannel && onOpenCatchupModal && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenCatchupModal(activeChannel)}
+                    className="w-full p-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 rounded-xl flex items-center justify-between text-xs text-emerald-300 font-bold transition shadow-md group mt-auto"
+                    title="Consulter les programmes des 7 derniers jours"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RotateCcw className="w-4 h-4 text-emerald-400 group-hover:rotate-[-45deg] transition-transform" />
+                      <span>Guide & Replay (7 jours)</span>
+                    </div>
+                    <span className="text-[10px] bg-emerald-500/20 px-2 py-0.5 rounded font-mono uppercase text-emerald-200">
+                      Ouvrir
+                    </span>
+                  </button>
+                )}
               </div>
             )}
           </div>
