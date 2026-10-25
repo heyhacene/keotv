@@ -638,80 +638,68 @@ export function getMockEpgForChannel(channelId: string): { current: EpgProgram; 
 }
 
 /**
- * Generates a realistic chronological timeline of programs (3 past + 1 current + 3 future)
- * for immediate TiviMate timeline rendering while real Xtream EPG is loading.
+ * Generates a complete 7-day chronological timeline of programs (168 past + 1 current + 48 future)
+ * so the user can rewind all the way back through 7 days of Replay / Catchup and 48h ahead,
+ * even for channels where the provider's EPG table only has partial entries.
  */
 export function getMockTimelineForChannel(channelId: string, channelName?: string): EpgProgram[] {
   const { current, next } = getMockEpgForChannel(channelId);
   const curStartMs = new Date(current.start).getTime();
-  const curEndMs = new Date(current.end).getTime();
   const nxtEndMs = new Date(next.end).getTime();
 
-  const past3Start = new Date(curStartMs - 180 * 60000);
-  const past2Start = new Date(curStartMs - 120 * 60000);
-  const past1Start = new Date(curStartMs - 60 * 60000);
-
-  const fut2End = new Date(nxtEndMs + 60 * 60000);
-  const fut3End = new Date(nxtEndMs + 135 * 60000);
-
   const label = channelName || 'la chaîne';
+  const timeline: EpgProgram[] = [];
 
-  return [
-    {
-      id: `epg_p3_${channelId}`,
+  // 168 past hourly slots (7 full days of Replay / Catchup archive!)
+  for (let i = 168; i >= 1; i--) {
+    const slotStartMs = curStartMs - i * 60 * 60000;
+    const slotEndMs = curStartMs - (i - 1) * 60 * 60000;
+    const slotDate = new Date(slotStartMs);
+    const timeStr = slotDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const dayStr = slotDate.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+
+    let title = `Tranche ${timeStr} • ${label}`;
+    if (i === 1) title = `Avant-Programme (${timeStr}) • ${label}`;
+    else if (i === 2) title = `Le Grand Magazine (${timeStr}) • ${label}`;
+    else if (i === 3) title = `Édition Précédente (${timeStr}) • ${label}`;
+
+    timeline.push({
+      id: `epg_p${i}_${channelId}`,
       channel_id: channelId,
-      title: `Édition Précédente • ${label}`,
-      description: `Rediffusion et temps forts diffusés précédemment sur ${label}.`,
-      start: past3Start.toISOString(),
-      end: past2Start.toISOString(),
+      title,
+      description: `Replay intégral du ${dayStr} à ${timeStr} sur ${label}. Appuyez sur OK pour lancer le rattrapage à cet horaire exact.`,
+      start: new Date(slotStartMs).toISOString(),
+      end: new Date(slotEndMs).toISOString(),
       duration_min: 60,
       category: current.category,
       has_catchup: true,
-    },
-    {
-      id: `epg_p2_${channelId}`,
+    });
+  }
+
+  // Current (index 168) and Next (index 169)
+  timeline.push(current);
+  timeline.push(next);
+
+  // 47 additional future hourly slots (2 full days ahead)
+  for (let f = 2; f <= 48; f++) {
+    const slotStartMs = nxtEndMs + (f - 2) * 60 * 60000;
+    const slotEndMs = nxtEndMs + (f - 1) * 60 * 60000;
+    const slotDate = new Date(slotStartMs);
+    const timeStr = slotDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+
+    timeline.push({
+      id: `epg_f${f}_${channelId}`,
       channel_id: channelId,
-      title: `Le Grand Magazine • ${label}`,
-      description: `Dossiers, reportages et analyses en plateau sur ${label}.`,
-      start: past2Start.toISOString(),
-      end: past1Start.toISOString(),
+      title: f === 2 ? `Grand Soir & Décryptage` : f === 3 ? `Programme de la Nuit` : `Programme ${timeStr} • ${label}`,
+      description: `La suite de votre programmation à ${timeStr} sur ${label}.`,
+      start: new Date(slotStartMs).toISOString(),
+      end: new Date(slotEndMs).toISOString(),
       duration_min: 60,
       category: current.category,
-      has_catchup: true,
-    },
-    {
-      id: `epg_p1_${channelId}`,
-      channel_id: channelId,
-      title: `Avant-Programme & Direct • ${label}`,
-      description: `Programme diffusé juste avant l'émission actuelle sur ${label}.`,
-      start: past1Start.toISOString(),
-      end: current.start,
-      duration_min: 60,
-      category: current.category,
-      has_catchup: true,
-    },
-    current,
-    next,
-    {
-      id: `epg_f2_${channelId}`,
-      channel_id: channelId,
-      title: `Grand Soir & Décryptage`,
-      description: `La suite de votre programmation sur ${label}.`,
-      start: next.end,
-      end: fut2End.toISOString(),
-      duration_min: 60,
-      category: current.category,
-    },
-    {
-      id: `epg_f3_${channelId}`,
-      channel_id: channelId,
-      title: `Programme de la Nuit`,
-      description: `Sélection nocturne en haute définition sur ${label}.`,
-      start: fut2End.toISOString(),
-      end: fut3End.toISOString(),
-      duration_min: 75,
-      category: current.category,
-    },
-  ];
+    });
+  }
+
+  return timeline;
 }
+
 

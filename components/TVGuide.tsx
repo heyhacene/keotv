@@ -154,9 +154,9 @@ function getProgramRemainingMin(prog: EpgProgram): number {
 
 /**
  * Organizes a channel's EPG list into relative offsets around the current live program (offset 0):
- * - offsets -3, -2, -1: past programs (Replay / Catchup)
+ * - offsets -168..-1: past programs up to 7 days back (Replay / Catchup)
  * - offset 0: current live program ("En direct")
- * - offsets +1, +2, +3, +4: upcoming programs ("À suivre")
+ * - offsets +1..+48: upcoming programs up to 48 hours ahead ("À suivre")
  */
 export function buildProgramSlotsForChannel(
   channel: Channel,
@@ -189,22 +189,64 @@ export function buildProgramSlotsForChannel(
   if (liveIdx === -1) liveIdx = 0;
 
   const slots: Record<number, EpgProgram> = {};
-  for (let offset = -3; offset <= 4; offset++) {
+  let minFilledOffset = 0;
+  let maxFilledOffset = 0;
+
+  for (let offset = -168; offset <= 48; offset++) {
     const targetIdx = liveIdx + offset;
     if (targetIdx >= 0 && targetIdx < list.length) {
       slots[offset] = list[targetIdx];
+      if (offset < minFilledOffset) minFilledOffset = offset;
+      if (offset > maxFilledOffset) maxFilledOffset = offset;
     }
   }
 
-  // Ensure offset -3..+4 always have clean chronological entries
-  if (!slots[0] || !slots[1] || !slots[-1]) {
+  // Ensure offset 0 is always defined
+  if (!slots[0]) {
     const fallback = getMockTimelineForChannel(channel.id, channel.name);
-    const fbLiveIdx = 3;
-    for (let offset = -3; offset <= 3; offset++) {
-      if (!slots[offset] && fallback[fbLiveIdx + offset]) {
-        slots[offset] = fallback[fbLiveIdx + offset];
-      }
-    }
+    slots[0] = fallback[168] || fallback[0];
+  }
+
+  // Extend backwards with 60-min Catchup slots all the way to -168 (7 days) if provider EPG stops earlier
+  const earliestProg = slots[minFilledOffset] || slots[0];
+  const earliestStartMs = earliestProg ? new Date(earliestProg.start).getTime() : nowMs;
+  for (let offset = minFilledOffset - 1; offset >= -168; offset--) {
+    const stepsBack = minFilledOffset - offset;
+    const sMs = earliestStartMs - stepsBack * 60 * 60000;
+    const eMs = sMs + 60 * 60000;
+    const sDate = new Date(sMs);
+    const timeStr = sDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    const dayStr = sDate.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+    slots[offset] = {
+      id: `epg_ext_past_${channel.id}_${ Math.abs(offset) }`,
+      channel_id: channel.id,
+      title: `Replay ${timeStr} (${dayStr}) • ${channel.name}`,
+      description: `Rattrapage TV du ${dayStr} à ${timeStr} sur ${channel.name}. Appuyez sur OK pour démarrer la lecture Replay à cet horaire.`,
+      start: new Date(sMs).toISOString(),
+      end: new Date(eMs).toISOString(),
+      duration_min: 60,
+      has_catchup: true,
+    };
+  }
+
+  // Extend forwards with 60-min slots up to +48 if provider EPG stops earlier
+  const latestProg = slots[maxFilledOffset] || slots[0];
+  const latestEndMs = latestProg ? new Date(latestProg.end).getTime() : nowMs + 3600000;
+  for (let offset = maxFilledOffset + 1; offset <= 48; offset++) {
+    const stepsFwd = offset - maxFilledOffset - 1;
+    const sMs = latestEndMs + stepsFwd * 60 * 60000;
+    const eMs = sMs + 60 * 60000;
+    const sDate = new Date(sMs);
+    const timeStr = sDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+    slots[offset] = {
+      id: `epg_ext_fut_${channel.id}_${offset}`,
+      channel_id: channel.id,
+      title: `Programme ${timeStr} • ${channel.name}`,
+      description: `Diffusion prévue à ${timeStr} sur ${channel.name}.`,
+      start: new Date(sMs).toISOString(),
+      end: new Date(eMs).toISOString(),
+      duration_min: 60,
+    };
   }
 
   return slots;
@@ -913,15 +955,25 @@ export const TVGuide: React.FC<TVGuideProps> = ({
     };
   }, [isLiveTimelineMode, focusedChannelIndex, channels, serverCreds]);
 
+  // Focused channel's program slots and currently highlighted program details for the Top TiviMate Info Deck
+  const focusedChannelSlots = useMemo(() => {
+    if (!focusedChannel || isSep) return {};
+    return buildProgramSlotsForChannel(focusedChannel, channelEpgMap[focusedChannel.id]);
+  }, [focusedChannel, isSep, channelEpgMap]);
+
   // Compute which 4 horizontal program offsets are displayed in the timeline row
+  // Allows sliding all the way back to -168 (7 days) and forward to +48 (2 days)!
   const visibleOffsets = useMemo(() => {
     if (activePane === 'epg_grid') {
-      if (isPastUnlocked || focusedProgramOffset < 0) {
-        const start = Math.max(-3, Math.min(focusedProgramOffset - 1, -2));
+      if (focusedProgramOffset < 0) {
+        const start = Math.max(-168, focusedProgramOffset);
         return [start, start + 1, start + 2, start + 3];
       }
+      if (isPastUnlocked && focusedProgramOffset === 0) {
+        return [-1, 0, 1, 2];
+      }
       if (focusedProgramOffset >= 2) {
-        const start = Math.min(1, focusedProgramOffset - 1);
+        const start = Math.min(45, focusedProgramOffset - 1);
         return [start, start + 1, start + 2, start + 3];
       }
       return [0, 1, 2, 3];
@@ -933,22 +985,27 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   // and the percentage position of the vertical blue Now Line!
   const timeRulerInfo = useMemo(() => {
     const baseMs = nowDate.getTime();
-    const d = new Date(baseMs);
+    const firstVisibleOffset = visibleOffsets[0] ?? 0;
+    const firstSlotProg = focusedChannelSlots[firstVisibleOffset];
+
+    let anchorMs = baseMs;
+    if (activePane === 'epg_grid' && firstVisibleOffset !== 0 && firstSlotProg?.start) {
+      const parsed = new Date(firstSlotProg.start).getTime();
+      if (!isNaN(parsed)) {
+        anchorMs = parsed;
+      } else {
+        anchorMs = baseMs + firstVisibleOffset * 60 * 60 * 1000;
+      }
+    } else if (activePane === 'epg_grid' && firstVisibleOffset !== 0) {
+      anchorMs = baseMs + firstVisibleOffset * 60 * 60 * 1000;
+    }
+
+    const d = new Date(anchorMs);
     d.setSeconds(0, 0);
     const mins = d.getMinutes();
     d.setMinutes(mins >= 30 ? 30 : 0);
 
-    // Shift ruler window when browsing past or future programs
-    const shiftHalfHours =
-      activePane === 'epg_grid'
-        ? focusedProgramOffset < 0
-          ? focusedProgramOffset
-          : focusedProgramOffset > 1
-          ? focusedProgramOffset - 1
-          : 0
-        : 0;
-
-    const startWindowMs = d.getTime() + shiftHalfHours * 30 * 60 * 1000;
+    const startWindowMs = d.getTime();
     const totalWindowMs = 2 * 60 * 60 * 1000; // 2 hours span (5 marks: +0, +30, +60, +90, +120)
 
     const marks: string[] = [];
@@ -965,18 +1022,22 @@ export const TVGuide: React.FC<TVGuideProps> = ({
     const nowRatio = (baseMs - startWindowMs) / totalWindowMs;
     const nowPercent = nowRatio >= 0 && nowRatio <= 1 ? Math.round(nowRatio * 1000) / 10 : null;
 
+    // Show the date/time of the currently focused program slot when rewinding in the past or browsing future
+    const focusedProg =
+      activePane === 'epg_grid' && focusedProgramOffset !== 0
+        ? focusedChannelSlots[focusedProgramOffset]
+        : null;
+    const labelDate =
+      focusedProg?.start && !isNaN(new Date(focusedProg.start).getTime())
+        ? new Date(focusedProg.start)
+        : nowDate;
+
     return {
-      currentLabel: formatFrenchDayAndTime(nowDate),
+      currentLabel: formatFrenchDayAndTime(labelDate),
       marks,
       nowPercent,
     };
-  }, [nowDate, activePane, focusedProgramOffset]);
-
-  // Focused channel's program slots and currently highlighted program details for the Top TiviMate Info Deck
-  const focusedChannelSlots = useMemo(() => {
-    if (!focusedChannel || isSep) return {};
-    return buildProgramSlotsForChannel(focusedChannel, channelEpgMap[focusedChannel.id]);
-  }, [focusedChannel, isSep, channelEpgMap]);
+  }, [nowDate, activePane, focusedProgramOffset, visibleOffsets, focusedChannelSlots]);
 
   const activeDisplayedProgram: EpgProgram | null = useMemo(() => {
     if (!focusedChannel || isSep) return null;

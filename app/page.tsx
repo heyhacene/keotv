@@ -2123,8 +2123,8 @@ export default function KeoTVHome() {
     setFocusedProgramOffset,
     isPastUnlocked,
     setIsPastUnlocked,
-    minProgramOffset: -3,
-    maxProgramOffset: 4,
+    minProgramOffset: -168,
+    maxProgramOffset: 48,
     onUnlockPastPrograms: (chIdx) => {
       const ch = filteredChannels[chIdx] || activeChannel;
       showToast(
