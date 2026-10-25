@@ -103,10 +103,15 @@ export default function KeoTVHome() {
       if (typeof window === 'undefined') return;
 
       const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-      const isExplicitMobileUa = /KeoTV-Mobile|iPhone|iPod|Mobi/i.test(ua);
+      const injectedTvFlag = (window as any).__KEOTV_IS_TV__;
+
+      // IMPORTANT: Never use /Mobi/i here because Android TV Chromium WebView includes "Mobile Safari/537.36" in its UA!
+      const isExplicitMobileUa =
+        injectedTvFlag === false || /KeoTV-Mobile|iPhone|iPod/i.test(ua);
       const isTvDevice =
-        !isExplicitMobileUa &&
-        /KeoTV-AndroidTV|Android TV|GoogleTV|Large Screen|AFT|BRAVIA|MiBox|SHIELD|PhilipsTV|SmartTV/i.test(ua);
+        injectedTvFlag === true ||
+        (!isExplicitMobileUa &&
+          /KeoTV-AndroidTV|Android TV|GoogleTV|Large Screen|AFT|BRAVIA|MiBox|SHIELD|PhilipsTV|SmartTV|Sony/i.test(ua));
       const isTouch =
         'ontouchstart' in window || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
 
@@ -135,7 +140,7 @@ export default function KeoTVHome() {
         setLayoutMode('mobile-portrait');
       } else {
         // Horizontal orientation on a touchscreen mobile device:
-        if (isExplicitMobileUa || height < 500) {
+        if (isExplicitMobileUa || height < 520) {
           setLayoutMode('mobile-landscape');
         } else {
           // Large tablet, desktop widescreen monitor, or TV
@@ -2091,9 +2096,9 @@ export default function KeoTVHome() {
     ? 2
     : 1;
 
-  // Register remote control D-Pad keyboard events with hierarchical back handler (TV mode only)
+  // Register remote control D-Pad keyboard events with hierarchical back handler
   useTVNavigation({
-    enabled: !isAnyModalOpen && isTvMode,
+    enabled: !isAnyModalOpen,
     activePane,
     setActivePane,
     channelCount: filteredChannels.length,

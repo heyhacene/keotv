@@ -11,7 +11,6 @@ import {
   Compass,
   Clock,
   Radio,
-  Info,
   Search,
   Lock,
   Sliders,
@@ -21,9 +20,7 @@ import {
   Loader2,
   Play,
   RotateCcw,
-  ChevronRight,
   ChevronLeft,
-  Sparkles,
 } from 'lucide-react';
 import { LiveVideoPlayer } from './LiveVideoPlayer';
 import {
@@ -98,12 +95,29 @@ function renderCategoryIcon(iconName?: string, isAdult?: boolean) {
   }
 }
 
-function formatTimeHHMM(isoStr?: string): string {
+function formatTimeHHMM(isoStr?: string | number): string {
   if (!isoStr) return '';
   try {
     const d = new Date(isoStr);
-    if (isNaN(d.getTime())) return isoStr.slice(0, 5);
+    if (isNaN(d.getTime())) return String(isoStr).slice(0, 5);
     return d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  } catch {
+    return '';
+  }
+}
+
+function formatFrenchDayAndTime(date: Date): string {
+  try {
+    const dayStr = date.toLocaleDateString('fr-FR', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+    const timeStr = date.toLocaleTimeString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    return `${dayStr} à ${timeStr}`;
   } catch {
     return '';
   }
@@ -120,6 +134,20 @@ function getProgramProgress(prog: EpgProgram): number {
     return Math.round(((now - s) / (e - s)) * 100);
   } catch {
     return 50;
+  }
+}
+
+function getProgramRemainingMin(prog: EpgProgram): number {
+  try {
+    const now = Date.now();
+    const s = new Date(prog.start).getTime();
+    const e = new Date(prog.end).getTime();
+    if (now >= s && now < e) {
+      return Math.max(1, Math.round((e - now) / 60000));
+    }
+    return prog.duration_min || Math.max(15, Math.round((e - s) / 60000));
+  } catch {
+    return prog.duration_min || 45;
   }
 }
 
@@ -146,7 +174,6 @@ export function buildProgramSlotsForChannel(
   });
 
   if (liveIdx === -1) {
-    // Find closest to now
     let bestDiff = Infinity;
     list.forEach((p, idx) => {
       const s = new Date(p.start).getTime();
@@ -168,10 +195,10 @@ export function buildProgramSlotsForChannel(
     }
   }
 
-  // Ensure offset 0 and +1..+3 always exist by filling from mock if server returned only 1-2 items
+  // Ensure offset -3..+4 always have clean chronological entries
   if (!slots[0] || !slots[1] || !slots[-1]) {
     const fallback = getMockTimelineForChannel(channel.id, channel.name);
-    const fbLiveIdx = 3; // mock timeline has 3 past, 1 current (index 3), 3 future
+    const fbLiveIdx = 3;
     for (let offset = -3; offset <= 3; offset++) {
       if (!slots[offset] && fallback[fbLiveIdx + offset]) {
         slots[offset] = fallback[fbLiveIdx + offset];
@@ -245,7 +272,7 @@ const CategoryRow = React.memo<CategoryRowProps>(
 CategoryRow.displayName = 'CategoryRow';
 
 // ----------------------------------------------------------------------
-// MEMOIZED TIVIMATE CHANNEL + HORIZONTAL PROGRAM TIMELINE ROW (LIVE TV)
+// MEMOIZED TIVIMATE CHANNEL + HORIZONTAL PROGRAM TIMELINE ROW (PHOTO EXACT MATCH)
 // ----------------------------------------------------------------------
 interface TiviMateTimelineRowProps {
   channel: Channel;
@@ -254,12 +281,10 @@ interface TiviMateTimelineRowProps {
   isEpgRowFocused: boolean;
   focusedProgramOffset: number;
   visibleOffsets: number[];
-  isPastUnlocked: boolean;
   isActive: boolean;
   programSlots: Record<number, EpgProgram>;
   onSelectChannel: (channel: Channel, index: number) => void;
   onSelectProgramCell: (channel: Channel, index: number, offset: number, prog?: EpgProgram) => void;
-  onToggleFavorite: (channel: Channel, explicitNewState?: boolean) => void;
   onOpenContextMenu?: (channel: Channel) => void;
 }
 
@@ -271,12 +296,10 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
     isEpgRowFocused,
     focusedProgramOffset,
     visibleOffsets,
-    isPastUnlocked,
     isActive,
     programSlots,
     onSelectChannel,
     onSelectProgramCell,
-    onToggleFavorite,
     onOpenContextMenu,
   }) => {
     const isSep = channel.is_separator ?? isSeparatorChannel(channel);
@@ -292,14 +315,14 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
             e.preventDefault();
             onOpenContextMenu?.(channel);
           }}
-          className={`flex items-center justify-between px-3.5 py-1.5 mx-2 my-1 rounded-xl select-none cursor-default transition-all duration-75 ${
+          className={`flex items-center justify-between px-3.5 h-[44px] mx-2 my-0.5 rounded-md select-none cursor-default transition-all duration-75 ${
             isChannelFocused || isEpgRowFocused
-              ? 'bg-tv-focus text-white font-bold ring-2 ring-tv-accent shadow-md'
-              : 'bg-white/5 border border-white/5 text-slate-400 font-semibold'
+              ? 'bg-sky-500 text-white font-bold ring-2 ring-white shadow-md'
+              : 'bg-white/[0.04] border border-white/5 text-slate-400 font-semibold'
           }`}
         >
           <div className="flex items-center space-x-2 truncate">
-            <Layers className="w-3.5 h-3.5 text-tv-accent flex-shrink-0" />
+            <Layers className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
             <span className="text-xs uppercase tracking-wider truncate font-bold">{cleanLabel}</span>
           </div>
           <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono uppercase tracking-widest flex-shrink-0 ml-2">
@@ -309,6 +332,15 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
       );
     }
 
+    // Determine flex weights proportional to program duration so blocks look like TiviMate's timeline
+    const getSlotWeight = (offset: number, prog?: EpgProgram) => {
+      if (!prog) return 1;
+      const dur = prog.duration_min || 45;
+      if (offset === 0) return Math.max(2.2, Math.min(3.5, dur / 25));
+      if (offset === 1) return Math.max(1.6, Math.min(2.6, dur / 30));
+      return Math.max(1.1, Math.min(2.0, dur / 35));
+    };
+
     return (
       <div
         id={`channel-item-${index}`}
@@ -316,171 +348,136 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
           e.preventDefault();
           onOpenContextMenu?.(channel);
         }}
-        className={`flex items-stretch mx-2 my-0.5 rounded-xl border transition-colors select-none ${
-          isChannelFocused
-            ? 'bg-tv-card/90 border-white/80 shadow-lg'
-            : isEpgRowFocused
-            ? 'bg-tv-card/80 border-tv-accent/60 shadow-md'
-            : isActive
-            ? 'bg-tv-card/65 border-tv-accent/40'
-            : 'bg-tv-card/30 border-white/5 hover:bg-tv-card/50'
-        }`}
+        className="flex items-stretch h-[50px] px-2 my-[2px] select-none"
       >
-        {/* LEFT PART: CHANNEL CELL (Num + Logo + Name + Badges) */}
+        {/* LEFT PART: TIVIMATE CHANNEL COLUMN (Num + Logo + Channel Name + Replay Clock / Blue Play Triangle) */}
         <div
           onClick={() => onSelectChannel(channel, index)}
-          className={`w-56 xl:w-64 flex-shrink-0 flex items-center justify-between px-3 py-2 rounded-l-xl cursor-pointer border-r border-white/5 transition-all ${
+          className={`w-[240px] xl:w-[270px] flex-shrink-0 flex items-center justify-between px-2.5 mr-2 rounded-md cursor-pointer transition-all ${
             isChannelFocused
-              ? 'bg-tv-focus text-white font-bold ring-4 ring-white z-20 shadow-xl scale-[1.01]'
+              ? 'bg-slate-200 text-slate-950 font-black shadow-lg ring-2 ring-white z-20'
               : isEpgRowFocused
-              ? 'bg-tv-surface/90 text-white font-bold'
-              : 'text-slate-200 hover:bg-white/5'
+              ? 'bg-white/10 text-white font-bold'
+              : 'bg-transparent text-slate-200 hover:bg-white/5'
           }`}
         >
           <div className="flex items-center space-x-2.5 min-w-0 flex-1">
+            {/* Channel Number */}
             <span
-              className={`text-xs font-mono font-bold w-6 text-right flex-shrink-0 ${
-                isChannelFocused ? 'text-white font-black' : isActive ? 'text-tv-accent' : 'text-slate-500'
+              className={`text-sm font-semibold w-6 text-center flex-shrink-0 ${
+                isChannelFocused
+                  ? 'text-slate-950 font-black'
+                  : isActive
+                  ? 'text-sky-400 font-bold'
+                  : 'text-slate-300'
               }`}
             >
               {channel.num}
             </span>
-            <div className="w-8 h-8 rounded-lg bg-black/50 border border-white/10 flex items-center justify-center flex-shrink-0 overflow-hidden">
+
+            {/* Channel Logo */}
+            <div className="w-10 h-7 flex items-center justify-center flex-shrink-0 overflow-hidden">
               {channel.logo ? (
                 <img
                   src={channel.logo}
                   alt={channel.name}
                   loading="lazy"
-                  className="w-full h-full object-contain p-0.5"
+                  className="max-w-full max-h-full object-contain"
                   onError={(e) => {
                     (e.target as HTMLElement).style.display = 'none';
                   }}
                 />
               ) : (
-                <span className="text-[10px] font-bold text-slate-400">{channel.name.slice(0, 3)}</span>
+                <span
+                  className={`text-[10px] font-bold px-1 rounded ${
+                    isChannelFocused ? 'bg-slate-800 text-white' : 'bg-white/10 text-slate-300'
+                  }`}
+                >
+                  {channel.name.slice(0, 3)}
+                </span>
               )}
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center space-x-1.5">
-                <h4 className="text-xs font-bold truncate text-white">{channel.name}</h4>
-              </div>
-              <div className="flex items-center space-x-1.5 mt-0.5">
-                {channel.resolution && (
-                  <span
-                    className={`text-[8px] px-1 rounded font-bold font-mono ${
-                      isChannelFocused
-                        ? 'bg-black/30 text-white'
-                        : 'bg-sky-500/15 text-tv-accent border border-sky-500/20'
-                    }`}
-                  >
-                    {channel.resolution}
-                  </span>
-                )}
-                {hasReplay && (
-                  <span
-                    className={`text-[8px] px-1 rounded font-bold uppercase tracking-wider flex items-center space-x-0.5 ${
-                      isChannelFocused
-                        ? 'bg-emerald-900/60 text-emerald-200 border border-emerald-300/40'
-                        : 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                    }`}
-                    title="Replay disponible"
-                  >
-                    <RotateCcw className="w-2.5 h-2.5 mr-0.5" />
-                    <span>Replay</span>
-                  </span>
-                )}
-              </div>
-            </div>
+
+            {/* Channel Name */}
+            <span
+              className={`text-[13px] xl:text-sm font-bold truncate ${
+                isChannelFocused
+                  ? 'text-slate-950'
+                  : isActive
+                  ? 'text-sky-400'
+                  : 'text-slate-100'
+              }`}
+            >
+              {channel.name}
+            </span>
           </div>
 
-          {/* Favorite Star */}
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              onToggleFavorite(channel);
-            }}
-            className={`p-1 rounded-lg flex-shrink-0 ml-1 ${
-              channel.is_favorite
-                ? 'text-amber-400 hover:text-amber-300'
-                : isChannelFocused
-                ? 'text-white/60 hover:text-white'
-                : 'text-slate-600 hover:text-slate-400'
-            }`}
-            title={channel.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
-          >
-            <Star className={`w-3.5 h-3.5 ${channel.is_favorite ? 'fill-amber-400' : ''}`} />
-          </button>
+          {/* Right status icon in channel cell: Blue Play Triangle (if active) or Replay Clock Icon (if has_archive) */}
+          <div className="flex items-center space-x-1.5 flex-shrink-0 ml-1.5">
+            {isActive ? (
+              <Play
+                className={`w-3.5 h-3.5 ${
+                  isChannelFocused ? 'text-slate-950 fill-slate-950' : 'text-sky-400 fill-sky-400'
+                }`}
+              />
+            ) : hasReplay ? (
+              <RotateCcw
+                className={`w-3.5 h-3.5 ${
+                  isChannelFocused ? 'text-slate-800' : 'text-slate-400'
+                }`}
+                title="Replay disponible"
+              />
+            ) : null}
+          </div>
         </div>
 
-        {/* RIGHT PART: HORIZONTAL CHRONOLOGICAL PROGRAM TIMELINE CELLS */}
-        <div className="flex-1 flex items-stretch overflow-hidden p-1 gap-1 bg-black/20 rounded-r-xl">
+        {/* RIGHT PART: TIVIMATE HORIZONTAL PROGRAM BLOCKS */}
+        <div className="flex-1 flex items-stretch gap-[4px] overflow-hidden">
           {visibleOffsets.map((offset) => {
             const prog = programSlots[offset];
-            const isCellFocused = isEpgRowFocused && focusedProgramOffset === offset;
-            const isLiveProg = offset === 0;
+            // Highlighted in light grey/white exactly like TiviMate photo when focused!
+            const isCellFocused =
+              (isEpgRowFocused && focusedProgramOffset === offset) ||
+              (isChannelFocused && offset === 0);
             const isPastProg = offset < 0;
-            const progress = isLiveProg && prog ? getProgramProgress(prog) : 0;
+            const weight = getSlotWeight(offset, prog);
 
             return (
               <div
                 key={offset}
+                style={{ flex: `${weight} 1 0%` }}
                 onClick={() => onSelectProgramCell(channel, index, offset, prog)}
-                className={`flex-1 min-w-0 px-2.5 py-1.5 rounded-lg cursor-pointer flex flex-col justify-between transition-all relative overflow-hidden ${
+                className={`min-w-0 px-3 flex items-center justify-between rounded-[5px] cursor-pointer transition-all relative overflow-hidden ${
                   isCellFocused
-                    ? isPastProg
-                      ? 'bg-emerald-600 text-white ring-4 ring-white z-20 shadow-2xl scale-[1.01] font-bold'
-                      : 'bg-tv-focus text-white ring-4 ring-white z-20 shadow-2xl scale-[1.01] font-bold'
-                    : isLiveProg
-                    ? isChannelFocused
-                      ? 'bg-sky-500/20 border border-sky-400/40 text-white'
-                      : 'bg-white/[0.06] border border-white/10 text-slate-200 hover:bg-white/10'
+                    ? 'bg-[#d8dee9] text-slate-950 font-bold shadow-md z-10'
                     : isPastProg
-                    ? 'bg-emerald-950/30 border border-emerald-500/20 text-emerald-200/90 hover:bg-emerald-900/40'
-                    : 'bg-white/[0.02] border border-white/5 text-slate-400 hover:bg-white/[0.06]'
+                    ? 'bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-100 border border-emerald-500/20'
+                    : 'bg-[#1c222d]/90 hover:bg-[#252d3b] text-slate-200'
                 }`}
               >
-                {/* Top line: Time range + status pill */}
-                <div className="flex items-center justify-between text-[10px] font-mono leading-none mb-0.5">
-                  <span className={isCellFocused ? 'text-white font-bold' : isLiveProg ? 'text-tv-accent font-semibold' : 'text-slate-400'}>
-                    {prog ? `${formatTimeHHMM(prog.start)} - ${formatTimeHHMM(prog.end)}` : '--:--'}
+                <span
+                  className={`text-[13px] xl:text-sm truncate ${
+                    isCellFocused
+                      ? 'text-slate-950 font-bold'
+                      : prog?.title === "Pas d'information"
+                      ? 'text-slate-400 font-normal'
+                      : 'text-slate-100 font-medium'
+                  }`}
+                >
+                  {prog ? prog.title : "Pas d'information"}
+                </span>
+
+                {isPastProg && (
+                  <span
+                    className={`ml-2 text-[9px] px-1.5 py-0.5 rounded uppercase font-mono font-bold flex items-center flex-shrink-0 ${
+                      isCellFocused
+                        ? 'bg-slate-900/20 text-slate-900'
+                        : 'bg-emerald-500/20 text-emerald-300'
+                    }`}
+                  >
+                    <RotateCcw className="w-2.5 h-2.5 mr-0.5" />
+                    Replay
                   </span>
-                  {isPastProg && (
-                    <span
-                      className={`text-[8px] px-1 py-0.2 rounded uppercase font-sans font-black flex items-center space-x-0.5 ${
-                        isCellFocused ? 'bg-black/30 text-white' : 'bg-emerald-500/20 text-emerald-300'
-                      }`}
-                    >
-                      <RotateCcw className="w-2.5 h-2.5 mr-0.5" />
-                      <span>Replay</span>
-                    </span>
-                  )}
-                  {isLiveProg && (
-                    <span
-                      className={`text-[8px] px-1 py-0.2 rounded uppercase font-sans font-black ${
-                        isCellFocused ? 'bg-black/30 text-white' : 'bg-sky-500/20 text-sky-300'
-                      }`}
-                    >
-                      Direct
-                    </span>
-                  )}
-                </div>
-
-                {/* Program Title */}
-                <div className="text-xs font-semibold truncate leading-tight">
-                  {prog ? prog.title : 'Programme TV'}
-                </div>
-
-                {/* Progress bar for current live program */}
-                {isLiveProg && (
-                  <div className="w-full h-1 bg-black/40 rounded-full overflow-hidden mt-1">
-                    <div
-                      className={`h-full rounded-full ${
-                        isCellFocused ? 'bg-white' : 'bg-gradient-to-r from-sky-400 to-tv-accent'
-                      }`}
-                      style={{ width: `${Math.max(6, progress)}%` }}
-                    />
-                  </div>
                 )}
               </div>
             );
@@ -654,6 +651,13 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
 
+  // Live clock for TiviMate Time Ruler ("dim. 25 oct. à 12:29") and 30-min marks
+  const [nowDate, setNowDate] = useState<Date>(() => new Date());
+  useEffect(() => {
+    const interval = setInterval(() => setNowDate(new Date()), 30000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Boundary resistance bounce & floating pill indicators
   const [channelBounce, setChannelBounce] = useState<'top' | 'bottom' | null>(null);
   const [channelNotice, setChannelNotice] = useState<'top' | 'bottom' | null>(null);
@@ -709,7 +713,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
 
   const isLiveTimelineMode = !isVodOrSeriesSection;
 
-  // In TiviMate Live Timeline Mode: when activePane === 'epg_grid', the left Bouquets/Categories column collapses!
+  // In TiviMate Live Timeline Mode: when activePane === 'epg_grid' (after pressing DPAD_RIGHT), the left Bouquets column hides!
   const isCategoriesCollapsed = isLiveTimelineMode && activePane === 'epg_grid';
 
   // Rich media preview states for VOD & Séries (only used when isVodOrSeriesSection is true)
@@ -843,8 +847,8 @@ export const TVGuide: React.FC<TVGuideProps> = ({
     }
   }, [focusedCategoryIndex, activePane]);
 
-  // VIRTUALIZED WINDOWING FOR LARGE CHANNEL LISTS
-  const ROW_HEIGHT = 56;
+  // VIRTUALIZED WINDOWING FOR LARGE CHANNEL LISTS (54px per row = 7 rows visible in bottom half!)
+  const ROW_HEIGHT = 54;
   const WINDOW_PAD_TOP = 25;
   const WINDOW_PAD_BOTTOM = 35;
 
@@ -869,7 +873,6 @@ export const TVGuide: React.FC<TVGuideProps> = ({
 
     let cancelled = false;
     const timer = setTimeout(async () => {
-      // Prioritize focused channel and its immediate neighbors (-3 to +6)
       const sliceStart = Math.max(0, focusedChannelIndex - 2);
       const sliceEnd = Math.min(channels.length, focusedChannelIndex + 6);
       const batch = channels.slice(sliceStart, sliceEnd).filter((ch) => {
@@ -908,11 +911,10 @@ export const TVGuide: React.FC<TVGuideProps> = ({
     };
   }, [isLiveTimelineMode, focusedChannelIndex, channels, serverCreds]);
 
-  // Compute which 3 or 4 horizontal program offsets are displayed in the timeline row
+  // Compute which 4 horizontal program offsets are displayed in the timeline row
   const visibleOffsets = useMemo(() => {
     if (activePane === 'epg_grid') {
       if (isPastUnlocked || focusedProgramOffset < 0) {
-        // Show past window around focusedProgramOffset, e.g. [-3, -2, -1, 0] or [-2, -1, 0, 1]
         const start = Math.max(-3, Math.min(focusedProgramOffset - 1, -2));
         return [start, start + 1, start + 2, start + 3];
       }
@@ -922,11 +924,53 @@ export const TVGuide: React.FC<TVGuideProps> = ({
       }
       return [0, 1, 2, 3];
     }
-    // When in categories or channels pane (bouquets visible on the left): show [En direct (0), À suivre (+1), Plus tard (+2)]
-    return [0, 1, 2];
+    return [0, 1, 2, 3];
   }, [activePane, focusedProgramOffset, isPastUnlocked]);
 
-  // Focused channel's program slots and currently highlighted program details for the Top TiviMate Info Header
+  // Compute the 5 half-hour marks for the TiviMate Time Ruler ("12:00  12:30  13:00  13:30  14:00")
+  // and the percentage position of the vertical blue Now Line!
+  const timeRulerInfo = useMemo(() => {
+    const baseMs = nowDate.getTime();
+    const d = new Date(baseMs);
+    d.setSeconds(0, 0);
+    const mins = d.getMinutes();
+    d.setMinutes(mins >= 30 ? 30 : 0);
+
+    // Shift ruler window when browsing past or future programs
+    const shiftHalfHours =
+      activePane === 'epg_grid'
+        ? focusedProgramOffset < 0
+          ? focusedProgramOffset
+          : focusedProgramOffset > 1
+          ? focusedProgramOffset - 1
+          : 0
+        : 0;
+
+    const startWindowMs = d.getTime() + shiftHalfHours * 30 * 60 * 1000;
+    const totalWindowMs = 2 * 60 * 60 * 1000; // 2 hours span (5 marks: +0, +30, +60, +90, +120)
+
+    const marks: string[] = [];
+    for (let i = 0; i < 5; i++) {
+      const markDate = new Date(startWindowMs + i * 30 * 60 * 1000);
+      marks.push(
+        markDate.toLocaleTimeString('fr-FR', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      );
+    }
+
+    const nowRatio = (baseMs - startWindowMs) / totalWindowMs;
+    const nowPercent = nowRatio >= 0 && nowRatio <= 1 ? Math.round(nowRatio * 1000) / 10 : null;
+
+    return {
+      currentLabel: formatFrenchDayAndTime(nowDate),
+      marks,
+      nowPercent,
+    };
+  }, [nowDate, activePane, focusedProgramOffset]);
+
+  // Focused channel's program slots and currently highlighted program details for the Top TiviMate Info Deck
   const focusedChannelSlots = useMemo(() => {
     if (!focusedChannel || isSep) return {};
     return buildProgramSlotsForChannel(focusedChannel, channelEpgMap[focusedChannel.id]);
@@ -950,17 +994,20 @@ export const TVGuide: React.FC<TVGuideProps> = ({
     [onEnterEpgGrid, onPlayCatchupProgram, onSelectChannel]
   );
 
+  const displayedProgProgress = activeDisplayedProgram ? getProgramProgress(activeDisplayedProgram) : 45;
+  const displayedProgRemainingMin = activeDisplayedProgram ? getProgramRemainingMin(activeDisplayedProgram) : 25;
+
   return (
-    <div className="flex-1 flex overflow-hidden bg-tv-bg text-slate-100 select-none">
-      {/* 1. CATEGORIES / BOUQUETS COLUMN (Automatically collapses in TiviMate EPG Timeline mode when pressing DPAD_RIGHT!) */}
+    <div className="flex-1 flex overflow-hidden bg-[#0e131a] text-slate-100 select-none">
+      {/* 1. CATEGORIES / BOUQUETS COLUMN (Visible when in categories or channels; collapses on DPAD_RIGHT into epg_grid!) */}
       {!isCategoriesCollapsed && (
         <div
-          className={`relative w-56 xl:w-64 border-r border-tv-border flex flex-col flex-shrink-0 transition-all duration-150 ${
-            activePane === 'categories' || activePane === 'category_header' ? 'bg-tv-surface/90' : 'bg-tv-surface/40'
+          className={`relative w-56 xl:w-64 border-r border-white/10 flex flex-col flex-shrink-0 transition-all duration-150 ${
+            activePane === 'categories' || activePane === 'category_header' ? 'bg-tv-surface/95' : 'bg-tv-surface/50'
           }`}
         >
           {/* Fixed Header with Groups Count and Sort Buttons */}
-          <div className="px-3 py-2.5 flex flex-col space-y-1.5 border-b border-tv-border/70 bg-tv-surface flex-shrink-0 z-10 shadow-sm">
+          <div className="px-3 py-2.5 flex flex-col space-y-1.5 border-b border-white/10 bg-tv-surface flex-shrink-0 z-10 shadow-sm">
             <div className="flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider">
               <span className="flex items-center space-x-1.5">
                 <span>Bouquets</span>
@@ -1091,151 +1138,167 @@ export const TVGuide: React.FC<TVGuideProps> = ({
         </div>
       )}
 
-      {/* 2. CENTER COLUMN: TIVIMATE FULL-WIDTH CHANNELS + HORIZONTAL PROGRAM TIMELINE (OR VOD/SERIES LIST) */}
+      {/* 2. TIVIMATE MAIN VIEW (TOP VIDEO + INFO DECK & BOTTOM CHRONOLOGICAL EPG GRID) */}
       <div
         className={`relative flex-1 min-w-[320px] flex flex-col overflow-hidden ${
           isVodOrSeriesSection ? 'border-r border-tv-border' : ''
-        } ${
-          activePane === 'channels' || activePane === 'epg_grid' || activePane === 'channel_header'
-            ? 'bg-tv-bg'
-            : 'bg-tv-bg/85'
         }`}
       >
-        {/* A. TIVIMATE TOP PROGRAM INFO DECK (Shown in Live TV mode, replaces the old right-side panel!) */}
+        {/* ===================================================================== */}
+        {/* A. TIVIMATE TOP DECK (Exact match to user photo: Left PiP Video + Right Program Details) */}
+        {/* ===================================================================== */}
         {isLiveTimelineMode && (
-          <div className="px-4 py-3 bg-gradient-to-r from-tv-surface via-tv-surface/95 to-slate-900/90 border-b border-tv-border flex items-center justify-between gap-4 flex-shrink-0 shadow-md">
-            {/* Left: Selected Channel & Focused Program Details */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center flex-wrap gap-2 mb-1">
-                {focusedChannel && (
-                  <span className="text-xs font-mono font-black text-tv-accent bg-sky-500/10 border border-sky-500/20 px-2 py-0.5 rounded-md">
-                    #{focusedChannel.num} {focusedChannel.name}
-                  </span>
-                )}
+          <div className="px-5 pt-3 pb-2.5 bg-[#0e131a] flex items-start gap-6 flex-shrink-0">
+            {/* 1. Left: 16:9 Rounded Mini Live Video Preview Window */}
+            <div
+              onClick={onToggleFullscreen}
+              className="w-[270px] lg:w-[310px] xl:w-[350px] aspect-video rounded-xl overflow-hidden bg-black border border-white/15 shadow-2xl flex-shrink-0 cursor-pointer relative group"
+              title="Appuyez sur OK pour passer en plein écran"
+            >
+              <LiveVideoPlayer
+                channel={activeChannel || focusedChannel}
+                currentEpg={currentEpg}
+                nextEpg={nextEpg}
+                isFullscreen={false}
+                onToggleFullscreen={onToggleFullscreen}
+                isStopped={isStopped}
+                onTogglePlayStop={onTogglePlayStop}
+              />
+            </div>
 
-                {activePane === 'epg_grid' && focusedProgramOffset < 0 ? (
-                  <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 flex items-center space-x-1">
-                    <RotateCcw className="w-3 h-3 mr-1" />
-                    <span>Programme Passé • Appuyez sur OK pour lancer le Replay</span>
-                  </span>
-                ) : activePane === 'epg_grid' && focusedProgramOffset > 0 ? (
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                    À venir sur cette chaîne
-                  </span>
-                ) : (
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-sky-500/20 text-sky-300 border border-sky-500/30 flex items-center space-x-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-ping mr-1" />
-                    <span>En Direct</span>
-                  </span>
-                )}
+            {/* 2. Right: Program Title, Time + Progress Bar + Remaining Mins, Bouquet Badge & 4-line Description */}
+            <div className="flex-1 min-w-0 flex flex-col justify-start pt-0.5">
+              {/* Row 1: Program Title + Favorite Star on far right */}
+              <div className="flex items-start justify-between gap-4">
+                <h2 className="text-xl xl:text-2xl font-bold text-white truncate leading-tight">
+                  {isSep
+                    ? cleanSeparatorName(focusedChannel?.name || 'Section')
+                    : activeDisplayedProgram?.title || focusedChannel?.name || "Pas d'information"}
+                </h2>
 
-                {activeDisplayedProgram && (
-                  <span className="text-xs font-mono text-slate-300 flex items-center space-x-1">
-                    <Clock className="w-3.5 h-3.5 text-tv-accent mr-1" />
-                    <span>
-                      {formatTimeHHMM(activeDisplayedProgram.start)} - {formatTimeHHMM(activeDisplayedProgram.end)}
-                    </span>
-                    <span className="text-slate-500">({activeDisplayedProgram.duration_min} min)</span>
-                  </span>
+                {focusedChannel && !isSep && (
+                  <button
+                    type="button"
+                    onClick={() => onToggleFavorite(focusedChannel)}
+                    className="p-1 text-slate-300 hover:text-amber-400 transition flex-shrink-0"
+                    title={focusedChannel.is_favorite ? 'Retirer des favoris' : 'Ajouter aux favoris'}
+                  >
+                    <Star
+                      className={`w-5 h-5 ${
+                        focusedChannel.is_favorite ? 'fill-amber-400 text-amber-400' : 'text-slate-300'
+                      }`}
+                    />
+                  </button>
                 )}
               </div>
 
-              <h2 className="text-base xl:text-lg font-black text-white truncate">
-                {isSep
-                  ? cleanSeparatorName(focusedChannel?.name || 'Section')
-                  : activeDisplayedProgram?.title || focusedChannel?.name || 'Sélectionnez une chaîne'}
-              </h2>
+              {/* Row 2: Time Range (11:50 - 12:50) + Progress Bar + Remaining Mins (21 min) ... Right: TV || BOUQUET */}
+              <div className="flex items-center justify-between gap-4 mt-1.5 mb-2">
+                <div className="flex items-center space-x-3 text-sm text-slate-300 font-medium">
+                  {activeDisplayedProgram && (
+                    <>
+                      <span className="font-mono text-slate-200">
+                        {formatTimeHHMM(activeDisplayedProgram.start)} – {formatTimeHHMM(activeDisplayedProgram.end)}
+                      </span>
+                      <div className="w-16 h-1 bg-white/20 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-white rounded-full"
+                          style={{ width: `${Math.max(8, displayedProgProgress)}%` }}
+                        />
+                      </div>
+                      <span className="text-slate-300">
+                        {activePane === 'epg_grid' && focusedProgramOffset < 0
+                          ? `Replay (${displayedProgRemainingMin} min)`
+                          : `${displayedProgRemainingMin} min`}
+                      </span>
+                    </>
+                  )}
 
-              <p className="text-xs text-slate-300 line-clamp-2 mt-0.5 leading-relaxed">
+                  {activePane === 'epg_grid' && focusedProgramOffset < 0 && (
+                    <span className="text-xs px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 font-bold flex items-center space-x-1">
+                      <RotateCcw className="w-3 h-3 mr-1" />
+                      <span>Programme Passé • OK pour lancer le Replay</span>
+                    </span>
+                  )}
+                </div>
+
+                {/* Right Badge: TV || FRANCE HD */}
+                <div className="flex items-center space-x-2 text-xs xl:text-sm font-bold text-slate-300 tracking-wide uppercase flex-shrink-0">
+                  <span className="flex items-center space-x-1 text-slate-200">
+                    <Tv className="w-3.5 h-3.5 text-sky-400 mr-1" />
+                    <span>TV</span>
+                  </span>
+                  <span className="text-slate-500 font-black">||</span>
+                  <span className="text-slate-200 truncate max-w-[220px]">
+                    {selectedCategory?.name || focusedChannel?.group_name || 'FRANCE HD'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Row 3: Multi-line Program Synopsis (3-4 lines just like TiviMate photo) */}
+              <p className="text-xs xl:text-[13px] text-slate-300 line-clamp-4 leading-relaxed">
                 {isSep
                   ? 'Séparateur thématique de bouquet.'
                   : activeDisplayedProgram?.description ||
-                    'Naviguez à droite (▶) pour explorer la ligne chronologique des programmes de cette chaîne.'}
+                    (focusedChannel
+                      ? `Diffusion en direct sur ${focusedChannel.name}. Utilisez les flèches Droite (▶) pour consulter les programmes à venir et maintenez Gauche (◀) enfoncé pour débloquer les programmes passés en Replay.`
+                      : 'Sélectionnez une chaîne pour afficher le résumé du programme.')}
               </p>
-            </div>
-
-            {/* Right: Quick Action Buttons & Mini Status */}
-            <div className="flex items-center space-x-2 flex-shrink-0">
-              {activePane === 'epg_grid' && !isPastUnlocked && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    onTogglePastUnlocked?.(true);
-                    onFocusProgramOffsetChange?.(-1);
-                  }}
-                  className="px-3 py-2 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300 text-xs font-bold flex items-center space-x-1.5 transition shadow"
-                  title="Maintenez Flèche Gauche enfoncée pour débloquer les programmes passés"
-                >
-                  <RotateCcw className="w-3.5 h-3.5" />
-                  <span>◀ Maintenir Gauche : Programmes passés</span>
-                </button>
-              )}
-
-              {focusedChannel && Boolean(focusedChannel.has_archive) && onOpenCatchupModal && (
-                <button
-                  type="button"
-                  onClick={() => onOpenCatchupModal(focusedChannel)}
-                  className="px-3 py-2 rounded-xl bg-tv-card hover:bg-tv-cardHover border border-tv-border text-slate-200 text-xs font-bold flex items-center space-x-1.5 transition"
-                  title="Ouvrir la grille Replay 7 jours complète"
-                >
-                  <Calendar className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="hidden lg:inline">Replay 7j</span>
-                </button>
-              )}
-
-              {focusedChannel && !isSep && (
-                <button
-                  type="button"
-                  onClick={() => onSelectChannel(focusedChannel, focusedChannelIndex)}
-                  className="px-3.5 py-2 rounded-xl bg-tv-focus hover:bg-sky-500 text-white text-xs font-black flex items-center space-x-1.5 shadow-lg transition"
-                >
-                  <Play className="w-3.5 h-3.5 fill-white" />
-                  <span>Direct (OK)</span>
-                </button>
-              )}
             </div>
           </div>
         )}
 
-        {/* B. SUB-HEADER: Bouquet Name, Channel Sort & Timeline Column Headers */}
-        <div className="px-3 py-2 flex items-center justify-between border-b border-tv-border/70 bg-tv-surface/60 flex-shrink-0 z-10">
-          <div className="flex items-center space-x-2 min-w-0">
-            {isCategoriesCollapsed && (
-              <button
-                type="button"
-                onClick={() => {
-                  onTogglePastUnlocked?.(false);
-                  onFocusProgramOffsetChange?.(0);
-                }}
-                className="px-2 py-1 rounded-lg bg-tv-card hover:bg-tv-cardHover border border-tv-border text-[11px] font-bold text-tv-accent flex items-center space-x-1"
-                title="Réafficher les bouquets (Flèche Gauche)"
-              >
-                <ChevronLeft className="w-3.5 h-3.5" />
-                <span>Bouquets</span>
-              </button>
-            )}
+        {/* ===================================================================== */}
+        {/* B. TIVIMATE TIME RULER BAR (dim. 25 oct. à 12:29 | 12:00 12:30 13:00 13:30 14:00) */}
+        {/* ===================================================================== */}
+        {isLiveTimelineMode ? (
+          <div className="px-2 py-1.5 border-b border-white/10 bg-[#0e131a] flex items-center flex-shrink-0 z-10">
+            {/* Left above channels: Current Day & Time in sky blue + optional Bouquets back pill */}
+            <div className="w-[240px] xl:w-[270px] flex-shrink-0 flex items-center justify-between px-2.5 mr-2">
+              <span className="text-xs xl:text-[13px] font-bold text-sky-400 truncate">
+                {timeRulerInfo.currentLabel}
+              </span>
+              {isCategoriesCollapsed && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onTogglePastUnlocked?.(false);
+                    onFocusProgramOffsetChange?.(0);
+                  }}
+                  className="text-[10px] px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-slate-200 flex items-center space-x-0.5"
+                  title="Réafficher les bouquets (Flèche Gauche)"
+                >
+                  <ChevronLeft className="w-3 h-3" />
+                  <span>Bouquets</span>
+                </button>
+              )}
+            </div>
+
+            {/* Right above program blocks: 30-min interval markers */}
+            <div className="flex-1 grid grid-cols-5 items-center text-xs xl:text-[13px] text-slate-300 font-medium pr-2">
+              {timeRulerInfo.marks.map((mark, i) => (
+                <span
+                  key={i}
+                  className={i === 4 ? 'text-right pr-1' : 'text-left pl-1'}
+                >
+                  {mark}
+                </span>
+              ))}
+            </div>
+          </div>
+        ) : (
+          /* Standard header for VOD / Series mode */
+          <div className="px-3 py-2 flex items-center justify-between border-b border-tv-border/70 bg-tv-surface/60 flex-shrink-0 z-10">
             <div className="min-w-0">
               <span className="truncate block text-xs font-bold text-slate-200 uppercase tracking-wider">
-                {selectedCategory?.name || 'Chaînes en direct'}
+                {selectedCategory?.name || 'Catalogue'}
               </span>
               <span className="text-[10px] text-slate-400 font-mono">
                 {channels.length}{' '}
-                {selectedCategory?.type === 'series'
-                  ? 'séries'
-                  : selectedCategory?.type === 'vod'
-                  ? 'films'
-                  : 'chaînes'}
-                {isLiveTimelineMode &&
-                  (activePane === 'epg_grid'
-                    ? isPastUnlocked
-                      ? ' • Mode Replay & Passé débloqué (◀ / ▶)'
-                      : ' • Mode Ligne Chronologique (▶ Futur • Maintenir ◀ Passé)'
-                    : ' • Appuyez sur ▶ Droite pour parcourir les programmes')}
+                {selectedCategory?.type === 'series' ? 'séries' : 'films'}
               </span>
             </div>
-          </div>
 
-          <div className="flex items-center space-x-2 flex-shrink-0">
             {onChannelSortChange && (
               <div className="flex items-center space-x-1 bg-black/40 p-0.5 rounded-md border border-white/5 text-[10px]">
                 <button
@@ -1280,86 +1343,103 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               </div>
             )}
           </div>
-        </div>
+        )}
 
-        {/* C. SCROLLABLE CHANNELS + TIMELINE LIST */}
-        <div
-          ref={channelListRef}
-          style={{
-            transform:
-              channelBounce === 'bottom'
-                ? 'translateY(-8px)'
-                : channelBounce === 'top'
-                ? 'translateY(8px)'
-                : 'translateY(0)',
-            transition: 'transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)',
-          }}
-          className="flex-1 flex flex-col py-1.5 overflow-y-auto overflow-x-hidden"
-        >
-          {channels.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-8 text-slate-500">
-              {selectedCategory?.id.startsWith('fav') ? (
-                <>
-                  <Star className="w-10 h-10 mb-2 text-amber-400/50" />
-                  <p className="text-sm text-slate-300 font-medium">Aucun favori dans cette catégorie.</p>
-                  <p className="text-xs text-slate-500 mt-1 max-w-xs text-center">
-                    Maintenez OK sur une chaîne ou cliquez sur l&apos;étoile pour l&apos;ajouter à vos favoris.
-                  </p>
-                </>
-              ) : (
-                <>
-                  <Radio className="w-10 h-10 mb-2 opacity-50" />
-                  <p className="text-sm">Aucune chaîne dans ce bouquet.</p>
-                </>
-              )}
+        {/* ===================================================================== */}
+        {/* C. SCROLLABLE CHANNELS + TIVIMATE TIMELINE GRID WITH VERTICAL NOW LINE */}
+        {/* ===================================================================== */}
+        <div className="relative flex-1 flex flex-col overflow-hidden">
+          {/* Vertical Sky-Blue "Now Line" with Glowing Dot on Top (Exact match to user photo!) */}
+          {isLiveTimelineMode && timeRulerInfo.nowPercent !== null && (
+            <div
+              className="pointer-events-none absolute top-0 bottom-0 left-[256px] xl:left-[286px] right-2 z-20 overflow-hidden"
+              aria-hidden="true"
+            >
+              <div
+                style={{ left: `${Math.min(96, Math.max(4, timeRulerInfo.nowPercent))}%` }}
+                className="absolute top-0 bottom-0 w-[1.5px] bg-sky-400/75"
+              >
+                <div className="w-2.5 h-2.5 rounded-full bg-sky-400 shadow-[0_0_8px_#38bdf8] -ml-[4px] -mt-[2px]" />
+              </div>
             </div>
-          ) : (
-            <div className="flex flex-col">
-              {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} className="flex-shrink-0" />}
-              {visibleChannels.map((ch, relIdx) => {
-                const realIdx = startIndex + relIdx;
-                const isChannelFocused = activePane === 'channels' && focusedChannelIndex === realIdx;
-                const isEpgRowFocused = activePane === 'epg_grid' && focusedChannelIndex === realIdx;
-                const isActive = activeChannel?.id === ch.id;
+          )}
 
-                if (isLiveTimelineMode) {
-                  const slots = buildProgramSlotsForChannel(ch, channelEpgMap[ch.id]);
+          <div
+            ref={channelListRef}
+            style={{
+              transform:
+                channelBounce === 'bottom'
+                  ? 'translateY(-8px)'
+                  : channelBounce === 'top'
+                  ? 'translateY(8px)'
+                  : 'translateY(0)',
+              transition: 'transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1)',
+            }}
+            className="flex-1 flex flex-col py-1 overflow-y-auto overflow-x-hidden"
+          >
+            {channels.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-slate-500">
+                {selectedCategory?.id.startsWith('fav') ? (
+                  <>
+                    <Star className="w-10 h-10 mb-2 text-amber-400/50" />
+                    <p className="text-sm text-slate-300 font-medium">Aucun favori dans cette catégorie.</p>
+                    <p className="text-xs text-slate-500 mt-1 max-w-xs text-center">
+                      Maintenez OK sur une chaîne ou cliquez sur l&apos;étoile pour l&apos;ajouter à vos favoris.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <Radio className="w-10 h-10 mb-2 opacity-50" />
+                    <p className="text-sm">Aucune chaîne dans ce bouquet.</p>
+                  </>
+                )}
+              </div>
+            ) : (
+              <div className="flex flex-col">
+                {topSpacerHeight > 0 && <div style={{ height: topSpacerHeight }} className="flex-shrink-0" />}
+                {visibleChannels.map((ch, relIdx) => {
+                  const realIdx = startIndex + relIdx;
+                  const isChannelFocused = activePane === 'channels' && focusedChannelIndex === realIdx;
+                  const isEpgRowFocused = activePane === 'epg_grid' && focusedChannelIndex === realIdx;
+                  const isActive = activeChannel?.id === ch.id;
+
+                  if (isLiveTimelineMode) {
+                    const slots = buildProgramSlotsForChannel(ch, channelEpgMap[ch.id]);
+                    return (
+                      <TiviMateTimelineRow
+                        key={ch.id}
+                        channel={ch}
+                        index={realIdx}
+                        isChannelFocused={isChannelFocused}
+                        isEpgRowFocused={isEpgRowFocused}
+                        focusedProgramOffset={focusedProgramOffset}
+                        visibleOffsets={visibleOffsets}
+                        isActive={isActive}
+                        programSlots={slots}
+                        onSelectChannel={onSelectChannel}
+                        onSelectProgramCell={handleSelectProgramCell}
+                        onOpenContextMenu={onOpenContextMenu}
+                      />
+                    );
+                  }
+
                   return (
-                    <TiviMateTimelineRow
+                    <ChannelRow
                       key={ch.id}
                       channel={ch}
                       index={realIdx}
-                      isChannelFocused={isChannelFocused}
-                      isEpgRowFocused={isEpgRowFocused}
-                      focusedProgramOffset={focusedProgramOffset}
-                      visibleOffsets={visibleOffsets}
-                      isPastUnlocked={isPastUnlocked}
+                      isFocused={isChannelFocused}
                       isActive={isActive}
-                      programSlots={slots}
-                      onSelectChannel={onSelectChannel}
-                      onSelectProgramCell={handleSelectProgramCell}
+                      onSelect={onSelectChannel}
                       onToggleFavorite={onToggleFavorite}
                       onOpenContextMenu={onOpenContextMenu}
                     />
                   );
-                }
-
-                return (
-                  <ChannelRow
-                    key={ch.id}
-                    channel={ch}
-                    index={realIdx}
-                    isFocused={isChannelFocused}
-                    isActive={isActive}
-                    onSelect={onSelectChannel}
-                    onToggleFavorite={onToggleFavorite}
-                    onOpenContextMenu={onOpenContextMenu}
-                  />
-                );
-              })}
-              {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} className="flex-shrink-0" />}
-            </div>
-          )}
+                })}
+                {bottomSpacerHeight > 0 && <div style={{ height: bottomSpacerHeight }} className="flex-shrink-0" />}
+              </div>
+            )}
+          </div>
         </div>
 
         {channelNotice && (
@@ -1378,48 +1458,9 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             </div>
           </div>
         )}
-
-        {/* D. BOTTOM TIVIMATE REMOTE NAVIGATION BAR */}
-        {channels.length > 0 && (
-          <div className="px-4 py-1.5 bg-tv-surface/95 border-t border-tv-border/70 flex items-center justify-between text-[11px] text-slate-300 flex-shrink-0">
-            <div className="flex items-center space-x-4 truncate">
-              <span>
-                <strong className="text-white font-mono bg-white/10 px-1.5 py-0.5 rounded">OK</strong>{' '}
-                {activePane === 'epg_grid' && focusedProgramOffset < 0 ? 'Lancer le Replay' : 'Regarder'}
-              </span>
-              {isLiveTimelineMode && activePane !== 'epg_grid' && (
-                <span>
-                  <strong className="text-tv-accent font-mono bg-sky-500/15 px-1.5 py-0.5 rounded">▶ Droite</strong>{' '}
-                  Parcourir la ligne des programmes (masque les bouquets)
-                </span>
-              )}
-              {isLiveTimelineMode && activePane === 'epg_grid' && (
-                <>
-                  <span>
-                    <strong className="text-tv-accent font-mono bg-sky-500/15 px-1.5 py-0.5 rounded">▶ Droite</strong>{' '}
-                    Programmes futurs
-                  </span>
-                  <span>
-                    <strong className="text-emerald-400 font-mono bg-emerald-500/15 px-1.5 py-0.5 rounded">
-                      Maintenir ◀ Gauche
-                    </strong>{' '}
-                    Débloquer les programmes passés (Replay)
-                  </span>
-                </>
-              )}
-              <span>
-                <strong className="text-amber-400 font-mono bg-amber-500/15 px-1.5 py-0.5 rounded">Menu / Info</strong>{' '}
-                Options & Favoris
-              </span>
-            </div>
-            <span className="font-mono text-[10px] text-slate-400 hidden xl:inline">
-              {activePane === 'epg_grid' ? '◀ Retour Chaînes & Bouquets' : '◀ Bouquets'}
-            </span>
-          </div>
-        )}
       </div>
 
-      {/* 3. RIGHT COLUMN: ONLY SHOWN FOR VOD (FILMS) & SERIES! (Completely removed for Live TV as requested!) */}
+      {/* 3. RIGHT COLUMN: ONLY SHOWN FOR VOD (FILMS) & SERIES! */}
       {isVodOrSeriesSection && (
         <div
           className={`w-80 xl:w-96 flex flex-col p-4 overflow-y-auto flex-shrink-0 border-l transition-colors ${
@@ -1543,4 +1584,3 @@ export const TVGuide: React.FC<TVGuideProps> = ({
     </div>
   );
 };
-

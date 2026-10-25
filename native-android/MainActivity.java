@@ -31,7 +31,7 @@ public class MainActivity extends BridgeActivity {
         // - Force landscape orientation on Android TV devices
         // - Allow sensor-based automatic rotation on mobile smartphones and tablets
         UiModeManager uiModeManager = (UiModeManager) getSystemService(UI_MODE_SERVICE);
-        boolean isTv = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION)
+        final boolean isTv = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION)
                 || getPackageManager().hasSystemFeature("android.software.leanback")
                 || !getPackageManager().hasSystemFeature("android.hardware.touchscreen");
 
@@ -41,7 +41,7 @@ public class MainActivity extends BridgeActivity {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
         }
 
-        // Tag WebView user agent so frontend knows device type and ensure WebView receives focus
+        // Tag WebView user agent AND inject window.__KEOTV_IS_TV__ so frontend immediately knows device type
         final WebView webView = getBridge() != null ? getBridge().getWebView() : null;
         if (webView != null) {
             try {
@@ -63,6 +63,10 @@ public class MainActivity extends BridgeActivity {
                 @Override
                 public void run() {
                     webView.requestFocus();
+                    try {
+                        String script = "window.__KEOTV_IS_TV__ = " + (isTv ? "true" : "false") + "; window.dispatchEvent(new Event('resize'));";
+                        webView.evaluateJavascript(script, null);
+                    } catch (Exception ignored) {}
                 }
             });
         }
@@ -73,10 +77,18 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         final WebView webView = getBridge() != null ? getBridge().getWebView() : null;
         if (webView != null) {
+            UiModeManager uiModeManager = (UiModeManager) getSystemService(UI_MODE_SERVICE);
+            final boolean isTv = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION)
+                    || getPackageManager().hasSystemFeature("android.software.leanback")
+                    || !getPackageManager().hasSystemFeature("android.hardware.touchscreen");
             webView.post(new Runnable() {
                 @Override
                 public void run() {
                     webView.requestFocus();
+                    try {
+                        String script = "window.__KEOTV_IS_TV__ = " + (isTv ? "true" : "false") + "; window.dispatchEvent(new Event('resize'));";
+                        webView.evaluateJavascript(script, null);
+                    } catch (Exception ignored) {}
                 }
             });
         }

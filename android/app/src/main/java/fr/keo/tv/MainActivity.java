@@ -16,25 +16,22 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
 
         // Set window background to dark TV surface (#080c14) immediately to prevent any white or default splash flash
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xFF080C14));
 
-        try {
-            getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.parseColor("#080C14")));
-        } catch (Exception e) {}
+        // Soft keyboard: display as an overlay (adjustPan) instead of crushing/resizing the TV layout in half
+        getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
 
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
-            try {
-                getSplashScreen().setOnExitAnimationListener(splashScreenView -> {
-                    splashScreenView.remove();
-                });
-            } catch (Exception e) {}
+            getSplashScreen().setOnExitAnimationListener(splashScreenView -> {
+                splashScreenView.remove();
+            });
         }
-
 
         // Orientation management:
         // - Force landscape orientation on Android TV devices
         // - Allow sensor-based automatic rotation on mobile smartphones and tablets
         UiModeManager uiModeManager = (UiModeManager) getSystemService(UI_MODE_SERVICE);
-        boolean isTv = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION)
+        final boolean isTv = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION)
                 || getPackageManager().hasSystemFeature("android.software.leanback")
                 || !getPackageManager().hasSystemFeature("android.hardware.touchscreen");
 
@@ -44,7 +41,7 @@ public class MainActivity extends BridgeActivity {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
         }
 
-        // Tag WebView user agent so frontend knows device type and ensure WebView receives focus
+        // Tag WebView user agent AND inject window.__KEOTV_IS_TV__ so frontend immediately knows device type
         final WebView webView = getBridge() != null ? getBridge().getWebView() : null;
         if (webView != null) {
             try {
@@ -66,6 +63,10 @@ public class MainActivity extends BridgeActivity {
                 @Override
                 public void run() {
                     webView.requestFocus();
+                    try {
+                        String script = "window.__KEOTV_IS_TV__ = " + (isTv ? "true" : "false") + "; window.dispatchEvent(new Event('resize'));";
+                        webView.evaluateJavascript(script, null);
+                    } catch (Exception ignored) {}
                 }
             });
         }
@@ -76,10 +77,18 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         final WebView webView = getBridge() != null ? getBridge().getWebView() : null;
         if (webView != null) {
+            UiModeManager uiModeManager = (UiModeManager) getSystemService(UI_MODE_SERVICE);
+            final boolean isTv = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION)
+                    || getPackageManager().hasSystemFeature("android.software.leanback")
+                    || !getPackageManager().hasSystemFeature("android.hardware.touchscreen");
             webView.post(new Runnable() {
                 @Override
                 public void run() {
                     webView.requestFocus();
+                    try {
+                        String script = "window.__KEOTV_IS_TV__ = " + (isTv ? "true" : "false") + "; window.dispatchEvent(new Event('resize'));";
+                        webView.evaluateJavascript(script, null);
+                    } catch (Exception ignored) {}
                 }
             });
         }
