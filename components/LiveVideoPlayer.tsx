@@ -16,6 +16,7 @@ interface LiveVideoPlayerProps {
   onTogglePlayStop?: () => void;
   onNextChannel?: () => void;
   onPreviousChannel?: () => void;
+  isModalCovering?: boolean;
 }
 
 export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
@@ -28,7 +29,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   onTogglePlayStop: externalTogglePlayStop,
   onNextChannel,
   onPreviousChannel,
+  isModalCovering = false,
 }) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [internalIsStopped, setInternalIsStopped] = useState<boolean>(false);
@@ -83,7 +86,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
     touchStartX.current = null;
   };
 
-  // On Android the stream is played by the native ExoPlayer (opened full screen), not by hls.js
+  // On Android, live streams inside the 16:9 mini window are rendered by the embedded native ExoPlayer!
   const [nativeMode, setNativeMode] = useState<boolean>(false);
   useEffect(() => {
     setNativeMode(isNativePlayerAvailable());
@@ -101,7 +104,70 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
     }).catch((err: any) => alert(`Lecture impossible : ${err?.message || err}`));
   };
 
-  // Stop or start stream when channel changes or isStopped changes
+  // Embedded Native ExoPlayer Mini Preview Window (TiviMate top-left 16:9 box on Android TV)
+  useEffect(() => {
+    if (!nativeMode) return;
+
+    if (!channel || !channel.stream_url || isStopped || isFullscreen || isModalCovering) {
+      NativePlayer.updatePreviewRect({
+        x: 0,
+        y: 0,
+        width: 0,
+        height: 0,
+        visible: false,
+      }).catch(() => {});
+      return;
+    }
+
+    const syncPreview = (startNew: boolean) => {
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 10 || rect.height <= 10) return;
+
+      if (startNew) {
+        NativePlayer.playPreview({
+          url: channel.stream_url,
+          x: rect.left,
+          y: rect.top,
+          width: rect.width,
+          height: rect.height,
+          muted: isMuted,
+          userAgent: NATIVE_PLAYER_USER_AGENT,
+        }).catch(() => {});
+      } else {
+        NativePlayer.updatePreviewRect({
+          x: rect.left,
+          y: rect.top,
+          width: rect.width,
+          height: rect.height,
+          visible: true,
+          muted: isMuted,
+        }).catch(() => {});
+      }
+    };
+
+    const timer = setTimeout(() => syncPreview(true), 60);
+
+    const onResize = () => syncPreview(false);
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', onResize);
+    };
+  }, [nativeMode, channel?.id, channel?.stream_url, isStopped, isFullscreen, isModalCovering, isMuted]);
+
+  // Ensure embedded native preview stops cleanly when LiveVideoPlayer unmounts (e.g. switching to VOD/Series)
+  useEffect(() => {
+    return () => {
+      if (isNativePlayerAvailable()) {
+        NativePlayer.stopPreview().catch(() => {});
+      }
+    };
+  }, []);
+
+  // Stop or start web HTML5/HLS stream when not running on native Android
   useEffect(() => {
     if (nativeMode) return;
     if (!channel || !videoRef.current) return;
@@ -124,7 +190,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
     setIsPlaying(false);
 
     const video = videoRef.current;
-    const streamUrl = channel.stream_url;
+    const rawUrl = channel.stream_url;
+    // If Web player receives a .ts Xtream stream URL, try the .m3u8 HLS variant first so hls.js can play it
+    const streamUrl = rawUrl.endsWith('.ts') ? rawUrl.replace(/\.ts$/, '.m3u8') : rawUrl;
 
     // Reset previous HLS instance
     if (hlsRef.current) {
@@ -181,7 +249,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
               hls.destroy();
               hlsRef.current = null;
               if (video) {
-                video.src = streamUrl;
+                video.src = rawUrl;
                 video.play().catch(() => {
                   setStreamError('Flux temporairement indisponible.');
                 });
@@ -199,7 +267,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       });
       setIsPlaying(true);
     } else {
-      video.src = streamUrl;
+      video.src = rawUrl;
       video.play().catch(() => {});
     }
 
@@ -322,9 +390,10 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
 
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
     if (videoRef.current) {
-      videoRef.current.muted = !videoRef.current.muted;
-      setIsMuted(videoRef.current.muted);
+      videoRef.current.muted = nextMuted;
     }
   };
 
@@ -340,7 +409,14 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
 
   return (
     <div
-      onClick={triggerOsd}
+      ref={containerRef}
+      onClick={(e) => {
+        if (!isFullscreen && nativeMode) {
+          openNativePlayer(e);
+        } else {
+          triggerOsd();
+        }
+      }}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
       className={`relative overflow-hidden bg-black transition-all duration-300 ${
@@ -349,37 +425,14 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
           : 'w-full h-full rounded-xl border border-tv-border shadow-2xl'
       }`}
     >
-      {/* HTML5 Video element */}
+      {/* HTML5 Video element (used on Web; on Android the native ExoPlayer preview renders over this box) */}
       <video
         ref={videoRef}
-        className={`w-full h-full object-contain ${isStopped ? 'hidden' : 'block'}`}
+        className={`w-full h-full object-contain ${isStopped || nativeMode ? 'hidden' : 'block'}`}
         playsInline
         autoPlay
         muted={isMuted}
       />
-
-      {/* Native player launcher (Android TV & Mobile) */}
-      {nativeMode && (
-        <div
-          onClick={openNativePlayer}
-          tabIndex={0}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ' || (e as any).keyCode === 23 || (e as any).keyCode === 13) {
-              e.preventDefault();
-              openNativePlayer();
-            }
-          }}
-          className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-tv-surface text-center p-4 select-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-tv-accent group"
-        >
-          <div className="w-14 h-14 rounded-full bg-tv-focus flex items-center justify-center mb-2 shadow-xl group-hover:scale-110 group-focus:scale-110 transition-transform">
-            <Play className="w-7 h-7 text-white fill-white" />
-          </div>
-          <h3 className="text-sm font-bold text-white line-clamp-2">{channel?.name || 'Aucune chaîne'}</h3>
-          <p className="text-[11px] text-slate-300 mt-1">
-            Appuyez sur <span className="text-tv-accent font-bold">OK</span> pour regarder en plein écran
-          </p>
-        </div>
-      )}
 
       {/* Stopped resting screen */}
       {isStopped && (
@@ -404,7 +457,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       )}
 
       {/* Stream loading / error state */}
-      {!isStopped && streamError && (
+      {!isStopped && !nativeMode && streamError && (
         <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/85 text-white p-6 text-center select-none">
           <Radio className="w-12 h-12 text-rose-500 mb-3 animate-pulse" />
           <p className="text-lg font-medium text-slate-200">{channel?.name}</p>
@@ -413,8 +466,8 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Controls Overlay (when not fullscreen) */}
-      {!isFullscreen && (
+      {/* Controls Overlay (when not fullscreen and in Web mode) */}
+      {!isFullscreen && !nativeMode && (
         <div className="absolute top-2 right-2 flex items-center space-x-1.5 bg-black/70 backdrop-blur-md rounded-lg p-1.5 border border-white/10 z-10">
           {/* Stop / Resume Button */}
           <button

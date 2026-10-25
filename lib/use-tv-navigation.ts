@@ -503,7 +503,7 @@ export function useTVNavigation({
 
           // 3. Currently at live program (curOffset === 0) and past is locked:
           // - Short press DPAD_LEFT (handled on keyup): returns to channel list and re-opens bouquets column!
-          // - Long press DPAD_LEFT (e.repeat or hold >= 500ms): unlocks past programs (Replay / Catchup) and steps into offset -1!
+          // - Long press DPAD_LEFT (e.repeat or hold >= 240ms): unlocks past programs (Replay / Catchup) and steps into offset -1!
           if (e.repeat) {
             if (!leftLongPressFiredRef.current) {
               clearLeftHoldTimer();
@@ -526,7 +526,7 @@ export function useTVNavigation({
             setIsPastUnlocked?.(true);
             setFocusedProgramOffset?.(-1);
             onUnlockPastPrograms?.(focusedChannelIndexRef.current);
-          }, 500);
+          }, 240);
           return;
         }
 

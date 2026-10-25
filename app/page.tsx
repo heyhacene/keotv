@@ -1514,8 +1514,14 @@ export default function KeoTVHome() {
         return;
       }
 
-      // ---- Native Android player (Live TV: reliable IPTV playback, no CORS, custom User-Agent) ----
+      // ---- Native Android player (Live TV: TiviMate 2-step preview + fullscreen) ----
+      // - First press on a new channel: switches activeChannel so it plays immediately in the top-left 16:9 mini preview window!
+      // - Second press on the already-active channel (or when forceFullscreen is true): opens full-screen PlayerActivity!
+      const isAlreadyActiveChannel = activeChannel?.id === targetChannel.id;
       if (isNativePlayerAvailable()) {
+        if (!forceFullscreen && !isAlreadyActiveChannel) {
+          return;
+        }
         try {
           const isTargetInPlaylist = filteredChannels.some((c) => c.id === targetChannel.id);
           const playlist = isTargetInPlaylist ? filteredChannels : [targetChannel];
@@ -1535,9 +1541,7 @@ export default function KeoTVHome() {
       }
 
       // ---- Browser fallback (hls.js web player) ----
-      if (activeChannel?.id === targetChannel.id && forceFullscreen) {
-        setIsFullscreen(true);
-      } else if (forceFullscreen) {
+      if (isAlreadyActiveChannel || forceFullscreen) {
         setIsFullscreen(true);
       }
     },
@@ -1581,7 +1585,7 @@ export default function KeoTVHome() {
       }
 
       if (program.catchup_url && !fallbackUrls.includes(program.catchup_url)) {
-        fallbackUrls.unshift(program.catchup_url);
+        fallbackUrls.push(program.catchup_url);
       }
 
       // If still empty (e.g., M3U or demo playlist), fallback to append utc or live stream_url so demo testing works smoothly
@@ -2140,11 +2144,11 @@ export default function KeoTVHome() {
         if (targetProg) {
           handlePlayCatchupProgram(targetProg, ch);
         } else {
-          handleSelectChannel(ch, true);
+          handleSelectChannel(ch, false);
         }
       } else {
-        // Current live (0) or future (>0) program -> launch live channel!
-        handleSelectChannel(ch, true);
+        // Current live (0) or future (>0) program -> switches mini preview on first press, or opens fullscreen if already active!
+        handleSelectChannel(ch, false);
       }
     },
     onSelectRightPanelAction: (btnIdx) => {
@@ -2720,6 +2724,21 @@ export default function KeoTVHome() {
             onTogglePlayStop={() => setIsStopped(!isStopped)}
             onNextChannel={handleNextChannel}
             onPreviousChannel={handlePreviousChannel}
+            isModalCovering={
+              isSplashVisible ||
+              isSettingsModalOpen ||
+              isCategoryModalOpen ||
+              isXtreamModalOpen ||
+              isSyncModalOpen ||
+              isSearchModalOpen ||
+              isCategoryManagerOpen ||
+              isParentalPinModalOpen ||
+              isContextMenuOpen ||
+              isCatchupModalOpen ||
+              Boolean(selectedSeriesForDetails) ||
+              Boolean(selectedMovieForDetails) ||
+              Boolean(appUpdateInfo)
+            }
           />
         </div>
 
@@ -3326,6 +3345,21 @@ export default function KeoTVHome() {
                 onTogglePlayStop={() => setIsStopped(!isStopped)}
                 onNextChannel={handleNextChannel}
                 onPreviousChannel={handlePreviousChannel}
+                isModalCovering={
+                  isSplashVisible ||
+                  isSettingsModalOpen ||
+                  isCategoryModalOpen ||
+                  isXtreamModalOpen ||
+                  isSyncModalOpen ||
+                  isSearchModalOpen ||
+                  isCategoryManagerOpen ||
+                  isParentalPinModalOpen ||
+                  isContextMenuOpen ||
+                  isCatchupModalOpen ||
+                  Boolean(selectedSeriesForDetails) ||
+                  Boolean(selectedMovieForDetails) ||
+                  Boolean(appUpdateInfo)
+                }
               />
             </div>
 
@@ -3470,6 +3504,21 @@ export default function KeoTVHome() {
               activeSection={activeSection}
               serverCreds={activeXtreamCreds}
               boundaryHit={boundaryHit}
+              isModalCovering={
+                isSplashVisible ||
+                isSettingsModalOpen ||
+                isCategoryModalOpen ||
+                isXtreamModalOpen ||
+                isSyncModalOpen ||
+                isSearchModalOpen ||
+                isCategoryManagerOpen ||
+                isParentalPinModalOpen ||
+                isContextMenuOpen ||
+                isCatchupModalOpen ||
+                Boolean(selectedSeriesForDetails) ||
+                Boolean(selectedMovieForDetails) ||
+                Boolean(appUpdateInfo)
+              }
               onSelectCategory={(cat, idx, switchPane = true) => handleSelectCategory(cat, idx, switchPane)}
               onSelectChannel={(ch, idx) => {
                 setFocusedChannelIndex(idx);
@@ -3493,8 +3542,9 @@ export default function KeoTVHome() {
                 setIsCatchupModalOpen(true);
               }}
               onToggleFullscreen={() => {
-                if (isNativePlayerAvailable() && activeChannel) {
-                  handleSelectChannel(activeChannel, true);
+                const target = activeChannel || filteredChannels[focusedChannelIndex];
+                if (isNativePlayerAvailable() && target) {
+                  handleSelectChannel(target, true);
                 } else {
                   setIsFullscreen(true);
                 }

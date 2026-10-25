@@ -70,6 +70,7 @@ interface TVGuideProps {
   activeSection?: 'live' | 'vod' | 'series' | 'fav';
   serverCreds?: { serverUrl: string; username: string; password: string } | null;
   boundaryHit?: { pane: string; boundary: 'top' | 'bottom'; time: number } | null;
+  isModalCovering?: boolean;
 }
 
 // Helper for category icons
@@ -647,6 +648,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   activeSection = 'live',
   serverCreds,
   boundaryHit,
+  isModalCovering = false,
 }) => {
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
@@ -1163,6 +1165,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 onToggleFullscreen={onToggleFullscreen}
                 isStopped={isStopped}
                 onTogglePlayStop={onTogglePlayStop}
+                isModalCovering={isModalCovering}
               />
             </div>
 

@@ -46,26 +46,24 @@ export class CatchupService {
       const dateLocal = this.formatXtreamDate(startSec, false);
       const dateUtc = this.formatXtreamDate(startSec, true);
 
-      // 1. Standard Xtream Codes: /timeshift/{user}/{pass}/{duration}/{YYYY-MM-DD:HH-mm}/{stream_id}.ts (Local / Server Time)
-      urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${dateLocal}/${cleanId}.ts`);
-
-      // 2. Standard Xtream Codes HLS (.m3u8) with YYYY-MM-DD:HH-mm
-      urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${dateLocal}/${cleanId}.m3u8`);
-
-      // 3. UTC date variant (if server archive uses UTC clock)
-      if (dateUtc !== dateLocal) {
-        urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${dateUtc}/${cleanId}.ts`);
-        urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${dateUtc}/${cleanId}.m3u8`);
-      }
-
-      // 4. Xtream streaming/timeshift.php endpoint
+      // 1. Official Xtream Codes Catchup endpoint: /streaming/timeshift.php (handles .ts/.m3u8 & internal redirects automatically)
       urls.push(
         `${baseUrl}/streaming/timeshift.php?username=${user}&password=${pass}&stream=${cleanId}&start=${dateLocal}&duration=${durMin}`
       );
+
+      // 2. Direct Xtream Codes MPEG-TS: /timeshift/{user}/{pass}/{duration}/{YYYY-MM-DD:HH-mm}/{stream_id}.ts
+      urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${dateLocal}/${cleanId}.ts`);
+
+      // 3. Direct Xtream Codes HLS (.m3u8) with YYYY-MM-DD:HH-mm
+      urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${dateLocal}/${cleanId}.m3u8`);
+
+      // 4. UTC date variants (if server archive uses UTC clock)
       if (dateUtc !== dateLocal) {
         urls.push(
           `${baseUrl}/streaming/timeshift.php?username=${user}&password=${pass}&stream=${cleanId}&start=${dateUtc}&duration=${durMin}`
         );
+        urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${dateUtc}/${cleanId}.ts`);
+        urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${dateUtc}/${cleanId}.m3u8`);
       }
 
       // 5. Unix epoch timestamp format (XUI.one / newer panels)

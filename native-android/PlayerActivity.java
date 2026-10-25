@@ -30,8 +30,10 @@ import androidx.media3.common.TrackSelectionParameters;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.HttpDataSource;
+import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
 import androidx.media3.ui.PlayerView;
 
 import java.util.ArrayList;
@@ -366,14 +368,33 @@ public class PlayerActivity extends AppCompatActivity {
 
         setContentView(root);
 
+        // Detect if this is a Replay / Catchup multi-format fallback cascade
+        boolean isReplayCascade = !isLive && pendingSeriesId == null && pendingUrls.size() > 1
+                && !pendingTitles.isEmpty() && pendingTitles.get(0) != null
+                && pendingTitles.get(0).startsWith("[Replay]");
+
         DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
                 .setUserAgent(pendingUserAgent)
                 .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(15000)
-                .setReadTimeoutMs(20000);
+                .setConnectTimeoutMs(isReplayCascade ? 3200 : 8000)
+                .setReadTimeoutMs(isReplayCascade ? 4000 : 12000);
+
+        // Ultra-fast initial playback buffer (starts playing after 500ms of stream instead of default 2500ms!)
+        DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
+                .setBufferDurationsMs(
+                        2500,  // minBufferMs
+                        15000, // maxBufferMs
+                        500,   // bufferForPlaybackMs (instant startup)
+                        1200   // bufferForPlaybackAfterRebufferMs
+                )
+                .build();
+
+        DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(httpFactory)
+                .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(isReplayCascade ? 0 : 1));
 
         player = new ExoPlayer.Builder(this)
-                .setMediaSourceFactory(new DefaultMediaSourceFactory(httpFactory))
+                .setLoadControl(loadControl)
+                .setMediaSourceFactory(mediaSourceFactory)
                 .build();
         playerView.setPlayer(player);
 
