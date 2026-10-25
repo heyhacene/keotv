@@ -21,6 +21,7 @@ import { SplashScreen } from '@/components/SplashScreen';
 import { ContextMenuModal } from '@/components/ContextMenuModal';
 import { CategoryManagerModal } from '@/components/CategoryManagerModal';
 import { ParentalPinModal } from '@/components/ParentalPinModal';
+import { CatchupModal } from '@/components/CatchupModal';
 import { checkForAppUpdate, AppUpdateInfo, CURRENT_BUILD_NUMBER } from '@/lib/update-service';
 import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
 import {
@@ -239,6 +240,10 @@ export default function KeoTVHome() {
   const [contextMenuItem, setContextMenuItem] = useState<Channel | null>(null);
   const [contextMenuCategory, setContextMenuCategory] = useState<Category | null>(null);
   const [isContextMenuOpen, setIsContextMenuOpen] = useState<boolean>(false);
+
+  // Catchup / Replay Modal state
+  const [isCatchupModalOpen, setIsCatchupModalOpen] = useState<boolean>(false);
+  const [catchupTargetChannel, setCatchupTargetChannel] = useState<Channel | null>(null);
 
   // Parental lock & PIN states
   const [isParentalPinModalOpen, setIsParentalPinModalOpen] = useState<boolean>(false);
@@ -1515,6 +1520,77 @@ export default function KeoTVHome() {
       }
     },
     [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession, adultCategoryIds]
+  );
+
+  // Play a specific past Catchup / Replay program via Timeshift
+  const handlePlayCatchupProgram = useCallback(
+    async (program: EpgProgram, channel: Channel) => {
+      let catchupUrl = program.catchup_url;
+
+      if (!catchupUrl) {
+        const pl = (await db.playlists.toArray()).find((p) => p.type === 'xtream' && p.username && p.password);
+        let serverUrl = pl?.server_url || '';
+        let username = pl?.username || '';
+        let password = pl?.password || '';
+
+        if (!serverUrl) {
+          const saved = await getSetting<any>('last_xtream_config', null);
+          if (saved?.server_url && saved?.username && saved?.password) {
+            serverUrl = saved.server_url;
+            username = saved.username;
+            password = saved.password;
+          }
+        }
+
+        const streamId = channel.stream_id || (channel.id.match(/\d+$/) ? channel.id.match(/\d+$/)![0] : null);
+        const startSec = Math.floor(new Date(program.start).getTime() / 1000);
+
+        if (serverUrl && username && password && streamId) {
+          catchupUrl = CatchupService.generateCatchupUrl({
+            serverUrl,
+            username,
+            password,
+            streamId,
+            startTimestamp: startSec,
+            durationMinutes: program.duration_min,
+          }) || undefined;
+        }
+      }
+
+      if (!catchupUrl) {
+        alert('Impossible de générer le flux replay pour ce programme.');
+        return;
+      }
+
+      const replayChannel: Channel = {
+        ...channel,
+        name: `[Replay] ${program.title} (${channel.name})`,
+        stream_url: catchupUrl,
+      };
+
+      setIsStopped(false);
+      setActiveChannel(replayChannel);
+      setCurrentEpg(program);
+      setNextEpg(null);
+
+      if (isNativePlayerAvailable()) {
+        try {
+          await NativePlayer.play({
+            urls: [catchupUrl],
+            titles: [`[Replay] ${program.title}`],
+            index: 0,
+            userAgent: NATIVE_PLAYER_USER_AGENT,
+            isLive: false,
+          });
+        } catch (err: any) {
+          console.error('Native catchup player error:', err);
+          alert(`Erreur lecture Replay : ${err?.message || err}`);
+        }
+      } else {
+        setIsFullscreen(true);
+      }
+    },
+    []
   );
 
   // Hide a single channel from view
@@ -3256,6 +3332,10 @@ export default function KeoTVHome() {
                 setIsContextMenuOpen(true);
               }}
               onOpenCategoryManager={() => setIsCategoryManagerOpen(true)}
+              onOpenCatchupModal={(ch) => {
+                setCatchupTargetChannel(ch);
+                setIsCatchupModalOpen(true);
+              }}
               onToggleFullscreen={() => {
                 if (isNativePlayerAvailable() && activeChannel) {
                   handleSelectChannel(activeChannel, true);
@@ -3434,6 +3514,22 @@ export default function KeoTVHome() {
         onToggleHideCategory={handleToggleHideCategory}
         onHideChannel={handleHideChannel}
         onExcludePrefix={handleExcludePrefix}
+        onOpenReplay={(ch) => {
+          setCatchupTargetChannel(ch);
+          setIsCatchupModalOpen(true);
+        }}
+      />
+
+      {/* Replay & Catchup Modal (7 Days Multi-day Listings & Timeshift Playback) */}
+      <CatchupModal
+        isOpen={isCatchupModalOpen}
+        channel={catchupTargetChannel}
+        serverCreds={activeXtreamCreds}
+        onClose={() => {
+          setIsCatchupModalOpen(false);
+          setCatchupTargetChannel(null);
+        }}
+        onPlayProgram={handlePlayCatchupProgram}
       />
 
       {/* Startup Update Alert Modal (Automatically triggered if a newer build is released) */}

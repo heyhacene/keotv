@@ -22,6 +22,7 @@ import {
   Clapperboard,
   Loader2,
   Play,
+  RotateCcw,
 } from 'lucide-react';
 import { LiveVideoPlayer } from './LiveVideoPlayer';
 import {
@@ -56,6 +57,7 @@ interface TVGuideProps {
   onOpenSearch?: () => void;
   onOpenContextMenu?: (channel: Channel) => void;
   onOpenCategoryManager?: () => void;
+  onOpenCatchupModal?: (channel: Channel) => void;
   focusedCategoryHeaderIndex?: number;
   focusedChannelHeaderIndex?: number;
   activeSection?: 'live' | 'vod' | 'series' | 'fav';
@@ -353,6 +355,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   onOpenSearch,
   onOpenContextMenu,
   onOpenCategoryManager,
+  onOpenCatchupModal,
   focusedCategoryHeaderIndex = 2,
   focusedChannelHeaderIndex = 0,
   activeSection = 'live',
@@ -1087,11 +1090,21 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 )}
 
                 {/* Replay / Catchup badge or button */}
-                {activeChannel?.has_archive && (
-                  <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center space-x-2 text-[11px] text-emerald-300">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
-                    <span>Replay & Retour arrière disponibles sur cette chaîne</span>
-                  </div>
+                {activeChannel && onOpenCatchupModal && (
+                  <button
+                    type="button"
+                    onClick={() => onOpenCatchupModal(activeChannel)}
+                    className="w-full p-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 rounded-xl flex items-center justify-between text-xs text-emerald-300 font-bold transition shadow-md group"
+                    title="Consulter les programmes des 7 derniers jours"
+                  >
+                    <div className="flex items-center space-x-2">
+                      <RotateCcw className="w-4 h-4 text-emerald-400 group-hover:rotate-[-45deg] transition-transform" />
+                      <span>Guide & Replay (7 jours)</span>
+                    </div>
+                    <span className="text-[10px] bg-emerald-500/20 px-2 py-0.5 rounded font-mono uppercase text-emerald-200">
+                      Ouvrir
+                    </span>
+                  </button>
                 )}
 
                 <button

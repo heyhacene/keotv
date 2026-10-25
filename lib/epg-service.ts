@@ -120,4 +120,89 @@ export class EPGService {
       return { current: null, next: null };
     }
   }
+
+  /**
+   * Fetches full EPG for a stream (all past & upcoming programs available from Xtream)
+   * action=get_simple_data_table&stream_id=...
+   */
+  static async fetchXtreamFullEpg(params: {
+    serverUrl: string;
+    username: string;
+    password: string;
+    streamId: string | number;
+    channelId: string;
+  }): Promise<EpgProgram[]> {
+    try {
+      const baseUrl = params.serverUrl.endsWith('/') ? params.serverUrl.slice(0, -1) : params.serverUrl;
+      const url = `${baseUrl}/player_api.php?username=${encodeURIComponent(params.username)}&password=${encodeURIComponent(params.password)}&action=get_simple_data_table&stream_id=${params.streamId}`;
+
+      const res = await fetchHttp(url, 'json');
+      const listings = toArray(res?.epg_listings || res);
+
+      if (listings.length === 0) {
+        // Fallback to short EPG with limit=30
+        const shortUrl = `${baseUrl}/player_api.php?username=${encodeURIComponent(params.username)}&password=${encodeURIComponent(params.password)}&action=get_short_epg&stream_id=${params.streamId}&limit=30`;
+        const shortRes = await fetchHttp(shortUrl, 'json');
+        const shortListings = toArray(shortRes?.epg_listings || shortRes);
+        if (shortListings.length === 0) return [];
+        return this.parseListings(shortListings, params);
+      }
+
+      return this.parseListings(listings, params);
+    } catch (err) {
+      console.warn('Failed to fetch full EPG for stream', params.streamId, err);
+      return [];
+    }
+  }
+
+  private static parseListings(
+    listings: any[],
+    params: { serverUrl: string; username: string; password: string; streamId: string | number; channelId: string }
+  ): EpgProgram[] {
+    const nowMs = Date.now();
+    return listings.map((item: any, idx: number) => {
+      let title = item.title || 'Programme';
+      try {
+        if (typeof title === 'string' && /^[A-Za-z0-9+/=]+$/.test(title) && title.length > 8) {
+          title = decodeURIComponent(escape(atob(title)));
+        }
+      } catch {}
+
+      let description = item.description || '';
+      try {
+        if (typeof description === 'string' && /^[A-Za-z0-9+/=]+$/.test(description) && description.length > 8) {
+          description = decodeURIComponent(escape(atob(description)));
+        }
+      } catch {}
+
+      const startMs = item.start_timestamp ? Number(item.start_timestamp) * 1000 : (item.start ? new Date(item.start).getTime() : nowMs);
+      const endMs = item.stop_timestamp ? Number(item.stop_timestamp) * 1000 : (item.end ? new Date(item.end).getTime() : startMs + 3600000);
+      const startIso = new Date(startMs).toISOString();
+      const endIso = new Date(endMs).toISOString();
+      const durationMin = Math.max(1, Math.round((endMs - startMs) / 60000));
+
+      const isPast = endMs < nowMs;
+      const startTimestampSec = Math.floor(startMs / 1000);
+      let catchupUrl: string | undefined = undefined;
+      let hasCatchup = false;
+
+      if (isPast && params.serverUrl && params.username && params.password && params.streamId) {
+        const cleanServer = params.serverUrl.endsWith('/') ? params.serverUrl.slice(0, -1) : params.serverUrl;
+        catchupUrl = `${cleanServer}/timeshift/${encodeURIComponent(params.username)}/${encodeURIComponent(params.password)}/${durationMin}/${startTimestampSec}/${params.streamId}.ts`;
+        hasCatchup = true;
+      }
+
+      return {
+        id: `epg_${params.channelId}_${item.id || idx}_${startTimestampSec}`,
+        channel_id: params.channelId,
+        title: title.trim(),
+        description: description.trim(),
+        start: startIso,
+        end: endIso,
+        duration_min: durationMin,
+        has_catchup: hasCatchup,
+        catchup_url: catchupUrl,
+      };
+    });
+  }
 }

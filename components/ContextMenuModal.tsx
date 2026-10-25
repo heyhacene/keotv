@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Channel, Category } from '@/types/iptv';
-import { Star, Play, Info, Lock, Unlock, X, EyeOff } from 'lucide-react';
+import { Star, Play, Info, Lock, Unlock, X, EyeOff, RotateCcw } from 'lucide-react';
 
 interface ContextMenuModalProps {
   isOpen: boolean;
@@ -16,6 +16,7 @@ interface ContextMenuModalProps {
   onToggleHideCategory?: (category: Category) => void;
   onHideChannel?: (item: Channel) => void;
   onExcludePrefix?: (prefix: string) => void;
+  onOpenReplay?: (item: Channel) => void;
 }
 
 interface ContextOption {
@@ -69,6 +70,19 @@ export const ContextMenuModal: React.FC<ContextMenuModalProps> = ({
         } else {
           onPlay(item);
         }
+        onClose();
+      },
+    });
+  }
+
+  if (item && item.stream_type === 'live' && onOpenReplay) {
+    options.push({
+      id: 'replay',
+      label: 'Guide & Replay (7 derniers jours)',
+      icon: RotateCcw,
+      color: 'text-emerald-400 font-bold',
+      action: () => {
+        onOpenReplay(item);
         onClose();
       },
     });
