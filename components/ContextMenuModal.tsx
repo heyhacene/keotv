@@ -39,6 +39,7 @@ export const ContextMenuModal: React.FC<ContextMenuModalProps> = ({
   onToggleHideCategory,
   onHideChannel,
   onExcludePrefix,
+  onOpenReplay,
 }) => {
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
 
@@ -75,10 +76,10 @@ export const ContextMenuModal: React.FC<ContextMenuModalProps> = ({
     });
   }
 
-  if (item && item.stream_type === 'live' && onOpenReplay) {
+  if (item && item.stream_type === 'live' && item.has_archive && onOpenReplay) {
     options.push({
       id: 'replay',
-      label: 'Guide & Replay (7 derniers jours)',
+      label: `Guide & Replay (${item.archive_days || 7} derniers jours)`,
       icon: RotateCcw,
       color: 'text-emerald-400 font-bold',
       action: () => {

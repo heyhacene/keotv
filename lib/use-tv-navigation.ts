@@ -19,6 +19,11 @@ export interface TVNavOptions {
   setFocusedCategoryHeaderIndex?: (index: number | ((prev: number) => number)) => void;
   focusedChannelHeaderIndex?: number;
   setFocusedChannelHeaderIndex?: (index: number | ((prev: number) => number)) => void;
+  focusedRightPanelIndex?: number;
+  setFocusedRightPanelIndex?: (index: number | ((prev: number) => number)) => void;
+  rightPanelButtonCount?: number;
+  onSelectRightPanelAction?: (buttonIndex: number) => void;
+  onOpenCatchup?: (channelIndex: number) => void;
   onSelectCategory: (index: number, switchPane?: boolean) => void;
   onSelectChannel: (index: number, fullscreen: boolean) => void;
   onToggleFavorite: (channelIndex: number) => void;
@@ -52,6 +57,11 @@ export function useTVNavigation({
   setFocusedCategoryHeaderIndex,
   focusedChannelHeaderIndex = 0,
   setFocusedChannelHeaderIndex,
+  focusedRightPanelIndex = 0,
+  setFocusedRightPanelIndex,
+  rightPanelButtonCount = 1,
+  onSelectRightPanelAction,
+  onOpenCatchup,
   onSelectCategory,
   onSelectChannel,
   onToggleFavorite,
@@ -71,6 +81,11 @@ export function useTVNavigation({
   const numberBufferRef = useRef<string>('');
   const numberTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Long-press vs Short-press state for TV remote OK / Enter button
+  const enterDownPaneRef = useRef<NavigationPane | null>(null);
+  const enterHoldTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const longPressFiredRef = useRef<boolean>(false);
+
   const focusedCategoryIndexRef = useRef(focusedCategoryIndex);
   focusedCategoryIndexRef.current = focusedCategoryIndex;
   const focusedChannelIndexRef = useRef(focusedChannelIndex);
@@ -81,6 +96,15 @@ export function useTVNavigation({
   focusedCategoryHeaderIndexRef.current = focusedCategoryHeaderIndex;
   const focusedChannelHeaderIndexRef = useRef(focusedChannelHeaderIndex);
   focusedChannelHeaderIndexRef.current = focusedChannelHeaderIndex;
+  const focusedRightPanelIndexRef = useRef(focusedRightPanelIndex);
+  focusedRightPanelIndexRef.current = focusedRightPanelIndex;
+
+  const clearEnterHoldTimer = useCallback(() => {
+    if (enterHoldTimerRef.current) {
+      clearTimeout(enterHoldTimerRef.current);
+      enterHoldTimerRef.current = null;
+    }
+  }, []);
 
   // Track boundary attempts for list carousel blockage (gives user time to understand they are at the end)
   const boundaryAttemptRef = useRef<{
@@ -195,26 +219,53 @@ export function useTVNavigation({
         e.code === 'KeyF' ||
         keyCode === 185;  // PROG_YELLOW on TV remotes
 
+      const isGreenReplay =
+        key === 'r' ||
+        key === 'R' ||
+        e.code === 'KeyR' ||
+        key === 'ColorF1Green' ||
+        keyCode === 184;  // PROG_GREEN on TV remotes
+
       const isChannelUp = key === 'ChannelUp' || key === 'PageUp' || keyCode === 33 || keyCode === 166;
       const isChannelDown = key === 'ChannelDown' || key === 'PageDown' || keyCode === 34 || keyCode === 167;
 
-      // Menu key (Android TV keyCode 82 or Menu button)
-      const isMenu = key === 'Menu' || keyCode === 82;
+      // Menu / Info / Context key (Android TV keyCode 82, 165 Info, or ContextMenu)
+      const isMenu = key === 'Menu' || key === 'ContextMenu' || key === 'Info' || keyCode === 82 || keyCode === 165;
       if (isMenu) {
-        if (activePane === 'channels' && onOpenContextMenu && channelCount > 0) {
+        if ((activePane === 'channels' || activePane === 'categories') && onOpenContextMenu) {
           e.preventDefault();
-          onOpenContextMenu(focusedChannelIndexRef.current);
+          clearEnterHoldTimer();
+          longPressFiredRef.current = true;
+          onOpenContextMenu(
+            activePane === 'channels' ? focusedChannelIndexRef.current : focusedCategoryIndexRef.current
+          );
+          return;
+        }
+      }
+
+      // Green button or 'R' key: Direct Replay / Catchup shortcut
+      if (isGreenReplay) {
+        if ((activePane === 'channels' || activePane === 'right_panel') && onOpenCatchup && channelCount > 0) {
+          e.preventDefault();
+          onOpenCatchup(focusedChannelIndexRef.current);
           return;
         }
       }
 
       // Favorite toggle key ('f' or Media/Yellow button)
       if (isFav) {
-        if (activePane === 'channels' && channelCount > 0) {
+        if ((activePane === 'channels' || activePane === 'right_panel') && channelCount > 0) {
           e.preventDefault();
-          onToggleFavorite(focusedChannelIndex);
+          onToggleFavorite(focusedChannelIndexRef.current);
           return;
         }
+      }
+
+      // Cancel any pending Enter hold timer if user presses a directional or back key
+      if (isUp || isDown || isLeft || isRight || isBack) {
+        clearEnterHoldTimer();
+        enterDownPaneRef.current = null;
+        longPressFiredRef.current = false;
       }
 
       // Handle Fullscreen Player Controls
@@ -269,7 +320,12 @@ export function useTVNavigation({
       // TV Guide Navigation
       if (isUp) {
         e.preventDefault();
-        if (activePane === 'channels') {
+        if (activePane === 'right_panel') {
+          const current = focusedRightPanelIndexRef.current;
+          if (current > 0) {
+            setFocusedRightPanelIndex?.((prev) => Math.max(0, prev - 1));
+          }
+        } else if (activePane === 'channels') {
           const current = focusedChannelIndexRef.current;
           if (current <= 0) {
             // Move up into channel header sort bar!
@@ -314,7 +370,13 @@ export function useTVNavigation({
 
       if (isDown) {
         e.preventDefault();
-        if (activePane === 'channels') {
+        if (activePane === 'right_panel') {
+          const current = focusedRightPanelIndexRef.current;
+          const maxIdx = Math.max(0, rightPanelButtonCount - 1);
+          if (current < maxIdx) {
+            setFocusedRightPanelIndex?.((prev) => Math.min(maxIdx, prev + 1));
+          }
+        } else if (activePane === 'channels') {
           if (channelCount <= 1) return;
           const current = focusedChannelIndexRef.current;
           if (current >= channelCount - 1) {
@@ -368,7 +430,9 @@ export function useTVNavigation({
       if (isLeft) {
         e.preventDefault();
         boundaryAttemptRef.current = null;
-        if (activePane === 'channels') {
+        if (activePane === 'right_panel') {
+          setActivePane('channels');
+        } else if (activePane === 'channels') {
           if (onJumpToCurrentCategory) {
             onJumpToCurrentCategory();
           }
@@ -406,6 +470,12 @@ export function useTVNavigation({
         } else if (activePane === 'categories') {
           onSelectCategory(focusedCategoryIndexRef.current, true);
           setActivePane('channels');
+        } else if (activePane === 'channels') {
+          // Move right from channel list into the Right EPG / Details / Replay Panel!
+          if (rightPanelButtonCount > 0) {
+            setFocusedRightPanelIndex?.(0);
+            setActivePane('right_panel');
+          }
         } else if (activePane === 'category_header') {
           const current = focusedCategoryHeaderIndexRef.current;
           if (current === 0) {
@@ -423,6 +493,9 @@ export function useTVNavigation({
           const current = focusedChannelHeaderIndexRef.current;
           if (current < 2) {
             setFocusedChannelHeaderIndex?.((prev) => Math.min(2, prev + 1));
+          } else if (rightPanelButtonCount > 0) {
+            setFocusedRightPanelIndex?.(0);
+            setActivePane('right_panel');
           }
         }
         return;
@@ -430,17 +503,48 @@ export function useTVNavigation({
 
       if (isEnter) {
         boundaryAttemptRef.current = null;
-        if (e.repeat && activePane === 'channels' && onOpenContextMenu && channelCount > 0) {
-          e.preventDefault();
-          onOpenContextMenu(focusedChannelIndexRef.current);
+        e.preventDefault();
+
+        // For 'channels' and 'categories': distinguish Short Press vs Long Press (450ms hold or key repeat)
+        // so holding OK on Android TV remote opens ContextMenuModal WITHOUT launching the channel!
+        if (activePane === 'channels' || activePane === 'categories') {
+          const itemCount = activePane === 'channels' ? channelCount : categoryCount;
+          if (itemCount <= 0) return;
+
+          if (e.repeat) {
+            if (!longPressFiredRef.current && onOpenContextMenu) {
+              clearEnterHoldTimer();
+              longPressFiredRef.current = true;
+              onOpenContextMenu(
+                activePane === 'channels' ? focusedChannelIndexRef.current : focusedCategoryIndexRef.current
+              );
+            }
+            return;
+          }
+
+          // Initial keydown (!e.repeat): start 420ms hold timer
+          enterDownPaneRef.current = activePane;
+          longPressFiredRef.current = false;
+          clearEnterHoldTimer();
+          if (onOpenContextMenu) {
+            const targetIdx =
+              activePane === 'channels' ? focusedChannelIndexRef.current : focusedCategoryIndexRef.current;
+            enterHoldTimerRef.current = setTimeout(() => {
+              longPressFiredRef.current = true;
+              enterHoldTimerRef.current = null;
+              onOpenContextMenu(targetIdx);
+            }, 420);
+          }
           return;
         }
-        e.preventDefault();
-        if (activePane === 'menu') {
+
+        // Immediate execution on keydown for non-long-press panes
+        if (e.repeat) return;
+
+        if (activePane === 'right_panel') {
+          onSelectRightPanelAction?.(focusedRightPanelIndexRef.current);
+        } else if (activePane === 'menu') {
           onSelectMenuItem(focusedMenuIndexRef.current);
-        } else if (activePane === 'categories') {
-          onSelectCategory(focusedCategoryIndexRef.current, true);
-          setActivePane('channels');
         } else if (activePane === 'category_header') {
           const current = focusedCategoryHeaderIndexRef.current;
           if (current === 0) {
@@ -463,8 +567,6 @@ export function useTVNavigation({
           } else if (current === 2) {
             onChannelSortChange?.('num');
           }
-        } else if (activePane === 'channels') {
-          onSelectChannel(focusedChannelIndexRef.current, false);
         }
         return;
       }
@@ -476,7 +578,9 @@ export function useTVNavigation({
           onBack();
           return;
         }
-        if (activePane === 'channels' || activePane === 'channel_header') {
+        if (activePane === 'right_panel') {
+          setActivePane('channels');
+        } else if (activePane === 'channels' || activePane === 'channel_header') {
           setActivePane('categories');
         } else if (activePane === 'categories' || activePane === 'category_header') {
           setActivePane('menu');
@@ -485,21 +589,21 @@ export function useTVNavigation({
       }
     },
     [
+      enabled,
       isFullscreen,
       activePane,
       setActivePane,
       channelCount,
       categoryCount,
-      focusedCategoryIndex,
-      focusedChannelIndex,
-      focusedMenuIndex,
-      focusedCategoryHeaderIndex,
-      focusedChannelHeaderIndex,
+      rightPanelButtonCount,
       setFocusedCategoryIndex,
       setFocusedChannelIndex,
       setFocusedMenuIndex,
       setFocusedCategoryHeaderIndex,
       setFocusedChannelHeaderIndex,
+      setFocusedRightPanelIndex,
+      onSelectRightPanelAction,
+      onOpenCatchup,
       onSelectCategory,
       onSelectChannel,
       onToggleFavorite,
@@ -511,17 +615,77 @@ export function useTVNavigation({
       onChannelSortChange,
       setIsFullscreen,
       onJumpToChannelNumber,
+      onJumpToCurrentCategory,
       onBack,
       shouldAllowWrap,
+      clearEnterHoldTimer,
+    ]
+  );
+
+  const handleKeyUp = useCallback(
+    (e: KeyboardEvent) => {
+      if (enabled === false) return;
+      const keyCode = (e as any).keyCode || 0;
+      const key = e.key || '';
+
+      const isEnter =
+        key === 'Enter' ||
+        key === 'Select' ||
+        key === 'Ok' ||
+        key === 'Accept' ||
+        keyCode === 13 ||
+        keyCode === 23 ||
+        keyCode === 66;
+
+      if (!isEnter) return;
+
+      clearEnterHoldTimer();
+      const downPane = enterDownPaneRef.current;
+      const wasLongPress = longPressFiredRef.current;
+
+      enterDownPaneRef.current = null;
+      longPressFiredRef.current = false;
+
+      if (wasLongPress || !downPane) {
+        return;
+      }
+
+      // Short press completed! Trigger the primary action for channels or categories
+      e.preventDefault();
+      if (downPane === 'channels' && activePane === 'channels' && channelCount > 0) {
+        onSelectChannel(focusedChannelIndexRef.current, false);
+      } else if (downPane === 'categories' && activePane === 'categories' && categoryCount > 0) {
+        onSelectCategory(focusedCategoryIndexRef.current, true);
+        setActivePane('channels');
+      }
+    },
+    [
+      enabled,
+      activePane,
+      channelCount,
+      categoryCount,
+      onSelectChannel,
+      onSelectCategory,
+      setActivePane,
+      clearEnterHoldTimer,
     ]
   );
 
   useEffect(() => {
-    if (enabled === false) return;
+    if (enabled === false) {
+      clearEnterHoldTimer();
+      enterDownPaneRef.current = null;
+      longPressFiredRef.current = false;
+      return;
+    }
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      clearEnterHoldTimer();
       if (numberTimerRef.current) clearTimeout(numberTimerRef.current);
     };
-  }, [enabled, handleKeyDown]);
+  }, [enabled, handleKeyDown, handleKeyUp, clearEnterHoldTimer]);
 }
+

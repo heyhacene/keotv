@@ -1010,9 +1010,9 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
     const logo = item.stream_icon || item.cover || '';
     const itemCatId = item.category_id ? String(item.category_id).trim() : rawCatId;
 
-    // Prefix group_id with stream type to prevent any primary key collisions
-    const hasArchive = Boolean(item.tv_archive === 1 || item.tv_archive === '1' || item.stream_type === 'live' && item.direct_source);
-    const archiveDays = Number(item.tv_archive_duration || item.archive_days || 0);
+    // Strict catchup/replay detection: ONLY mark has_archive true if the Xtream server explicitly sets tv_archive === 1
+    const hasArchive = Number(item.tv_archive) === 1;
+    const archiveDays = hasArchive ? Math.max(1, Number(item.tv_archive_duration || item.archive_days || 7)) : 0;
 
     channels.push({
       id: `ch_xtream_${type}_${streamId}`,
@@ -1492,6 +1492,8 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
     logo?: string;
     group: string;
     epgId?: string;
+    hasArchive?: boolean;
+    archiveDays?: number;
   } | null = null;
 
   for (let i = 0; i < lines.length; i++) {
@@ -1502,6 +1504,13 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
       const logo = extractAttribute(line, 'tvg-logo');
       const group = extractAttribute(line, 'group-title') || 'Général';
       const epgId = extractAttribute(line, 'tvg-id') || undefined;
+      const catchupType = extractAttribute(line, 'catchup');
+      const catchupDaysStr = extractAttribute(line, 'catchup-days') || extractAttribute(line, 'tvg-rec');
+      const catchupDaysNum = catchupDaysStr ? parseInt(catchupDaysStr, 10) : 0;
+      const hasArchive = Boolean(
+        (catchupType && catchupType.toLowerCase() !== 'none' && catchupType !== '0') ||
+        (catchupDaysNum > 0)
+      );
 
       const commaIdx = line.indexOf(',');
       const chName = commaIdx !== -1 && commaIdx < line.length - 1
@@ -1513,6 +1522,8 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
         logo,
         group,
         epgId,
+        hasArchive,
+        archiveDays: hasArchive ? (catchupDaysNum > 0 ? catchupDaysNum : 7) : 0,
       };
     } else if (!line.startsWith('#') && currentExtInf) {
       const streamUrl = line;
@@ -1556,6 +1567,8 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
         custom_order: channels.length + 1, // Strict M3U appearance order
         resolution: detectResolution(currentExtInf.name),
         is_separator: isSeparatorChannel({ name: currentExtInf.name, stream_url: streamUrl } as any),
+        has_archive: streamType === 'live' ? Boolean(currentExtInf.hasArchive) : false,
+        archive_days: streamType === 'live' ? (currentExtInf.archiveDays || 0) : 0,
       });
 
       currentExtInf = null;

@@ -81,6 +81,8 @@ export type NavigationPane =
   | 'channels'
   | 'category_header'
   | 'channel_header'
+  | 'right_panel'
   | 'player_osd'
   | 'settings'
   | 'modal';
+

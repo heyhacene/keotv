@@ -60,6 +60,7 @@ interface TVGuideProps {
   onOpenCatchupModal?: (channel: Channel) => void;
   focusedCategoryHeaderIndex?: number;
   focusedChannelHeaderIndex?: number;
+  focusedRightPanelIndex?: number;
   activeSection?: 'live' | 'vod' | 'series' | 'fav';
   serverCreds?: { serverUrl: string; username: string; password: string } | null;
   boundaryHit?: { pane: string; boundary: 'top' | 'bottom'; time: number } | null;
@@ -167,12 +168,15 @@ interface ChannelRowProps {
 const ChannelRow = React.memo<ChannelRowProps>(
   ({ channel, index, isFocused, isActive, onSelect, onToggleFavorite, onOpenContextMenu, onOpenCatchupModal }) => {
     const pressTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const longPressTriggeredRef = useRef<boolean>(false);
 
     const handlePressStart = () => {
+      longPressTriggeredRef.current = false;
       if (!onOpenContextMenu) return;
       pressTimerRef.current = setTimeout(() => {
+        longPressTriggeredRef.current = true;
         onOpenContextMenu(channel);
-      }, 500);
+      }, 450);
     };
 
     const handlePressEnd = () => {
@@ -182,14 +186,23 @@ const ChannelRow = React.memo<ChannelRowProps>(
       }
     };
 
+    const handleRowClick = () => {
+      if (longPressTriggeredRef.current) {
+        longPressTriggeredRef.current = false;
+        return;
+      }
+      onSelect(channel, index);
+    };
+
     const isSep = channel.is_separator ?? isSeparatorChannel(channel);
+    const hasReplay = channel.stream_type === 'live' && Boolean(channel.has_archive);
 
     if (isSep) {
       const cleanLabel = cleanSeparatorName(channel.name);
       return (
         <div
           id={`channel-item-${index}`}
-          onClick={() => onSelect(channel, index)}
+          onClick={handleRowClick}
           onContextMenu={(e) => {
             e.preventDefault();
             onOpenContextMenu?.(channel);
@@ -214,7 +227,7 @@ const ChannelRow = React.memo<ChannelRowProps>(
     return (
       <div
         id={`channel-item-${index}`}
-        onClick={() => onSelect(channel, index)}
+        onClick={handleRowClick}
         onContextMenu={(e) => {
           e.preventDefault();
           onOpenContextMenu?.(channel);
@@ -294,24 +307,26 @@ const ChannelRow = React.memo<ChannelRowProps>(
           </div>
         </div>
 
-        {/* Actions: Replay & Favorite */}
+        {/* Actions: Replay (strictly only when channel.has_archive === true) & Favorite */}
         <div className="flex items-center space-x-1 flex-shrink-0">
-          {channel.stream_type === 'live' && onOpenCatchupModal && (
+          {hasReplay && onOpenCatchupModal && (
             <button
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onOpenCatchupModal(channel);
               }}
-              className={`p-1.5 rounded-lg flex items-center space-x-1 transition ${
+              className={`px-1.5 py-1 rounded-lg flex items-center space-x-1 transition border ${
                 isFocused
-                  ? 'bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30'
-                  : 'text-slate-500 hover:text-emerald-400 hover:bg-white/5'
+                  ? 'bg-emerald-500/30 border-emerald-300/60 text-white hover:bg-emerald-500/40 shadow-sm'
+                  : 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20'
               }`}
               title="Voir le Replay de cette chaîne"
             >
-              <RotateCcw className="w-3.5 h-3.5 text-emerald-400" />
-              <span className="text-[10px] font-bold text-emerald-300 hidden sm:inline">Replay</span>
+              <RotateCcw className={`w-3 h-3 ${isFocused ? 'text-emerald-200' : 'text-emerald-400'}`} />
+              <span className={`text-[9px] font-bold uppercase tracking-wider hidden sm:inline ${isFocused ? 'text-white' : 'text-emerald-300'}`}>
+                Replay
+              </span>
             </button>
           )}
 
@@ -345,6 +360,7 @@ const ChannelRow = React.memo<ChannelRowProps>(
       prev.channel.num === next.channel.num &&
       prev.channel.name === next.channel.name &&
       prev.channel.is_favorite === next.channel.is_favorite &&
+      prev.channel.has_archive === next.channel.has_archive &&
       prev.channel.logo === next.channel.logo &&
       prev.channel.is_separator === next.channel.is_separator
     );
@@ -381,6 +397,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   onOpenCatchupModal,
   focusedCategoryHeaderIndex = 2,
   focusedChannelHeaderIndex = 0,
+  focusedRightPanelIndex = 0,
   activeSection = 'live',
   serverCreds,
   boundaryHit,
@@ -880,10 +897,41 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             </div>
           </div>
         )}
+        {/* Bottom Remote Shortcuts Hint Bar */}
+        {channels.length > 0 && (
+          <div className="px-3 py-1.5 bg-tv-surface/90 border-t border-tv-border/60 flex items-center justify-between text-[10px] text-slate-400 flex-shrink-0">
+            <div className="flex items-center space-x-3 truncate">
+              <span>
+                <strong className="text-white font-mono">OK</strong> Regarder
+              </span>
+              <span className="text-slate-600">•</span>
+              <span>
+                <strong className="text-tv-accent font-mono">Maintenir OK</strong> Options
+              </span>
+              {focusedChannel?.has_archive && (
+                <>
+                  <span className="text-slate-600">•</span>
+                  <span className="text-emerald-400 font-semibold">
+                    <strong className="font-mono">▶ Droite</strong> Replay 7j
+                  </span>
+                </>
+              )}
+            </div>
+            <span className="font-mono text-[9px] text-slate-500 hidden xl:inline">
+              ◀ Groupes • ▶ Détails
+            </span>
+          </div>
+        )}
       </div>
 
       {/* 3. RIGHT COLUMN: PREVIEW PLAYER & DETAILED EPG OR RICH MEDIA DETAILS */}
-      <div className="w-80 xl:w-96 flex flex-col p-4 bg-tv-surface/60 overflow-y-auto flex-shrink-0 border-l border-tv-border">
+      <div
+        className={`w-80 xl:w-96 flex flex-col p-4 overflow-y-auto flex-shrink-0 border-l transition-colors ${
+          activePane === 'right_panel'
+            ? 'bg-tv-surface/95 border-tv-accent/60'
+            : 'bg-tv-surface/60 border-tv-border'
+        }`}
+      >
         {isSep ? (
           /* SEPARATOR / SECTION DIVIDER CARD */
           <div className="flex-1 flex flex-col items-center justify-center p-6 text-center">
@@ -897,7 +945,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               {cleanSeparatorName(focusedChannel?.name || 'Séparateur')}
             </h3>
             <p className="text-xs text-slate-400 leading-relaxed mb-6">
-              Cet élément est un en-tête thématique inséré dans votre playlist. Il n'émet aucun flux vidéo.
+              Cet élément est un en-tête thématique inséré dans votre playlist. Il n&apos;émet aucun flux vidéo.
             </p>
             <div className="w-full bg-tv-card/60 p-3 rounded-xl border border-tv-border text-[11px] text-slate-300">
               💡 <span className="font-semibold text-white">Astuce télécommande :</span> Descendez avec la flèche <span className="font-mono text-tv-accent font-bold">▼</span> pour parcourir les chaînes de ce groupe.
@@ -1032,7 +1080,11 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               <button
                 type="button"
                 onClick={() => onSelectChannel(focusedChannel, focusedChannelIndex)}
-                className="w-full py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition shadow-lg flex items-center justify-center space-x-2 mt-auto"
+                className={`w-full py-2.5 rounded-xl text-xs font-bold transition shadow-lg flex items-center justify-center space-x-2 mt-auto outline-none ${
+                  activePane === 'right_panel' && focusedRightPanelIndex === 0
+                    ? 'bg-tv-focus text-white ring-4 ring-white scale-[1.02] shadow-2xl font-black'
+                    : 'bg-tv-focus hover:bg-sky-500 text-white'
+                }`}
               >
                 <Play className="w-3.5 h-3.5 fill-white" />
                 <span>
@@ -1060,9 +1112,17 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             </div>
 
             {/* EPG Program details */}
-            <div className="flex items-center space-x-2 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
-              <Info className="w-4 h-4 text-tv-accent" />
-              <span>Guide du Programme</span>
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
+              <div className="flex items-center space-x-2">
+                <Info className="w-4 h-4 text-tv-accent" />
+                <span>Guide du Programme</span>
+              </div>
+              {focusedChannel?.has_archive && (
+                <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold normal-case flex items-center space-x-1">
+                  <RotateCcw className="w-3 h-3 text-emerald-400" />
+                  <span>Replay actif</span>
+                </span>
+              )}
             </div>
 
             {currentEpg ? (
@@ -1113,57 +1173,99 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                   </div>
                 )}
 
-                {/* Replay / Catchup badge or button */}
-                {activeChannel && onOpenCatchupModal && (
+                <div className="mt-auto space-y-2 pt-2">
+                  {/* Replay / Catchup button: STRICTLY only when channel has_archive === true */}
+                  {focusedChannel && Boolean(focusedChannel.has_archive) && onOpenCatchupModal && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenCatchupModal(focusedChannel)}
+                      className={`w-full p-2.5 rounded-xl flex items-center justify-between text-xs font-bold transition shadow-md group outline-none ${
+                        activePane === 'right_panel' && focusedRightPanelIndex === 0
+                          ? 'bg-emerald-600 text-white border-2 border-white ring-4 ring-white scale-[1.02] shadow-2xl font-black z-10'
+                          : 'bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300'
+                      }`}
+                      title="Consulter les programmes en Replay"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RotateCcw
+                          className={`w-4 h-4 transition-transform ${
+                            activePane === 'right_panel' && focusedRightPanelIndex === 0
+                              ? 'text-white rotate-[-45deg]'
+                              : 'text-emerald-400 group-hover:rotate-[-45deg]'
+                          }`}
+                        />
+                        <span>Guide & Replay ({focusedChannel.archive_days || 7} jours)</span>
+                      </div>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded font-mono uppercase ${
+                          activePane === 'right_panel' && focusedRightPanelIndex === 0
+                            ? 'bg-black/30 text-white font-black'
+                            : 'bg-emerald-500/20 text-emerald-200'
+                        }`}
+                      >
+                        Ouvrir (OK)
+                      </span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
-                    onClick={() => onOpenCatchupModal(activeChannel)}
-                    className="w-full p-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 rounded-xl flex items-center justify-between text-xs text-emerald-300 font-bold transition shadow-md group"
-                    title="Consulter les programmes des 7 derniers jours"
+                    onClick={onToggleFullscreen}
+                    className={`w-full py-2.5 rounded-xl text-xs font-bold transition shadow-lg outline-none ${
+                      activePane === 'right_panel' &&
+                      focusedRightPanelIndex === (Boolean(focusedChannel?.has_archive) && Boolean(onOpenCatchupModal) ? 1 : 0)
+                        ? 'bg-tv-focus text-white border-2 border-white ring-4 ring-white scale-[1.02] shadow-2xl font-black z-10'
+                        : 'bg-tv-focus/90 hover:bg-sky-500 text-white'
+                    }`}
                   >
-                    <div className="flex items-center space-x-2">
-                      <RotateCcw className="w-4 h-4 text-emerald-400 group-hover:rotate-[-45deg] transition-transform" />
-                      <span>Guide & Replay (7 jours)</span>
-                    </div>
-                    <span className="text-[10px] bg-emerald-500/20 px-2 py-0.5 rounded font-mono uppercase text-emerald-200">
-                      Ouvrir
-                    </span>
+                    Passer en plein écran (OK)
                   </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={onToggleFullscreen}
-                  className="w-full py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition shadow-lg mt-auto"
-                >
-                  Passer en plein écran (Entrée)
-                </button>
+                </div>
               </div>
             ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-slate-500 text-center p-4 space-y-4">
-                <div className="flex flex-col items-center justify-center">
+              <div className="flex-1 flex flex-col justify-between text-slate-500 text-center p-4 space-y-4">
+                <div className="flex-1 flex flex-col items-center justify-center">
                   <Clock className="w-8 h-8 mb-2 opacity-50" />
                   <p className="text-xs">
-                    {activeChannel ? activeChannel.name : 'Sélectionnez une chaîne pour afficher les détails.'}
+                    {focusedChannel ? focusedChannel.name : 'Sélectionnez une chaîne pour afficher les détails.'}
                   </p>
                 </div>
 
-                {activeChannel && onOpenCatchupModal && (
+                <div className="space-y-2 w-full">
+                  {focusedChannel && Boolean(focusedChannel.has_archive) && onOpenCatchupModal && (
+                    <button
+                      type="button"
+                      onClick={() => onOpenCatchupModal(focusedChannel)}
+                      className={`w-full p-2.5 rounded-xl flex items-center justify-between text-xs font-bold transition shadow-md group outline-none ${
+                        activePane === 'right_panel' && focusedRightPanelIndex === 0
+                          ? 'bg-emerald-600 text-white border-2 border-white ring-4 ring-white scale-[1.02] shadow-2xl font-black z-10'
+                          : 'bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 text-emerald-300'
+                      }`}
+                      title="Consulter les programmes en Replay"
+                    >
+                      <div className="flex items-center space-x-2">
+                        <RotateCcw className="w-4 h-4 text-emerald-400 group-hover:rotate-[-45deg] transition-transform" />
+                        <span>Guide & Replay ({focusedChannel.archive_days || 7} jours)</span>
+                      </div>
+                      <span className="text-[10px] bg-emerald-500/20 px-2 py-0.5 rounded font-mono uppercase text-emerald-200">
+                        Ouvrir (OK)
+                      </span>
+                    </button>
+                  )}
+
                   <button
                     type="button"
-                    onClick={() => onOpenCatchupModal(activeChannel)}
-                    className="w-full p-2.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 rounded-xl flex items-center justify-between text-xs text-emerald-300 font-bold transition shadow-md group mt-auto"
-                    title="Consulter les programmes des 7 derniers jours"
+                    onClick={onToggleFullscreen}
+                    className={`w-full py-2.5 rounded-xl text-xs font-bold transition shadow-lg outline-none ${
+                      activePane === 'right_panel' &&
+                      focusedRightPanelIndex === (Boolean(focusedChannel?.has_archive) && Boolean(onOpenCatchupModal) ? 1 : 0)
+                        ? 'bg-tv-focus text-white border-2 border-white ring-4 ring-white scale-[1.02] shadow-2xl font-black z-10'
+                        : 'bg-tv-focus/90 hover:bg-sky-500 text-white'
+                    }`}
                   >
-                    <div className="flex items-center space-x-2">
-                      <RotateCcw className="w-4 h-4 text-emerald-400 group-hover:rotate-[-45deg] transition-transform" />
-                      <span>Guide & Replay (7 jours)</span>
-                    </div>
-                    <span className="text-[10px] bg-emerald-500/20 px-2 py-0.5 rounded font-mono uppercase text-emerald-200">
-                      Ouvrir
-                    </span>
+                    Passer en plein écran (OK)
                   </button>
-                )}
+                </div>
               </div>
             )}
           </div>

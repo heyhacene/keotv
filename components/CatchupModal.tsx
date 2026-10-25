@@ -116,10 +116,9 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
     return matched.length > 0 ? matched : programs;
   }, [programs, selectedDay, days]);
 
-  // Reset focus when filtered programs change
+  // Reset program focus index when selected day changes (keep activeArea intact so user can scroll days with Up/Down)
   useEffect(() => {
     setFocusedIndex(0);
-    setActiveArea('programs');
   }, [selectedDay]);
 
   // Spatial scroll into view

@@ -76,6 +76,7 @@ export default function KeoTVHome() {
   const [focusedChannelIndex, setFocusedChannelIndex] = useState<number>(0);
   const [focusedCategoryHeaderIndex, setFocusedCategoryHeaderIndex] = useState<number>(2);
   const [focusedChannelHeaderIndex, setFocusedChannelHeaderIndex] = useState<number>(0);
+  const [focusedRightPanelIndex, setFocusedRightPanelIndex] = useState<number>(0);
   const [focusedMenuIndex, setFocusedMenuIndex] = useState<number>(0);
 
   // Responsive Layout Mode: 'mobile-portrait' | 'mobile-landscape' | 'tv'
@@ -100,10 +101,14 @@ export default function KeoTVHome() {
       if (typeof window === 'undefined') return;
 
       const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-      const isTvDevice = /KeoTV-AndroidTV|Android TV|GoogleTV|Large Screen/i.test(ua);
+      const isTvDevice =
+        /KeoTV-AndroidTV|Android TV|GoogleTV|Large Screen|AFT|BRAVIA|MiBox|SHIELD|PhilipsTV|SmartTV|TV/i.test(ua);
+      const isExplicitMobileUa = /KeoTV-Mobile|iPhone|iPod|Mobi/i.test(ua);
+      const isTouch =
+        'ontouchstart' in window || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
 
-      // Dedicated Android TV hardware always stays in full TV mode
-      if (isTvDevice) {
+      // Dedicated Android TV hardware or any non-touch device (TV boxes, Fire TV, PC) ALWAYS stays in full 4-column TV mode!
+      if (isTvDevice || (!isTouch && !isExplicitMobileUa)) {
         setLayoutMode('tv');
         return;
       }
@@ -122,19 +127,15 @@ export default function KeoTVHome() {
       const height = window.innerHeight;
       const isPortrait = height > width;
 
-      const isTouch = 'ontouchstart' in window || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
-      const isMobileDevice = /Mobi|Android|iPhone|iPad|iPod|KeoTV-Mobile/i.test(ua) || isTouch;
-
       if (isPortrait) {
         // Vertical phone or portrait tablet -> Mobile Portrait
         setLayoutMode('mobile-portrait');
       } else {
-        // Horizontal orientation:
-        // If it's a mobile device or screen with compact mobile height (< 580px) -> Mobile Landscape!
-        if (isMobileDevice || height < 580 || width < 1000) {
+        // Horizontal orientation on a touchscreen mobile device:
+        if (isExplicitMobileUa || height < 500) {
           setLayoutMode('mobile-landscape');
         } else {
-          // Large desktop widescreen monitor or TV
+          // Large tablet, desktop widescreen monitor, or TV
           setLayoutMode('tv');
         }
       }
@@ -961,6 +962,19 @@ export default function KeoTVHome() {
           }
         }
 
+
+        // Sanitize any cached channels from Build 64/65 where has_archive was falsely set with archive_days === 0
+        try {
+          const sanitizedFlag = await getSetting<boolean>('sanitized_has_archive_v66', false);
+          if (!sanitizedFlag) {
+            await db.channels
+              .filter((c) => Boolean(c.has_archive) && (!c.archive_days || c.archive_days <= 0))
+              .modify({ has_archive: false, archive_days: 0 });
+            await setSetting('sanitized_has_archive_v66', true);
+          }
+        } catch (sanErr) {
+          console.warn('Archive sanitization notice:', sanErr);
+        }
 
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
         const loadedPlaylists = await db.playlists.toArray();
@@ -1840,6 +1854,13 @@ export default function KeoTVHome() {
       return;
     }
 
+    // -2a. Catchup / Replay modal
+    if (isCatchupModalOpen) {
+      setIsCatchupModalOpen(false);
+      setCatchupTargetChannel(null);
+      return;
+    }
+
     // -2b. Parental PIN modal
     if (isParentalPinModalOpen) {
       setIsParentalPinModalOpen(false);
@@ -1903,14 +1924,24 @@ export default function KeoTVHome() {
       return;
     }
 
-    // 3. Channels list pane -> go back to categories pane
-    if (activePane === 'channels') {
+    // 2b. Right EPG/Details panel -> go back to channels list pane
+    if (activePane === 'right_panel') {
+      setActivePane('channels');
+      return;
+    }
+
+    // 3. Channels list pane (or channel sort header) -> go back to categories pane
+    if (activePane === 'channels' || activePane === 'channel_header') {
+      const idx = sortedCategories.findIndex((c) => c.id === selectedCategory?.id);
+      if (idx >= 0) {
+        setFocusedCategoryIndex(idx);
+      }
       setActivePane('categories');
       return;
     }
 
-    // 3b. Categories pane -> go back to sidebar menu pane
-    if (activePane === 'categories') {
+    // 3b. Categories pane (or category sort header) -> go back to sidebar menu pane
+    if (activePane === 'categories' || activePane === 'category_header') {
       setActivePane('menu');
       return;
     }
@@ -1936,6 +1967,7 @@ export default function KeoTVHome() {
     }
   }, [
     isContextMenuOpen,
+    isCatchupModalOpen,
     isParentalPinModalOpen,
     isCategoryManagerOpen,
     appUpdateInfo,
@@ -1948,6 +1980,8 @@ export default function KeoTVHome() {
     isXtreamModalOpen,
     isSyncModalOpen,
     activePane,
+    sortedCategories,
+    selectedCategory,
   ]);
 
   // Register hardware Android Back button and webview history fallback
@@ -2009,9 +2043,29 @@ export default function KeoTVHome() {
     isCategoryManagerOpen ||
     isParentalPinModalOpen ||
     isContextMenuOpen ||
+    isCatchupModalOpen ||
     Boolean(appUpdateInfo) ||
     Boolean(selectedMovieForDetails) ||
     Boolean(selectedSeriesForDetails);
+
+  // Compute interactive buttons count in the Right Panel for D-Pad navigation
+  const currentFocusedChannel = filteredChannels[focusedChannelIndex] || activeChannel;
+  const isCurrentSep = isSeparatorChannel(currentFocusedChannel);
+  const isCurrentMedia =
+    activeSection === 'vod' ||
+    activeSection === 'series' ||
+    currentFocusedChannel?.stream_type === 'vod' ||
+    currentFocusedChannel?.stream_type === 'series';
+
+  const rightPanelButtonCount = isCurrentSep
+    ? 0
+    : isCurrentMedia
+    ? currentFocusedChannel
+      ? 1
+      : 0
+    : currentFocusedChannel?.has_archive
+    ? 2
+    : 1;
 
   // Register remote control D-Pad keyboard events with hierarchical back handler (TV mode only)
   useTVNavigation({
@@ -2028,6 +2082,46 @@ export default function KeoTVHome() {
     setFocusedCategoryHeaderIndex,
     focusedChannelHeaderIndex,
     setFocusedChannelHeaderIndex,
+    focusedRightPanelIndex,
+    setFocusedRightPanelIndex,
+    rightPanelButtonCount,
+    onSelectRightPanelAction: (btnIdx) => {
+      const targetCh = filteredChannels[focusedChannelIndex] || activeChannel;
+      if (!targetCh) return;
+      if (isCurrentMedia) {
+        handleSelectChannel(targetCh, false);
+        return;
+      }
+      if (targetCh.has_archive) {
+        if (btnIdx === 0) {
+          setCatchupTargetChannel(targetCh);
+          setIsCatchupModalOpen(true);
+        } else {
+          if (isNativePlayerAvailable()) {
+            handleSelectChannel(targetCh, true);
+          } else {
+            setActiveChannel(targetCh);
+            setIsFullscreen(true);
+          }
+        }
+      } else {
+        if (isNativePlayerAvailable()) {
+          handleSelectChannel(targetCh, true);
+        } else {
+          setActiveChannel(targetCh);
+          setIsFullscreen(true);
+        }
+      }
+    },
+    onOpenCatchup: (idx) => {
+      const ch = filteredChannels[idx] || activeChannel;
+      if (ch && ch.stream_type === 'live' && ch.has_archive) {
+        setCatchupTargetChannel(ch);
+        setIsCatchupModalOpen(true);
+      } else if (ch && ch.stream_type === 'live') {
+        showToast(`ℹ️ Aucun Replay disponible sur « ${ch.name} »`);
+      }
+    },
     focusedMenuIndex,
     setFocusedMenuIndex,
     onOpenCategoryManager: () => setIsCategoryManagerOpen(true),
@@ -3351,6 +3445,7 @@ export default function KeoTVHome() {
               onChannelSortChange={handleChannelSortChange}
               focusedCategoryHeaderIndex={focusedCategoryHeaderIndex}
               focusedChannelHeaderIndex={focusedChannelHeaderIndex}
+              focusedRightPanelIndex={focusedRightPanelIndex}
             />
           </div>
         </div>
