@@ -105,6 +105,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleShowFavoritesCategory,
   excludedPrefixes = [],
   onUpdateExcludedPrefixes,
+}) => {
   const [activeTab, setActiveTab] = useState<'playlists' | 'controls' | 'categories' | 'parental' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
   const [localPlaylists, setLocalPlaylists] = useState<PlaylistConfig[]>(playlists);
 
