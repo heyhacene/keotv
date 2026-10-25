@@ -201,7 +201,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       modalBodyRef.current.querySelectorAll<HTMLElement>(
         'button:not([disabled]), a[href]:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex="0"]'
       )
-    );
+    ).filter((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).display !== 'none';
+    });
   }, []);
 
   // Sync visual TV focus attribute onto active content element
@@ -217,7 +220,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         item.removeAttribute('data-tv-focused');
       }
     });
-  }, [isOpen, focusArea, contentFocusIndex, activeTab, getContentFocusableElements]);
+  }, [isOpen, focusArea, contentFocusIndex, activeTab, getContentFocusableElements, deletingId]);
 
   // When opening or switching tabs, reset or align TV focus
   useEffect(() => {
@@ -231,6 +234,73 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       return () => clearTimeout(timer);
     }
   }, [isOpen]);
+
+  // Spatial navigation helper: finds the best element in a given direction
+  const findNextSpatialElement = useCallback(
+    (direction: 'down' | 'up' | 'left' | 'right', currentIndex: number): number => {
+      const items = getContentFocusableElements();
+      if (items.length <= 1 || currentIndex < 0 || currentIndex >= items.length) return currentIndex;
+
+      const currentRect = items[currentIndex].getBoundingClientRect();
+      const currentCenterX = currentRect.left + currentRect.width / 2;
+      const currentCenterY = currentRect.top + currentRect.height / 2;
+
+      let bestIndex = currentIndex;
+      let minDistance = Infinity;
+
+      for (let i = 0; i < items.length; i++) {
+        if (i === currentIndex) continue;
+        const rect = items[i].getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+
+        const deltaY = centerY - currentCenterY;
+        const deltaX = centerX - currentCenterX;
+
+        if (direction === 'down') {
+          // Must be below the current element (at least 8px below the top of current)
+          if (rect.top >= currentRect.bottom - 4 || deltaY > 15) {
+            // Distance with vertical priority
+            const distance = Math.abs(deltaY) * 1.5 + Math.abs(deltaX);
+            if (distance < minDistance) {
+              minDistance = distance;
+              bestIndex = i;
+            }
+          }
+        } else if (direction === 'up') {
+          // Must be above the current element
+          if (rect.bottom <= currentRect.top + 4 || deltaY < -15) {
+            const distance = Math.abs(deltaY) * 1.5 + Math.abs(deltaX);
+            if (distance < minDistance) {
+              minDistance = distance;
+              bestIndex = i;
+            }
+          }
+        } else if (direction === 'right') {
+          // Must be to the right and roughly on the same row (vertical overlap)
+          if (rect.left >= currentRect.right - 4 && Math.abs(deltaY) < Math.max(rect.height, currentRect.height)) {
+            const distance = Math.abs(deltaX) + Math.abs(deltaY) * 2;
+            if (distance < minDistance) {
+              minDistance = distance;
+              bestIndex = i;
+            }
+          }
+        } else if (direction === 'left') {
+          // Must be to the left and roughly on the same row
+          if (rect.right <= currentRect.left + 4 && Math.abs(deltaY) < Math.max(rect.height, currentRect.height)) {
+            const distance = Math.abs(deltaX) + Math.abs(deltaY) * 2;
+            if (distance < minDistance) {
+              minDistance = distance;
+              bestIndex = i;
+            }
+          }
+        }
+      }
+
+      return bestIndex;
+    },
+    [getContentFocusableElements]
+  );
 
   // Dedicated TV Remote D-Pad Navigation inside the Settings Modal
   useEffect(() => {
@@ -296,29 +366,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         if (focusArea === 'content') {
           // Return focus to vertical tabs list
           setFocusArea('tabs');
-          const target = document.getElementById(`settings-tab-${selectedTabNavIndex}`);
-          target?.focus();
+          const t = document.getElementById(`settings-tab-${selectedTabNavIndex}`);
+          t?.focus();
         } else {
           onClose();
         }
         return;
       }
 
-      // --- SECTION 1: MASTER SIDEBAR TABS (VERTICAL D-PAD) ---
+      // --- SECTION 1: MASTER SIDEBAR TABS (VERTICAL D-PAD ONLY FOR TABS 0..TABS.length-1) ---
       if (focusArea === 'tabs') {
-        const totalItems = TABS.length + 1; // 0..TABS.length-1 = tabs, TABS.length = close button
-
         if (isUp) {
           e.preventDefault();
           setSelectedTabNavIndex((prev) => {
-            const next = prev > 0 ? prev - 1 : totalItems - 1;
-            if (next < TABS.length) {
-              setActiveTab(TABS[next].id);
-              setContentFocusIndex(0);
-            }
-            const target = document.getElementById(`settings-tab-${next}`);
-            target?.focus();
-            target?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+            const next = prev > 0 ? prev - 1 : TABS.length - 1;
+            setActiveTab(TABS[next].id);
+            setContentFocusIndex(0);
+            const t = document.getElementById(`settings-tab-${next}`);
+            t?.focus();
+            t?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
             return next;
           });
           return;
@@ -327,25 +393,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         if (isDown) {
           e.preventDefault();
           setSelectedTabNavIndex((prev) => {
-            const next = prev < totalItems - 1 ? prev + 1 : 0;
-            if (next < TABS.length) {
-              setActiveTab(TABS[next].id);
-              setContentFocusIndex(0);
-            }
-            const target = document.getElementById(`settings-tab-${next}`);
-            target?.focus();
-            target?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+            const next = prev < TABS.length - 1 ? prev + 1 : 0;
+            setActiveTab(TABS[next].id);
+            setContentFocusIndex(0);
+            const t = document.getElementById(`settings-tab-${next}`);
+            t?.focus();
+            t?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
             return next;
           });
           return;
         }
 
-        if (isRight) {
+        if (isRight || isEnter) {
           e.preventDefault();
-          if (selectedTabNavIndex === TABS.length) {
-            // On close button, do nothing on Right
-            return;
-          }
           const items = getContentFocusableElements();
           if (items.length > 0) {
             setFocusArea('content');
@@ -355,25 +415,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           }
           return;
         }
-
-        if (isEnter) {
-          e.preventDefault();
-          if (selectedTabNavIndex === TABS.length) {
-            onClose();
-          } else {
-            const items = getContentFocusableElements();
-            if (items.length > 0) {
-              setFocusArea('content');
-              setContentFocusIndex(0);
-              items[0].focus();
-              items[0].scrollIntoView({ behavior: 'auto', block: 'nearest' });
-            }
-          }
-          return;
-        }
       }
 
-      // --- SECTION 2: DETAIL CONTENT AREA (SPATIAL D-PAD) ---
+      // --- SECTION 2: DETAIL CONTENT AREA (TRUE 2D SPATIAL D-PAD) ---
       if (focusArea === 'content') {
         const items = getContentFocusableElements();
         if (items.length === 0) {
@@ -387,50 +431,61 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         if (isLeft) {
           e.preventDefault();
-          // Returning to vertical tabs sidebar
-          setFocusArea('tabs');
-          const target = document.getElementById(`settings-tab-${selectedTabNavIndex}`);
-          target?.focus();
+          const nextIndex = findNextSpatialElement('left', contentFocusIndex);
+          if (nextIndex !== contentFocusIndex) {
+            // There is another element to the left on the same row!
+            setContentFocusIndex(nextIndex);
+            items[nextIndex]?.focus();
+            items[nextIndex]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+          } else {
+            // No element to the left -> Return to master sidebar
+            setFocusArea('tabs');
+            const t = document.getElementById(`settings-tab-${selectedTabNavIndex}`);
+            t?.focus();
+          }
           return;
         }
 
         if (isRight) {
           e.preventDefault();
-          // Move forward to next interactive element if on horizontal row
-          setContentFocusIndex((prev) => {
-            const next = Math.min(items.length - 1, prev + 1);
-            items[next]?.focus();
-            items[next]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-            return next;
-          });
+          const nextIndex = findNextSpatialElement('right', contentFocusIndex);
+          if (nextIndex !== contentFocusIndex) {
+            setContentFocusIndex(nextIndex);
+            items[nextIndex]?.focus();
+            items[nextIndex]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+          }
           return;
         }
 
         if (isDown) {
           e.preventDefault();
-          setContentFocusIndex((prev) => {
-            const next = Math.min(items.length - 1, prev + 1);
-            items[next]?.focus();
-            items[next]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-            return next;
-          });
+          const nextIndex = findNextSpatialElement('down', contentFocusIndex);
+          if (nextIndex !== contentFocusIndex) {
+            setContentFocusIndex(nextIndex);
+            items[nextIndex]?.focus();
+            items[nextIndex]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+          } else if (contentFocusIndex < items.length - 1) {
+            // Fallback: move to next item
+            const fallback = contentFocusIndex + 1;
+            setContentFocusIndex(fallback);
+            items[fallback]?.focus();
+            items[fallback]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+          }
           return;
         }
 
         if (isUp) {
           e.preventDefault();
-          if (contentFocusIndex === 0) {
-            // First item: Return to master tabs sidebar
-            setFocusArea('tabs');
-            const target = document.getElementById(`settings-tab-${selectedTabNavIndex}`);
-            target?.focus();
+          const nextIndex = findNextSpatialElement('up', contentFocusIndex);
+          if (nextIndex !== contentFocusIndex) {
+            setContentFocusIndex(nextIndex);
+            items[nextIndex]?.focus();
+            items[nextIndex]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
           } else {
-            setContentFocusIndex((prev) => {
-              const next = Math.max(0, prev - 1);
-              items[next]?.focus();
-              items[next]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-              return next;
-            });
+            // At the top of content -> Return to master sidebar
+            setFocusArea('tabs');
+            const t = document.getElementById(`settings-tab-${selectedTabNavIndex}`);
+            t?.focus();
           }
           return;
         }
@@ -450,7 +505,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     return () => {
       window.removeEventListener('keydown', handleKeyDown, true);
     };
-  }, [isOpen, isPinModalOpen, focusArea, selectedTabNavIndex, contentFocusIndex, getContentFocusableElements, onClose]);
+  }, [
+    isOpen,
+    isPinModalOpen,
+    focusArea,
+    selectedTabNavIndex,
+    contentFocusIndex,
+    getContentFocusableElements,
+    findNextSpatialElement,
+    onClose,
+  ]);
 
   if (!isOpen && !isPinModalOpen) return null;
 
@@ -519,13 +583,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           </div>
           <button
-            id={`settings-tab-${TABS.length}`}
             onClick={onClose}
-            className={`px-5 py-2.5 rounded-xl transition flex items-center space-x-2 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface ${
-              focusArea === 'tabs' && selectedTabNavIndex === TABS.length
-                ? 'bg-rose-500 text-white ring-2 ring-tv-accent scale-105 shadow-xl'
-                : 'bg-white/10 text-slate-300 hover:text-white hover:bg-white/15'
-            }`}
+            className="px-4 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 hover:text-white transition flex items-center space-x-2 text-xs font-bold"
             title="Fermer les paramètres (Touche Retour)"
           >
             <X className="w-4 h-4" />
@@ -571,7 +630,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               );
             })}
 
-            <div className="pt-4 mt-auto">
+            <div className="pt-4 mt-auto space-y-2">
+              <button
+                id={`settings-tab-${TABS.length}`}
+                onClick={onClose}
+                className={`w-full flex items-center justify-center space-x-2 px-4 py-3 rounded-xl text-xs font-bold transition focus:outline-none ${
+                  focusArea === 'tabs' && selectedTabNavIndex === TABS.length
+                    ? 'bg-rose-600 text-white ring-4 ring-white shadow-2xl scale-[1.02] z-10'
+                    : 'bg-white/10 hover:bg-white/15 text-slate-300 hover:text-white'
+                }`}
+              >
+                <X className="w-4 h-4" />
+                <span>Quitter les paramètres</span>
+              </button>
+
               <div className="p-3 bg-black/40 rounded-xl border border-white/5 text-[11px] text-slate-400 space-y-1">
                 <span className="font-semibold text-slate-300 block">Navigation Télécommande :</span>
                 <p>• <strong>Haut / Bas :</strong> Changer de rubrique</p>
@@ -643,17 +715,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       {deletingId === pl.id ? (
                         <div className="flex items-center space-x-2 flex-shrink-0">
                           <button
-                            onClick={() => {
-                              onDeletePlaylist(pl.id);
+                            type="button"
+                            onClick={async (e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const targetId = pl.id;
                               setDeletingId(null);
+                              try {
+                                await onDeletePlaylist(targetId);
+                              } catch (err) {
+                                console.error('Delete playlist error:', err);
+                              }
                             }}
-                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-500 text-white rounded-lg text-xs font-bold shadow-md transition focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-tv-surface"
+                            className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-bold shadow-md transition focus:outline-none focus:ring-2 focus:ring-rose-400 focus:ring-offset-2 focus:ring-offset-tv-surface"
                           >
-                            Confirmer
+                            Confirmer la suppression
                           </button>
                           <button
-                            onClick={() => setDeletingId(null)}
-                            className="px-2.5 py-1.5 bg-white/10 hover:bg-white/20 text-slate-300 rounded-lg text-xs transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setDeletingId(null);
+                            }}
+                            className="px-3 py-2 bg-white/10 hover:bg-white/20 text-slate-300 rounded-xl text-xs transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                           >
                             Annuler
                           </button>
@@ -1551,28 +1636,56 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 </div>
               </div>
 
+              {/* Section: Paramètres du Lecteur Vidéo & Buffer */}
               <div>
-                <h3 className="text-sm font-bold text-white mt-4">Paramètres du Lecteur Vidéo</h3>
+                <h3 className="text-sm font-bold text-white mt-4">Paramètres du Lecteur Vidéo & Tampon</h3>
                 <p className="text-xs text-slate-400">Optimisez la fluidité et le zapping selon votre connexion.</p>
               </div>
 
               <div className="space-y-3">
-                <div className="p-3.5 bg-tv-card/60 rounded-xl border border-tv-border flex items-center justify-between">
-                  <div>
-                    <span className="text-xs font-bold text-white block">Taille du Buffer de lecture</span>
-                    <span className="text-[11px] text-slate-400 block">Délai avant démarrage du flux</span>
+                {/* Réglage interactif de la taille du Buffer */}
+                <div className="p-3.5 bg-tv-card/60 rounded-xl border border-tv-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-white block">Taille du Buffer de lecture</span>
+                      <span className="text-[11px] text-slate-400 block">Délai avant démarrage du flux (anti-coupures)</span>
+                    </div>
                   </div>
-                  <span className="text-xs font-mono font-bold bg-tv-focus/20 text-tv-accent border border-tv-focus/30 px-2.5 py-1 rounded-lg">
-                    Très court (300ms)
-                  </span>
+                  <div className="grid grid-cols-3 gap-1.5 pt-1">
+                    {[
+                      { id: '300ms', label: '300 ms (Fibre/Défaut)', desc: 'Zapping ultra rapide' },
+                      { id: '1000ms', label: '1 000 ms (ADSL/4G)', desc: 'Équilibré' },
+                      { id: '2500ms', label: '2 500 ms (Wi-Fi)', desc: 'Anti-coupures' },
+                    ].map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          setBufferSize(item.id as any);
+                          saveControlSetting('bufferSize', item.id);
+                        }}
+                        className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center focus:outline-none focus:ring-2 focus:ring-tv-accent ${
+                          bufferSize === item.id
+                            ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                            : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                        }`}
+                      >
+                        <div className="font-bold">{item.label}</div>
+                        <div className="text-[10px] opacity-75">{item.desc}</div>
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
+                {/* Accélération matérielle */}
                 <div className="p-3.5 bg-tv-card/60 rounded-xl border border-tv-border flex items-center justify-between">
                   <div>
-                    <span className="text-xs font-bold text-white block">Accélération Matérielle</span>
-                    <span className="text-[11px] text-slate-400 block">Décodage fluide via processeur graphique</span>
+                    <span className="text-xs font-bold text-white block">Accélération Matérielle GPU</span>
+                    <span className="text-[11px] text-slate-400 block">Décodage fluide via processeur graphique TV</span>
                   </div>
-                  <span className="text-xs font-bold text-emerald-400">Activée</span>
+                  <span className="text-xs font-bold px-3 py-1 bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg">
+                    ✓ Activée
+                  </span>
                 </div>
               </div>
             </div>
