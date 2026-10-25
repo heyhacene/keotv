@@ -636,3 +636,82 @@ export function getMockEpgForChannel(channelId: string): { current: EpgProgram; 
     },
   };
 }
+
+/**
+ * Generates a realistic chronological timeline of programs (3 past + 1 current + 3 future)
+ * for immediate TiviMate timeline rendering while real Xtream EPG is loading.
+ */
+export function getMockTimelineForChannel(channelId: string, channelName?: string): EpgProgram[] {
+  const { current, next } = getMockEpgForChannel(channelId);
+  const curStartMs = new Date(current.start).getTime();
+  const curEndMs = new Date(current.end).getTime();
+  const nxtEndMs = new Date(next.end).getTime();
+
+  const past3Start = new Date(curStartMs - 180 * 60000);
+  const past2Start = new Date(curStartMs - 120 * 60000);
+  const past1Start = new Date(curStartMs - 60 * 60000);
+
+  const fut2End = new Date(nxtEndMs + 60 * 60000);
+  const fut3End = new Date(nxtEndMs + 135 * 60000);
+
+  const label = channelName || 'la chaîne';
+
+  return [
+    {
+      id: `epg_p3_${channelId}`,
+      channel_id: channelId,
+      title: `Édition Précédente • ${label}`,
+      description: `Rediffusion et temps forts diffusés précédemment sur ${label}.`,
+      start: past3Start.toISOString(),
+      end: past2Start.toISOString(),
+      duration_min: 60,
+      category: current.category,
+      has_catchup: true,
+    },
+    {
+      id: `epg_p2_${channelId}`,
+      channel_id: channelId,
+      title: `Le Grand Magazine • ${label}`,
+      description: `Dossiers, reportages et analyses en plateau sur ${label}.`,
+      start: past2Start.toISOString(),
+      end: past1Start.toISOString(),
+      duration_min: 60,
+      category: current.category,
+      has_catchup: true,
+    },
+    {
+      id: `epg_p1_${channelId}`,
+      channel_id: channelId,
+      title: `Avant-Programme & Direct • ${label}`,
+      description: `Programme diffusé juste avant l'émission actuelle sur ${label}.`,
+      start: past1Start.toISOString(),
+      end: current.start,
+      duration_min: 60,
+      category: current.category,
+      has_catchup: true,
+    },
+    current,
+    next,
+    {
+      id: `epg_f2_${channelId}`,
+      channel_id: channelId,
+      title: `Grand Soir & Décryptage`,
+      description: `La suite de votre programmation sur ${label}.`,
+      start: next.end,
+      end: fut2End.toISOString(),
+      duration_min: 60,
+      category: current.category,
+    },
+    {
+      id: `epg_f3_${channelId}`,
+      channel_id: channelId,
+      title: `Programme de la Nuit`,
+      description: `Sélection nocturne en haute définition sur ${label}.`,
+      start: fut2End.toISOString(),
+      end: fut3End.toISOString(),
+      duration_min: 75,
+      category: current.category,
+    },
+  ];
+}
+

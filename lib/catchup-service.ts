@@ -17,20 +17,63 @@ export interface CatchupParams {
 
 export class CatchupService {
   /**
-   * Generates a playable Timeshift / Catchup URL for past programs.
+   * Formats a Unix timestamp (seconds) into Xtream Codes standard `YYYY-MM-DD:HH-mm` string
    */
-  static generateCatchupUrl(params: CatchupParams): string | null {
-    // 1. Xtream Codes Standard Catchup URL
+  static formatXtreamDate(timestampSec: number, useUtc: boolean = false): string {
+    const d = new Date(timestampSec * 1000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    if (useUtc) {
+      return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}:${pad(d.getUTCHours())}-${pad(d.getUTCMinutes())}`;
+    }
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}:${pad(d.getHours())}-${pad(d.getMinutes())}`;
+  }
+
+  /**
+   * Generates a list of candidate Catchup / Timeshift URLs ordered by compatibility across Xtream & M3U panels.
+   * Used by NativePlayer (ExoPlayer) and Web Player for automatic seamless fallback if the primary format 404s.
+   */
+  static generateCatchupFallbackUrls(params: CatchupParams): string[] {
+    const urls: string[] = [];
+
     if (params.serverUrl && params.streamId && params.username && params.password) {
       const baseUrl = params.serverUrl.endsWith('/') ? params.serverUrl.slice(0, -1) : params.serverUrl;
-      const startStr = Math.floor(params.startTimestamp).toString();
-      const durStr = Math.max(1, Math.floor(params.durationMinutes)).toString();
+      const cleanId = String(params.streamId).replace(/^ch_xtream_(?:live|vod|series)_/, '').trim();
+      const startSec = Math.floor(params.startTimestamp);
+      const durMin = Math.max(1, Math.floor(params.durationMinutes));
+      const user = encodeURIComponent(params.username);
+      const pass = encodeURIComponent(params.password);
 
-      // Format standard Xtream: /timeshift/{username}/{password}/{duration_min}/{start_timestamp}/{stream_id}.ts
-      return `${baseUrl}/timeshift/${encodeURIComponent(params.username)}/${encodeURIComponent(params.password)}/${durStr}/${startStr}/${params.streamId}.ts`;
+      const dateLocal = this.formatXtreamDate(startSec, false);
+      const dateUtc = this.formatXtreamDate(startSec, true);
+
+      // 1. Standard Xtream Codes: /timeshift/{user}/{pass}/{duration}/{YYYY-MM-DD:HH-mm}/{stream_id}.ts (Local / Server Time)
+      urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${dateLocal}/${cleanId}.ts`);
+
+      // 2. Standard Xtream Codes HLS (.m3u8) with YYYY-MM-DD:HH-mm
+      urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${dateLocal}/${cleanId}.m3u8`);
+
+      // 3. UTC date variant (if server archive uses UTC clock)
+      if (dateUtc !== dateLocal) {
+        urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${dateUtc}/${cleanId}.ts`);
+        urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${dateUtc}/${cleanId}.m3u8`);
+      }
+
+      // 4. Xtream streaming/timeshift.php endpoint
+      urls.push(
+        `${baseUrl}/streaming/timeshift.php?username=${user}&password=${pass}&stream=${cleanId}&start=${dateLocal}&duration=${durMin}`
+      );
+      if (dateUtc !== dateLocal) {
+        urls.push(
+          `${baseUrl}/streaming/timeshift.php?username=${user}&password=${pass}&stream=${cleanId}&start=${dateUtc}&duration=${durMin}`
+        );
+      }
+
+      // 5. Unix epoch timestamp format (XUI.one / newer panels)
+      urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${startSec}/${cleanId}.ts`);
+      urls.push(`${baseUrl}/timeshift/${user}/${pass}/${durMin}/${startSec}/${cleanId}.m3u8`);
     }
 
-    // 2. M3U Catchup Template
+    // M3U Catchup Template
     if (params.sourceUrl) {
       const startSec = Math.floor(params.startTimestamp);
       const endSec = startSec + Math.floor(params.durationMinutes * 60);
@@ -41,23 +84,23 @@ export class CatchupService {
         url = url.replace(/\$\{end\}/g, endSec.toString());
         url = url.replace(/\$\{timestamp\}/g, startSec.toString());
         url = url.replace(/\$\{duration\}/g, (params.durationMinutes * 60).toString());
-        url = url.replace(/\$\{offset\}/g, Math.max(0, Math.floor((Date.now() / 1000) - startSec)).toString());
-        return url;
+        url = url.replace(/\$\{offset\}/g, Math.max(0, Math.floor(Date.now() / 1000 - startSec)).toString());
+        urls.push(url);
       }
 
-      if (params.catchupType === 'append' || params.catchupType === 'default') {
-        const separator = params.sourceUrl.includes('?') ? '&' : '?';
-        return `${params.sourceUrl}${separator}utc=${startSec}&lutc=${startSec}`;
-      }
-
-      if (params.catchupType === 'shift') {
-        const nowSec = Math.floor(Date.now() / 1000);
-        const shiftHours = Math.max(1, Math.floor((nowSec - startSec) / 3600));
-        const separator = params.sourceUrl.includes('?') ? '&' : '?';
-        return `${params.sourceUrl}${separator}utc=${shiftHours}`;
-      }
+      const separator = params.sourceUrl.includes('?') ? '&' : '?';
+      urls.push(`${params.sourceUrl}${separator}utc=${startSec}&lutc=${Math.floor(Date.now() / 1000)}`);
     }
 
-    return null;
+    return Array.from(new Set(urls));
+  }
+
+  /**
+   * Generates a primary playable Timeshift / Catchup URL for past programs.
+   */
+  static generateCatchupUrl(params: CatchupParams): string | null {
+    const candidates = this.generateCatchupFallbackUrls(params);
+    return candidates.length > 0 ? candidates[0] : null;
   }
 }
+

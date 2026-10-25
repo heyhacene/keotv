@@ -79,10 +79,12 @@ export type NavigationPane =
   | 'menu'
   | 'categories'
   | 'channels'
+  | 'epg_grid'
   | 'category_header'
   | 'channel_header'
   | 'right_panel'
   | 'player_osd'
   | 'settings'
   | 'modal';
+
 

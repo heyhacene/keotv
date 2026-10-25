@@ -7,7 +7,7 @@ import { Channel, Category, EpgProgram, NavigationPane, PlaylistConfig } from '@
 import { useTVNavigation } from '@/lib/use-tv-navigation';
 import { NavigationSidebar } from '@/components/NavigationSidebar';
 import { TopBar } from '@/components/TopBar';
-import { TVGuide } from '@/components/TVGuide';
+import { TVGuide, buildProgramSlotsForChannel } from '@/components/TVGuide';
 import { LiveVideoPlayer } from '@/components/LiveVideoPlayer';
 import { XtreamModal } from '@/components/XtreamModal';
 import { SyncModal } from '@/components/SyncModal';
@@ -78,6 +78,8 @@ export default function KeoTVHome() {
   const [focusedChannelHeaderIndex, setFocusedChannelHeaderIndex] = useState<number>(0);
   const [focusedRightPanelIndex, setFocusedRightPanelIndex] = useState<number>(0);
   const [focusedMenuIndex, setFocusedMenuIndex] = useState<number>(0);
+  const [focusedProgramOffset, setFocusedProgramOffset] = useState<number>(0);
+  const [isPastUnlocked, setIsPastUnlocked] = useState<boolean>(false);
 
   // Responsive Layout Mode: 'mobile-portrait' | 'mobile-landscape' | 'tv'
   const [layoutMode, setLayoutMode] = useState<'tv' | 'mobile-portrait' | 'mobile-landscape'>('tv');
@@ -101,13 +103,14 @@ export default function KeoTVHome() {
       if (typeof window === 'undefined') return;
 
       const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-      const isTvDevice =
-        /KeoTV-AndroidTV|Android TV|GoogleTV|Large Screen|AFT|BRAVIA|MiBox|SHIELD|PhilipsTV|SmartTV|TV/i.test(ua);
       const isExplicitMobileUa = /KeoTV-Mobile|iPhone|iPod|Mobi/i.test(ua);
+      const isTvDevice =
+        !isExplicitMobileUa &&
+        /KeoTV-AndroidTV|Android TV|GoogleTV|Large Screen|AFT|BRAVIA|MiBox|SHIELD|PhilipsTV|SmartTV/i.test(ua);
       const isTouch =
         'ontouchstart' in window || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0);
 
-      // Dedicated Android TV hardware or any non-touch device (TV boxes, Fire TV, PC) ALWAYS stays in full 4-column TV mode!
+      // Dedicated Android TV hardware or any non-touch device (TV boxes, Fire TV, PC) ALWAYS stays in full TV mode!
       if (isTvDevice || (!isTouch && !isExplicitMobileUa)) {
         setLayoutMode('tv');
         return;
@@ -1536,50 +1539,65 @@ export default function KeoTVHome() {
     [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession, adultCategoryIds]
   );
 
-  // Play a specific past Catchup / Replay program via Timeshift
+  // Play a specific past Catchup / Replay program via Timeshift (with multi-format fallback cascade!)
   const handlePlayCatchupProgram = useCallback(
     async (program: EpgProgram, channel: Channel) => {
-      let catchupUrl = program.catchup_url;
+      const pl = (await db.playlists.toArray()).find((p) => p.type === 'xtream' && p.username && p.password);
+      let serverUrl = pl?.server_url || '';
+      let username = pl?.username || '';
+      let password = pl?.password || '';
 
-      if (!catchupUrl) {
-        const pl = (await db.playlists.toArray()).find((p) => p.type === 'xtream' && p.username && p.password);
-        let serverUrl = pl?.server_url || '';
-        let username = pl?.username || '';
-        let password = pl?.password || '';
-
-        if (!serverUrl) {
-          const saved = await getSetting<any>('last_xtream_config', null);
-          if (saved?.server_url && saved?.username && saved?.password) {
-            serverUrl = saved.server_url;
-            username = saved.username;
-            password = saved.password;
-          }
-        }
-
-        const streamId = channel.stream_id || (channel.id.match(/\d+$/) ? channel.id.match(/\d+$/)![0] : null);
-        const startSec = Math.floor(new Date(program.start).getTime() / 1000);
-
-        if (serverUrl && username && password && streamId) {
-          catchupUrl = CatchupService.generateCatchupUrl({
-            serverUrl,
-            username,
-            password,
-            streamId,
-            startTimestamp: startSec,
-            durationMinutes: program.duration_min,
-          }) || undefined;
+      if (!serverUrl) {
+        const saved = await getSetting<any>('last_xtream_config', null);
+        if (saved?.server_url && saved?.username && saved?.password) {
+          serverUrl = saved.server_url;
+          username = saved.username;
+          password = saved.password;
         }
       }
 
-      if (!catchupUrl) {
-        alert('Impossible de générer le flux replay pour ce programme.');
+      const streamId =
+        channel.stream_id ||
+        channel.id.replace(/^ch_xtream_(?:live|vod|series)_/, '') ||
+        (channel.id.match(/\d+$/) ? channel.id.match(/\d+$/)![0] : null);
+      const startSec = Math.floor(new Date(program.start).getTime() / 1000);
+
+      let fallbackUrls: string[] = [];
+      if (serverUrl && username && password && streamId) {
+        fallbackUrls = CatchupService.generateCatchupFallbackUrls({
+          serverUrl,
+          username,
+          password,
+          streamId,
+          sourceUrl: channel.stream_url,
+          startTimestamp: startSec,
+          durationMinutes: program.duration_min || 60,
+        });
+      }
+
+      if (program.catchup_url && !fallbackUrls.includes(program.catchup_url)) {
+        fallbackUrls.unshift(program.catchup_url);
+      }
+
+      // If still empty (e.g., M3U or demo playlist), fallback to append utc or live stream_url so demo testing works smoothly
+      if (fallbackUrls.length === 0 && channel.stream_url) {
+        const sep = channel.stream_url.includes('?') ? '&' : '?';
+        fallbackUrls.push(`${channel.stream_url}${sep}utc=${startSec}`);
+        fallbackUrls.push(channel.stream_url);
+      }
+
+      const primaryUrl = fallbackUrls[0];
+      if (!primaryUrl) {
+        showToast('⚠️ Impossible de générer le lien Replay pour ce programme.');
         return;
       }
 
+      const replayTitle = `[Replay] ${program.title} — ${channel.name}`;
       const replayChannel: Channel = {
         ...channel,
-        name: `[Replay] ${program.title} (${channel.name})`,
-        stream_url: catchupUrl,
+        name: replayTitle,
+        stream_url: primaryUrl,
+        stream_type: 'vod', // Enables transport seekbar / FF / Rewind controls
       };
 
       setIsStopped(false);
@@ -1590,8 +1608,8 @@ export default function KeoTVHome() {
       if (isNativePlayerAvailable()) {
         try {
           await NativePlayer.play({
-            urls: [catchupUrl],
-            titles: [`[Replay] ${program.title}`],
+            urls: fallbackUrls,
+            titles: fallbackUrls.map(() => replayTitle),
             index: 0,
             userAgent: NATIVE_PLAYER_USER_AGENT,
             isLive: false,
@@ -1604,7 +1622,7 @@ export default function KeoTVHome() {
         setIsFullscreen(true);
       }
     },
-    []
+    [showToast]
   );
 
   // Hide a single channel from view
@@ -1924,8 +1942,10 @@ export default function KeoTVHome() {
       return;
     }
 
-    // 2b. Right EPG/Details panel -> go back to channels list pane
-    if (activePane === 'right_panel') {
+    // 2b. EPG Timeline Grid or Right Details panel -> go back to channels list pane (re-showing bouquets)
+    if (activePane === 'epg_grid' || activePane === 'right_panel') {
+      setIsPastUnlocked(false);
+      setFocusedProgramOffset(0);
       setActivePane('channels');
       return;
     }
@@ -2054,8 +2074,12 @@ export default function KeoTVHome() {
   const isCurrentMedia =
     activeSection === 'vod' ||
     activeSection === 'series' ||
+    selectedCategory?.type === 'vod' ||
+    selectedCategory?.type === 'series' ||
     currentFocusedChannel?.stream_type === 'vod' ||
     currentFocusedChannel?.stream_type === 'series';
+
+  const isLiveTimelineMode = !isCurrentMedia;
 
   const rightPanelButtonCount = isCurrentSep
     ? 0
@@ -2085,6 +2109,39 @@ export default function KeoTVHome() {
     focusedRightPanelIndex,
     setFocusedRightPanelIndex,
     rightPanelButtonCount,
+    isLiveTimelineMode,
+    focusedProgramOffset,
+    setFocusedProgramOffset,
+    isPastUnlocked,
+    setIsPastUnlocked,
+    minProgramOffset: -3,
+    maxProgramOffset: 4,
+    onUnlockPastPrograms: (chIdx) => {
+      const ch = filteredChannels[chIdx] || activeChannel;
+      showToast(
+        ch
+          ? `⏪ Programmes passés débloqués pour « ${ch.name} » (OK pour lancer le Replay)`
+          : '⏪ Navigation dans les programmes passés débloquée'
+      );
+    },
+    onSelectTimelineProgram: async (chIdx, offset) => {
+      const ch = filteredChannels[chIdx] || activeChannel;
+      if (!ch) return;
+      if (offset < 0) {
+        // Past program selected in TiviMate timeline -> launch Replay!
+        const storedProgs = await EPGService.getProgramsForChannel(ch.id);
+        const slots = buildProgramSlotsForChannel(ch, storedProgs);
+        const targetProg = slots[offset];
+        if (targetProg) {
+          handlePlayCatchupProgram(targetProg, ch);
+        } else {
+          handleSelectChannel(ch, true);
+        }
+      } else {
+        // Current live (0) or future (>0) program -> launch live channel!
+        handleSelectChannel(ch, true);
+      }
+    },
     onSelectRightPanelAction: (btnIdx) => {
       const targetCh = filteredChannels[focusedChannelIndex] || activeChannel;
       if (!targetCh) return;
@@ -2137,7 +2194,7 @@ export default function KeoTVHome() {
     onSelectChannel: handleSelectChannel,
     onToggleFavorite: (idx) => handleToggleFavorite(idx),
     onOpenContextMenu: (idx) => {
-      if (activePane === 'channels') {
+      if (activePane === 'channels' || activePane === 'epg_grid') {
         const ch = filteredChannels[idx];
         if (ch) {
           setContextMenuItem(ch);
@@ -3446,6 +3503,24 @@ export default function KeoTVHome() {
               focusedCategoryHeaderIndex={focusedCategoryHeaderIndex}
               focusedChannelHeaderIndex={focusedChannelHeaderIndex}
               focusedRightPanelIndex={focusedRightPanelIndex}
+              onPlayCatchupProgram={handlePlayCatchupProgram}
+              focusedProgramOffset={focusedProgramOffset}
+              onFocusProgramOffsetChange={setFocusedProgramOffset}
+              isPastUnlocked={isPastUnlocked}
+              onTogglePastUnlocked={(unlocked) => {
+                setIsPastUnlocked(unlocked);
+                if (!unlocked) {
+                  setFocusedProgramOffset(0);
+                } else if (focusedProgramOffset >= 0) {
+                  setFocusedProgramOffset(-1);
+                }
+              }}
+              onEnterEpgGrid={(chIdx, offset) => {
+                setFocusedChannelIndex(chIdx);
+                setFocusedProgramOffset(offset);
+                if (offset < 0) setIsPastUnlocked(true);
+                setActivePane('epg_grid');
+              }}
             />
           </div>
         </div>

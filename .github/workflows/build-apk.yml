@@ -209,12 +209,13 @@ jobs:
             ### 📺 KeoTV v1.0.0 (Build ${{ github.run_number }})
             Cliquez sur le fichier **KeoTV-Build-${{ github.run_number }}.apk** ci-dessous pour installer ou mettre à jour directement votre application.
 
-            #### 🚀 Nouveautés & Correctifs Majeurs (Build 15) :
-            - **Fiche détaillée pour les Films (intermédiaire avant lecture)** : Un clic sur un film ouvre désormais sa fiche complète avec image de fond, affiche, note IMDb, durée, réalisateur, synopsis en français, pistes audio et sous-titres, et grand bouton "Lancer le film".
-            - **Distribution & Filmographie croisée avec votre Playlist** : Cliquez sur n'importe quel acteur de la distribution pour voir immédiatement tous ses autres films disponibles dans votre playlist IPTV personnelle !
-            - **Langues Audio et Sous-titres (Séries & Films)** : Détection et affichage clair des langues disponibles (Français VF, VOSTFR, Multilingue, VO, etc.).
-            - **Raccourci Downloader Android TV** : Tapez `tinyurl.com/keotv-apk` dans la barre URL de l'application Downloader sur votre télévision.
-            - **Mise à jour directe sans désinstallation** : Signature cryptographique officielle permanente (`versionCode ${{ github.run_number }}`).
+            #### 🚀 Nouveautés & Correctifs Majeurs (Build ${{ github.run_number }}) :
+            - **Architecture TiviMate (TV en direct)** : Suppression du panneau de droite et affichage d'une ligne chronologique EPG (`Passé / Direct / Futur`) directement sur chaque ligne de chaîne, accompagnée d'un bandeau supérieur détaillé.
+            - **Navigation TiviMate D-Pad (`DPAD_RIGHT` & Appui long `DPAD_LEFT`)** : Appuyez sur `Droite` depuis la liste des chaînes pour masquer les bouquets et naviguer dans les programmes futurs ; maintenez `Gauche` appuyé sur le programme en direct pour débloquer les programmes passés (Replay) !
+            - **Réparation du Replay Multi-Formats Xtream Codes** : Format de date standard `YYYY-MM-DD:HH-mm` et cascade automatique de secours (`.ts`, `.m3u8`, UTC, `/streaming/timeshift.php`, timestamp) dans ExoPlayer.
+            - **Contrôles du Lecteur Vidéo & Touche Retour (`BACK`)** : Quand les contrôles sont affichés, `Haut`/`Bas` naviguent exclusivement dans les contrôles sans changer de chaîne, et `Retour` masque les contrôles sans quitter le lecteur.
+            - **Réparation de l'Interface Mobile** : Correction de la détection User-Agent `KeoTV-Mobile` pour rétablir l'interface portrait/paysage sur smartphone.
+            - **Code Downloader Android TV** : `4317787` (`https://tinyurl.com/keo-apk`).
           files: |
             KeoTV.apk
             KeoTV-Build-${{ github.run_number }}.apk

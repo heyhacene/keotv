@@ -23,6 +23,16 @@ export interface TVNavOptions {
   setFocusedRightPanelIndex?: (index: number | ((prev: number) => number)) => void;
   rightPanelButtonCount?: number;
   onSelectRightPanelAction?: (buttonIndex: number) => void;
+  // TiviMate EPG Timeline Grid Navigation
+  isLiveTimelineMode?: boolean;
+  focusedProgramOffset?: number;
+  setFocusedProgramOffset?: (offset: number | ((prev: number) => number)) => void;
+  isPastUnlocked?: boolean;
+  setIsPastUnlocked?: (unlocked: boolean) => void;
+  minProgramOffset?: number;
+  maxProgramOffset?: number;
+  onSelectTimelineProgram?: (channelIndex: number, programOffset: number) => void;
+  onUnlockPastPrograms?: (channelIndex: number) => void;
   onOpenCatchup?: (channelIndex: number) => void;
   onSelectCategory: (index: number, switchPane?: boolean) => void;
   onSelectChannel: (index: number, fullscreen: boolean) => void;
@@ -61,6 +71,15 @@ export function useTVNavigation({
   setFocusedRightPanelIndex,
   rightPanelButtonCount = 1,
   onSelectRightPanelAction,
+  isLiveTimelineMode = false,
+  focusedProgramOffset = 0,
+  setFocusedProgramOffset,
+  isPastUnlocked = false,
+  setIsPastUnlocked,
+  minProgramOffset = -3,
+  maxProgramOffset = 4,
+  onSelectTimelineProgram,
+  onUnlockPastPrograms,
   onOpenCatchup,
   onSelectCategory,
   onSelectChannel,
@@ -81,10 +100,16 @@ export function useTVNavigation({
   const numberBufferRef = useRef<string>('');
   const numberTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Long-press vs Short-press state for TV remote OK / Enter button
+  // Calibrated Long-press vs Short-press state for TV remote OK / Enter button (800ms hold)
   const enterDownPaneRef = useRef<NavigationPane | null>(null);
+  const enterDownTimeRef = useRef<number>(0);
   const enterHoldTimerRef = useRef<NodeJS.Timeout | null>(null);
   const longPressFiredRef = useRef<boolean>(false);
+
+  // Long-press DPAD_LEFT state in epg_grid to unlock past programs (TiviMate style)
+  const leftDownInEpgRef = useRef<boolean>(false);
+  const leftHoldTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const leftLongPressFiredRef = useRef<boolean>(false);
 
   const focusedCategoryIndexRef = useRef(focusedCategoryIndex);
   focusedCategoryIndexRef.current = focusedCategoryIndex;
@@ -98,6 +123,10 @@ export function useTVNavigation({
   focusedChannelHeaderIndexRef.current = focusedChannelHeaderIndex;
   const focusedRightPanelIndexRef = useRef(focusedRightPanelIndex);
   focusedRightPanelIndexRef.current = focusedRightPanelIndex;
+  const focusedProgramOffsetRef = useRef(focusedProgramOffset);
+  focusedProgramOffsetRef.current = focusedProgramOffset;
+  const isPastUnlockedRef = useRef(isPastUnlocked);
+  isPastUnlockedRef.current = isPastUnlocked;
 
   const clearEnterHoldTimer = useCallback(() => {
     if (enterHoldTimerRef.current) {
@@ -106,7 +135,14 @@ export function useTVNavigation({
     }
   }, []);
 
-  // Track boundary attempts for list carousel blockage (gives user time to understand they are at the end)
+  const clearLeftHoldTimer = useCallback(() => {
+    if (leftHoldTimerRef.current) {
+      clearTimeout(leftHoldTimerRef.current);
+      leftHoldTimerRef.current = null;
+    }
+  }, []);
+
+  // Track boundary attempts for list carousel blockage
   const boundaryAttemptRef = useRef<{
     pane: string;
     boundary: 'top' | 'bottom';
@@ -118,19 +154,16 @@ export function useTVNavigation({
       const now = Date.now();
       const attempt = boundaryAttemptRef.current;
 
-      // If first attempt at this boundary or happened more than 1200ms ago:
       if (!attempt || attempt.pane !== pane || attempt.boundary !== boundary || now - attempt.timestamp > 1200) {
         boundaryAttemptRef.current = { pane, boundary, timestamp: now };
         if (onBoundaryHit) {
           onBoundaryHit(pane as any, boundary);
         }
-        return false; // LÉGER BLOCAGE: stop at the boundary!
+        return false;
       }
 
       const elapsed = now - attempt.timestamp;
 
-      // When holding down the arrow key (repeat events):
-      // Require holding through a clear 380ms pause at the boundary before wrapping
       if (isRepeat) {
         if (elapsed < 380) {
           return false;
@@ -139,12 +172,10 @@ export function useTVNavigation({
         return true;
       }
 
-      // Ignore rapid switch debounce chatter < 40ms for faster scrolling
       if (elapsed < 40) {
         return false;
       }
 
-      // Deliberate second press: allow wrap back to the start!
       boundaryAttemptRef.current = null;
       return true;
     },
@@ -232,12 +263,12 @@ export function useTVNavigation({
       // Menu / Info / Context key (Android TV keyCode 82, 165 Info, or ContextMenu)
       const isMenu = key === 'Menu' || key === 'ContextMenu' || key === 'Info' || keyCode === 82 || keyCode === 165;
       if (isMenu) {
-        if ((activePane === 'channels' || activePane === 'categories') && onOpenContextMenu) {
+        if ((activePane === 'channels' || activePane === 'epg_grid' || activePane === 'categories') && onOpenContextMenu) {
           e.preventDefault();
           clearEnterHoldTimer();
           longPressFiredRef.current = true;
           onOpenContextMenu(
-            activePane === 'channels' ? focusedChannelIndexRef.current : focusedCategoryIndexRef.current
+            activePane === 'categories' ? focusedCategoryIndexRef.current : focusedChannelIndexRef.current
           );
           return;
         }
@@ -245,7 +276,7 @@ export function useTVNavigation({
 
       // Green button or 'R' key: Direct Replay / Catchup shortcut
       if (isGreenReplay) {
-        if ((activePane === 'channels' || activePane === 'right_panel') && onOpenCatchup && channelCount > 0) {
+        if ((activePane === 'channels' || activePane === 'epg_grid' || activePane === 'right_panel') && onOpenCatchup && channelCount > 0) {
           e.preventDefault();
           onOpenCatchup(focusedChannelIndexRef.current);
           return;
@@ -254,7 +285,7 @@ export function useTVNavigation({
 
       // Favorite toggle key ('f' or Media/Yellow button)
       if (isFav) {
-        if ((activePane === 'channels' || activePane === 'right_panel') && channelCount > 0) {
+        if ((activePane === 'channels' || activePane === 'epg_grid' || activePane === 'right_panel') && channelCount > 0) {
           e.preventDefault();
           onToggleFavorite(focusedChannelIndexRef.current);
           return;
@@ -266,6 +297,12 @@ export function useTVNavigation({
         clearEnterHoldTimer();
         enterDownPaneRef.current = null;
         longPressFiredRef.current = false;
+      }
+
+      if (isUp || isDown || isRight || isEnter || isBack) {
+        clearLeftHoldTimer();
+        leftDownInEpgRef.current = false;
+        leftLongPressFiredRef.current = false;
       }
 
       // Handle Fullscreen Player Controls
@@ -325,10 +362,19 @@ export function useTVNavigation({
           if (current > 0) {
             setFocusedRightPanelIndex?.((prev) => Math.max(0, prev - 1));
           }
+        } else if (activePane === 'epg_grid') {
+          const current = focusedChannelIndexRef.current;
+          if (current <= 0) {
+            if (shouldAllowWrap('channels', 'top', e.repeat)) {
+              setFocusedChannelIndex(Math.max(0, channelCount - 1));
+            }
+          } else {
+            boundaryAttemptRef.current = null;
+            setFocusedChannelIndex((prev) => Math.max(0, prev - 1));
+          }
         } else if (activePane === 'channels') {
           const current = focusedChannelIndexRef.current;
           if (current <= 0) {
-            // Move up into channel header sort bar!
             setActivePane('channel_header');
             setFocusedChannelHeaderIndex?.(0);
           } else {
@@ -340,7 +386,6 @@ export function useTVNavigation({
         } else if (activePane === 'categories') {
           const current = focusedCategoryIndexRef.current;
           if (current <= 0) {
-            // Move up into category header sort bar (row 2: sort pills)
             setActivePane('category_header');
             setFocusedCategoryHeaderIndex?.(2);
           } else {
@@ -350,7 +395,6 @@ export function useTVNavigation({
         } else if (activePane === 'category_header') {
           const current = focusedCategoryHeaderIndexRef.current;
           if (current >= 2) {
-            // Row 2 (2: playlist, 3: alpha, 4: count) -> move up to Row 1 (0: order, 1: search)
             const next = current === 4 ? 1 : 0;
             setFocusedCategoryHeaderIndex?.(next);
           }
@@ -376,6 +420,17 @@ export function useTVNavigation({
           if (current < maxIdx) {
             setFocusedRightPanelIndex?.((prev) => Math.min(maxIdx, prev + 1));
           }
+        } else if (activePane === 'epg_grid') {
+          if (channelCount <= 1) return;
+          const current = focusedChannelIndexRef.current;
+          if (current >= channelCount - 1) {
+            if (shouldAllowWrap('channels', 'bottom', e.repeat)) {
+              setFocusedChannelIndex(0);
+            }
+          } else {
+            boundaryAttemptRef.current = null;
+            setFocusedChannelIndex((prev) => prev + 1);
+          }
         } else if (activePane === 'channels') {
           if (channelCount <= 1) return;
           const current = focusedChannelIndexRef.current;
@@ -388,7 +443,6 @@ export function useTVNavigation({
             setFocusedChannelIndex((prev) => prev + 1);
           }
         } else if (activePane === 'channel_header') {
-          // Down from channel header enters channel list at index 0
           setActivePane('channels');
           setFocusedChannelIndex(0);
         } else if (activePane === 'categories') {
@@ -405,11 +459,9 @@ export function useTVNavigation({
         } else if (activePane === 'category_header') {
           const current = focusedCategoryHeaderIndexRef.current;
           if (current <= 1) {
-            // Row 1 -> Row 2 (0 -> 2: playlist, 1 -> 4: count)
             const next = current === 0 ? 2 : 4;
             setFocusedCategoryHeaderIndex?.(next);
           } else {
-            // Row 2 -> Enter category list at index 0
             setActivePane('categories');
             setFocusedCategoryIndex(0);
           }
@@ -430,6 +482,54 @@ export function useTVNavigation({
       if (isLeft) {
         e.preventDefault();
         boundaryAttemptRef.current = null;
+
+        // TiviMate EPG Timeline Navigation (activePane === 'epg_grid')
+        if (activePane === 'epg_grid') {
+          const curOffset = focusedProgramOffsetRef.current;
+
+          // 1. If currently on a future program (offset > 0), move left toward live (0)
+          if (curOffset > 0) {
+            setFocusedProgramOffset?.((prev) => prev - 1);
+            return;
+          }
+
+          // 2. If past programs are already unlocked, move further left into past programs (down to minProgramOffset)
+          if (isPastUnlockedRef.current && curOffset <= 0) {
+            if (curOffset > minProgramOffset) {
+              setFocusedProgramOffset?.((prev) => Math.max(minProgramOffset, prev - 1));
+            }
+            return;
+          }
+
+          // 3. Currently at live program (curOffset === 0) and past is locked:
+          // - Short press DPAD_LEFT (handled on keyup): returns to channel list and re-opens bouquets column!
+          // - Long press DPAD_LEFT (e.repeat or hold >= 500ms): unlocks past programs (Replay / Catchup) and steps into offset -1!
+          if (e.repeat) {
+            if (!leftLongPressFiredRef.current) {
+              clearLeftHoldTimer();
+              leftLongPressFiredRef.current = true;
+              leftDownInEpgRef.current = false;
+              setIsPastUnlocked?.(true);
+              setFocusedProgramOffset?.(-1);
+              onUnlockPastPrograms?.(focusedChannelIndexRef.current);
+            }
+            return;
+          }
+
+          leftDownInEpgRef.current = true;
+          leftLongPressFiredRef.current = false;
+          clearLeftHoldTimer();
+          leftHoldTimerRef.current = setTimeout(() => {
+            leftLongPressFiredRef.current = true;
+            leftDownInEpgRef.current = false;
+            leftHoldTimerRef.current = null;
+            setIsPastUnlocked?.(true);
+            setFocusedProgramOffset?.(-1);
+            onUnlockPastPrograms?.(focusedChannelIndexRef.current);
+          }, 500);
+          return;
+        }
+
         if (activePane === 'right_panel') {
           setActivePane('channels');
         } else if (activePane === 'channels') {
@@ -471,10 +571,23 @@ export function useTVNavigation({
           onSelectCategory(focusedCategoryIndexRef.current, true);
           setActivePane('channels');
         } else if (activePane === 'channels') {
-          // Move right from channel list into the Right EPG / Details / Replay Panel!
-          if (rightPanelButtonCount > 0) {
+          // In Live TV (TiviMate mode): DPAD_RIGHT collapses the bouquets list and enters the horizontal Program Timeline!
+          if (isLiveTimelineMode && channelCount > 0) {
+            setIsPastUnlocked?.(false);
+            setFocusedProgramOffset?.(0);
+            setActivePane('epg_grid');
+          } else if (rightPanelButtonCount > 0) {
             setFocusedRightPanelIndex?.(0);
             setActivePane('right_panel');
+          }
+        } else if (activePane === 'epg_grid') {
+          const curOffset = focusedProgramOffsetRef.current;
+          if (curOffset < maxProgramOffset) {
+            const nextOffset = curOffset + 1;
+            setFocusedProgramOffset?.(nextOffset);
+            if (nextOffset >= 0 && isPastUnlockedRef.current) {
+              setIsPastUnlocked?.(false);
+            }
           }
         } else if (activePane === 'category_header') {
           const current = focusedCategoryHeaderIndexRef.current;
@@ -493,6 +606,10 @@ export function useTVNavigation({
           const current = focusedChannelHeaderIndexRef.current;
           if (current < 2) {
             setFocusedChannelHeaderIndex?.((prev) => Math.min(2, prev + 1));
+          } else if (isLiveTimelineMode && channelCount > 0) {
+            setIsPastUnlocked?.(false);
+            setFocusedProgramOffset?.(0);
+            setActivePane('epg_grid');
           } else if (rightPanelButtonCount > 0) {
             setFocusedRightPanelIndex?.(0);
             setActivePane('right_panel');
@@ -505,14 +622,25 @@ export function useTVNavigation({
         boundaryAttemptRef.current = null;
         e.preventDefault();
 
-        // For 'channels' and 'categories': distinguish Short Press vs Long Press (450ms hold or key repeat)
-        // so holding OK on Android TV remote opens ContextMenuModal WITHOUT launching the channel!
+        // In EPG timeline grid: immediate press on OK launches the channel (if live/future) or Replay (if past)!
+        if (activePane === 'epg_grid') {
+          if (e.repeat) return;
+          if (onSelectTimelineProgram && channelCount > 0) {
+            onSelectTimelineProgram(focusedChannelIndexRef.current, focusedProgramOffsetRef.current);
+          }
+          return;
+        }
+
+        // For 'channels' and 'categories':
+        // Calibrated to 850ms hold so normal clicks NEVER accidentally trigger the context menu,
+        // and holding OK deliberately for ~0.85s reliably opens the ContextMenuModal!
         if (activePane === 'channels' || activePane === 'categories') {
           const itemCount = activePane === 'channels' ? channelCount : categoryCount;
           if (itemCount <= 0) return;
 
           if (e.repeat) {
-            if (!longPressFiredRef.current && onOpenContextMenu) {
+            const heldDuration = enterDownTimeRef.current > 0 ? Date.now() - enterDownTimeRef.current : 0;
+            if (heldDuration >= 800 && !longPressFiredRef.current && onOpenContextMenu) {
               clearEnterHoldTimer();
               longPressFiredRef.current = true;
               onOpenContextMenu(
@@ -522,8 +650,8 @@ export function useTVNavigation({
             return;
           }
 
-          // Initial keydown (!e.repeat): start 420ms hold timer
           enterDownPaneRef.current = activePane;
+          enterDownTimeRef.current = Date.now();
           longPressFiredRef.current = false;
           clearEnterHoldTimer();
           if (onOpenContextMenu) {
@@ -533,12 +661,11 @@ export function useTVNavigation({
               longPressFiredRef.current = true;
               enterHoldTimerRef.current = null;
               onOpenContextMenu(targetIdx);
-            }, 420);
+            }, 850);
           }
           return;
         }
 
-        // Immediate execution on keydown for non-long-press panes
         if (e.repeat) return;
 
         if (activePane === 'right_panel') {
@@ -578,7 +705,11 @@ export function useTVNavigation({
           onBack();
           return;
         }
-        if (activePane === 'right_panel') {
+        if (activePane === 'epg_grid') {
+          setIsPastUnlocked?.(false);
+          setFocusedProgramOffset?.(0);
+          setActivePane('channels');
+        } else if (activePane === 'right_panel') {
           setActivePane('channels');
         } else if (activePane === 'channels' || activePane === 'channel_header') {
           setActivePane('categories');
@@ -596,13 +727,20 @@ export function useTVNavigation({
       channelCount,
       categoryCount,
       rightPanelButtonCount,
+      isLiveTimelineMode,
+      minProgramOffset,
+      maxProgramOffset,
       setFocusedCategoryIndex,
       setFocusedChannelIndex,
       setFocusedMenuIndex,
       setFocusedCategoryHeaderIndex,
       setFocusedChannelHeaderIndex,
       setFocusedRightPanelIndex,
+      setFocusedProgramOffset,
+      setIsPastUnlocked,
       onSelectRightPanelAction,
+      onSelectTimelineProgram,
+      onUnlockPastPrograms,
       onOpenCatchup,
       onSelectCategory,
       onSelectChannel,
@@ -619,6 +757,7 @@ export function useTVNavigation({
       onBack,
       shouldAllowWrap,
       clearEnterHoldTimer,
+      clearLeftHoldTimer,
     ]
   );
 
@@ -637,6 +776,29 @@ export function useTVNavigation({
         keyCode === 23 ||
         keyCode === 66;
 
+      const isLeft =
+        key === 'ArrowLeft' ||
+        key === 'Left' ||
+        keyCode === 37 ||
+        keyCode === 21;
+
+      if (isLeft && activePane === 'epg_grid') {
+        clearLeftHoldTimer();
+        const wasDown = leftDownInEpgRef.current;
+        const wasLong = leftLongPressFiredRef.current;
+        leftDownInEpgRef.current = false;
+        leftLongPressFiredRef.current = false;
+
+        if (!wasLong && wasDown && focusedProgramOffsetRef.current === 0 && !isPastUnlockedRef.current) {
+          e.preventDefault();
+          // Short press Left from live program: return to channels list & re-show bouquets!
+          setIsPastUnlocked?.(false);
+          setFocusedProgramOffset?.(0);
+          setActivePane('channels');
+        }
+        return;
+      }
+
       if (!isEnter) return;
 
       clearEnterHoldTimer();
@@ -644,6 +806,7 @@ export function useTVNavigation({
       const wasLongPress = longPressFiredRef.current;
 
       enterDownPaneRef.current = null;
+      enterDownTimeRef.current = 0;
       longPressFiredRef.current = false;
 
       if (wasLongPress || !downPane) {
@@ -667,15 +830,21 @@ export function useTVNavigation({
       onSelectChannel,
       onSelectCategory,
       setActivePane,
+      setFocusedProgramOffset,
+      setIsPastUnlocked,
       clearEnterHoldTimer,
+      clearLeftHoldTimer,
     ]
   );
 
   useEffect(() => {
     if (enabled === false) {
       clearEnterHoldTimer();
+      clearLeftHoldTimer();
       enterDownPaneRef.current = null;
       longPressFiredRef.current = false;
+      leftDownInEpgRef.current = false;
+      leftLongPressFiredRef.current = false;
       return;
     }
     window.addEventListener('keydown', handleKeyDown);
@@ -684,8 +853,10 @@ export function useTVNavigation({
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('keyup', handleKeyUp);
       clearEnterHoldTimer();
+      clearLeftHoldTimer();
       if (numberTimerRef.current) clearTimeout(numberTimerRef.current);
     };
-  }, [enabled, handleKeyDown, handleKeyUp, clearEnterHoldTimer]);
+  }, [enabled, handleKeyDown, handleKeyUp, clearEnterHoldTimer, clearLeftHoldTimer]);
 }
+
 

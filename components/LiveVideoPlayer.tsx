@@ -240,6 +240,86 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
     }, 4500);
   };
 
+  // Capture DPAD & Back keys in fullscreen web player when OSD controls are visible:
+  // - Back hides the OSD controls instead of exiting fullscreen!
+  // - Up / Down do NOT zap channels while OSD controls are displayed!
+  useEffect(() => {
+    if (!isFullscreen) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const keyCode = (e as any).keyCode || 0;
+      const key = e.key || '';
+
+      const isBack =
+        key === 'Escape' ||
+        key === 'Backspace' ||
+        key === 'GoBack' ||
+        key === 'Back' ||
+        keyCode === 27 ||
+        keyCode === 4;
+
+      const isEnter =
+        key === 'Enter' ||
+        key === 'Select' ||
+        key === 'Ok' ||
+        keyCode === 13 ||
+        keyCode === 23 ||
+        keyCode === 66;
+
+      const isUp = key === 'ArrowUp' || key === 'Up' || keyCode === 38 || keyCode === 19;
+      const isDown = key === 'ArrowDown' || key === 'Down' || keyCode === 40 || keyCode === 20;
+      const isLeft = key === 'ArrowLeft' || key === 'Left' || keyCode === 37 || keyCode === 21;
+      const isRight = key === 'ArrowRight' || key === 'Right' || keyCode === 39 || keyCode === 22;
+
+      if (showOsd) {
+        if (isBack) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
+          setShowOsd(false);
+          return;
+        }
+        if (isUp || isDown) {
+          // Block channel zapping when OSD controls are visible!
+          e.preventDefault();
+          e.stopPropagation();
+          triggerOsd();
+          return;
+        }
+        if (isLeft && channel?.stream_type !== 'live') {
+          e.preventDefault();
+          e.stopPropagation();
+          skipTime(-10);
+          return;
+        }
+        if (isRight && channel?.stream_type !== 'live') {
+          e.preventDefault();
+          e.stopPropagation();
+          skipTime(10);
+          return;
+        }
+        if (isEnter) {
+          e.preventDefault();
+          e.stopPropagation();
+          if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
+          setShowOsd(false);
+          return;
+        }
+      } else {
+        // When OSD is hidden, pressing OK/Enter brings up the OSD controls
+        if (isEnter) {
+          e.preventDefault();
+          e.stopPropagation();
+          triggerOsd();
+          return;
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [isFullscreen, showOsd, channel]);
+
   const toggleMute = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (videoRef.current) {

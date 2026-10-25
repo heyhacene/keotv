@@ -606,14 +606,40 @@ public class PlayerActivity extends AppCompatActivity {
         osdContainer.setVisibility(View.VISIBLE);
         osdContainer.animate().cancel();
         osdContainer.setAlpha(1f);
-        osdHandler.postDelayed(hideOsdRunnable, 3500);
+        osdHandler.postDelayed(hideOsdRunnable, 3800);
+    }
+
+    private void hideOsdImmediately() {
+        osdHandler.removeCallbacks(hideOsdRunnable);
+        if (osdContainer != null) {
+            osdContainer.animate().cancel();
+            osdContainer.setAlpha(0f);
+            osdContainer.setVisibility(View.GONE);
+        }
+    }
+
+    private boolean isOsdVisible() {
+        return osdContainer != null && osdContainer.getVisibility() == View.VISIBLE && osdContainer.getAlpha() > 0.3f;
+    }
+
+    private boolean isControllerVisible() {
+        return playerView != null && playerView.isControllerFullyVisible();
     }
 
     private void toggleOsd() {
+        if (!isLive && playerView != null) {
+            if (isControllerVisible() || isOsdVisible()) {
+                playerView.hideController();
+                hideOsdImmediately();
+            } else {
+                playerView.showController();
+                showOsd();
+            }
+            return;
+        }
         if (osdContainer == null) return;
-        if (osdContainer.getVisibility() == View.VISIBLE && osdContainer.getAlpha() > 0.5f) {
-            osdHandler.removeCallbacks(hideOsdRunnable);
-            hideOsdRunnable.run();
+        if (isOsdVisible()) {
+            hideOsdImmediately();
         } else {
             showOsd();
         }
@@ -629,7 +655,25 @@ public class PlayerActivity extends AppCompatActivity {
             return;
         }
 
-        // Many Xtream panels only serve live streams as raw MPEG-TS: retry with .ts
+        // 1. If this is a Replay / Catchup stream (!isLive and multiple fallback URLs were provided),
+        // automatically advance to the next fallback URL format!
+        if (!isLive && pendingSeriesId == null && player.getMediaItemCount() > 1 && index < player.getMediaItemCount() - 1) {
+            boolean isReplayFallbackList = false;
+            if (current != null && current.mediaMetadata != null && current.mediaMetadata.title != null) {
+                String t = current.mediaMetadata.title.toString();
+                if (t.startsWith("[Replay]")) {
+                    isReplayFallbackList = true;
+                }
+            }
+            if (isReplayFallbackList) {
+                player.seekToDefaultPosition(index + 1);
+                player.prepare();
+                player.play();
+                return;
+            }
+        }
+
+        // 2. Many Xtream panels only serve live streams as raw MPEG-TS: retry with .ts (or .m3u8)
         if (current != null && current.localConfiguration != null) {
             String uri = current.localConfiguration.uri.toString();
             if (uri.endsWith(".m3u8") && !triedTsFallback.contains(index)) {
@@ -637,6 +681,17 @@ public class PlayerActivity extends AppCompatActivity {
                 String tsUri = uri.substring(0, uri.length() - 5) + ".ts";
                 MediaItem replacement = new MediaItem.Builder()
                         .setUri(tsUri)
+                        .setMediaMetadata(current.mediaMetadata)
+                        .build();
+                player.replaceMediaItem(index, replacement);
+                player.prepare();
+                player.play();
+                return;
+            } else if (uri.endsWith(".ts") && !triedTsFallback.contains(index)) {
+                triedTsFallback.add(index);
+                String m3u8Uri = uri.substring(0, uri.length() - 3) + ".m3u8";
+                MediaItem replacement = new MediaItem.Builder()
+                        .setUri(m3u8Uri)
                         .setMediaMetadata(current.mediaMetadata)
                         .build();
                 player.replaceMediaItem(index, replacement);
@@ -654,14 +709,14 @@ public class PlayerActivity extends AppCompatActivity {
             if (code == 401 || code == 403) {
                 details += " (accès refusé par le serveur : abonnement expiré ou nombre de connexions atteint)";
             } else if (code == 404) {
-                details += " (flux introuvable)";
+                details += " (flux ou archive replay introuvable sur le serveur)";
             } else if (code == 884 || code == 509 || code == 429) {
                 details += " (trop de connexions simultanées)";
             }
         } else if (cause != null && cause.getMessage() != null) {
             details += " - " + cause.getMessage();
         }
-        errorView.setText("Impossible de lire ce flux\n" + details + "\n\nAppuyez sur OK pour réessayer");
+        errorView.setText("Impossible de lire ce flux\n" + details + "\n\nAppuyez sur OK pour réessayer ou Retour pour quitter");
         errorView.setVisibility(View.VISIBLE);
     }
 
@@ -670,7 +725,22 @@ public class PlayerActivity extends AppCompatActivity {
         if (player != null && event.getAction() == KeyEvent.ACTION_DOWN) {
             int key = event.getKeyCode();
 
-            // When Next Episode overlay is visible:
+            // 0. If error screen is displayed, OK retries and Back exits
+            if (errorView != null && errorView.getVisibility() == View.VISIBLE) {
+                if (key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                    errorView.setVisibility(View.GONE);
+                    player.seekToDefaultPosition(0);
+                    player.prepare();
+                    player.play();
+                    return true;
+                }
+                if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
+                    finish();
+                    return true;
+                }
+            }
+
+            // 1. When Next Episode overlay is visible:
             if (isCountdownActive && nextEpisodeCard != null && nextEpisodeCard.getVisibility() == View.VISIBLE) {
                 if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
                     dismissNextEpisodeCountdown();
@@ -698,13 +768,13 @@ public class PlayerActivity extends AppCompatActivity {
                 }
             }
 
-            // When Skip Intro is visible:
+            // 2. When Skip Intro is visible:
             if (skipIntroBtn != null && skipIntroBtn.getVisibility() == View.VISIBLE) {
                 if (key == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || key == KeyEvent.KEYCODE_BUTTON_R1 || key == KeyEvent.KEYCODE_PROG_RED) {
                     performSkipIntro();
                     return true;
                 }
-                if (key == KeyEvent.KEYCODE_DPAD_RIGHT && !skipIntroBtn.isFocused()) {
+                if (key == KeyEvent.KEYCODE_DPAD_RIGHT && !skipIntroBtn.isFocused() && !isControllerVisible()) {
                     skipIntroBtn.requestFocus();
                     return true;
                 }
@@ -714,8 +784,46 @@ public class PlayerActivity extends AppCompatActivity {
                 }
             }
 
-            // Zapping to Previous Channel / Episode (Up, Channel Up, Page Up)
-            if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_CHANNEL_UP || key == KeyEvent.KEYCODE_PAGE_UP) {
+            // 3. CRITICAL: When player controls (Controller or OSD) are visible:
+            // - BACK button MUST hide the controls instead of exiting the player!
+            // - DPAD buttons (UP / DOWN / LEFT / RIGHT) MUST ONLY control the player UI (or do nothing in OSD), NEVER change channel!
+            boolean controlsVisible = isControllerVisible() || isOsdVisible();
+            if (controlsVisible) {
+                if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
+                    if (playerView != null) {
+                        playerView.hideController();
+                    }
+                    hideOsdImmediately();
+                    return true;
+                }
+
+                // If the full transport controller (VOD / Series / Replay) is visible, let ExoPlayer's PlayerView handle all DPAD navigation!
+                if (isControllerVisible()) {
+                    showOsd(); // Keep top title bar synced while interacting with controls
+                    return super.dispatchKeyEvent(event);
+                }
+
+                // If Live TV OSD banner is visible:
+                // - OK / Center hides the OSD banner
+                // - UP / DOWN do NOT zap channels while OSD is shown unless user uses dedicated CHANNEL_UP / CHANNEL_DOWN hardware keys!
+                if (key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                    hideOsdImmediately();
+                    return true;
+                }
+                if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN || key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    if (!isLive && playerView != null) {
+                        playerView.showController();
+                        return super.dispatchKeyEvent(event);
+                    }
+                    // In Live TV when OSD is visible, keep OSD alive or let user dismiss with Back/OK without accidental channel change
+                    showOsd();
+                    return true;
+                }
+            }
+
+            // 4. Dedicated Channel Up / Channel Down keys (always zap in Live TV)
+            // Or DPAD_UP / DPAD_DOWN when controls are HIDDEN!
+            if (isLive && (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_CHANNEL_UP || key == KeyEvent.KEYCODE_PAGE_UP)) {
                 if (player.hasPreviousMediaItem()) {
                     player.seekToPreviousMediaItem();
                 } else if (player.getMediaItemCount() > 0) {
@@ -726,8 +834,7 @@ public class PlayerActivity extends AppCompatActivity {
                 return true;
             }
 
-            // Zapping to Next Channel / Episode (Down, Channel Down, Page Down)
-            if (key == KeyEvent.KEYCODE_DPAD_DOWN || key == KeyEvent.KEYCODE_CHANNEL_DOWN || key == KeyEvent.KEYCODE_PAGE_DOWN) {
+            if (isLive && (key == KeyEvent.KEYCODE_DPAD_DOWN || key == KeyEvent.KEYCODE_CHANNEL_DOWN || key == KeyEvent.KEYCODE_PAGE_DOWN)) {
                 if (player.hasNextMediaItem()) {
                     player.seekToNextMediaItem();
                 } else if (player.getMediaItemCount() > 0) {
@@ -738,39 +845,51 @@ public class PlayerActivity extends AppCompatActivity {
                 return true;
             }
 
-            // Toggle OSD Info Banner (OK / Enter / Center)
+            // 5. In VOD / Replay / Series when controls are hidden: pressing OK, UP, DOWN shows the player controls!
+            if (!isLive && (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN || key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER)) {
+                if (playerView != null) {
+                    playerView.showController();
+                }
+                showOsd();
+                return true;
+            }
+
+            // 6. Toggle OSD Info Banner in Live TV (OK / Enter / Center when hidden)
             if (key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER) {
                 toggleOsd();
                 return true;
             }
 
-            // Fast Forward / Rewind for VODs
+            // 7. Fast Forward / Rewind for VOD & Replay when controls are hidden
             if (!isLive) {
                 if (key == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
                     long currentPos = player.getCurrentPosition();
                     player.seekTo(currentPos + 10000);
                     showOsd();
+                    if (playerView != null) playerView.showController();
                     return true;
                 }
                 if (key == KeyEvent.KEYCODE_MEDIA_REWIND || key == KeyEvent.KEYCODE_DPAD_LEFT) {
                     long currentPos = player.getCurrentPosition();
                     player.seekTo(Math.max(0, currentPos - 10000));
                     showOsd();
+                    if (playerView != null) playerView.showController();
                     return true;
                 }
             }
 
-            // Toggle Pause/Play on Media buttons
+            // 8. Toggle Pause/Play on dedicated Media buttons
             if (key == KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE || key == KeyEvent.KEYCODE_MEDIA_PLAY || key == KeyEvent.KEYCODE_MEDIA_PAUSE) {
                 if (player.isPlaying()) {
                     player.pause();
                 } else {
                     player.play();
                 }
+                showOsd();
                 return true;
             }
 
-            // Back button returns to TV Guide
+            // 9. Back button (when controls are already hidden) returns to TV Guide
             if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
                 finish();
                 return true;

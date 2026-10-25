@@ -1,15 +1,52 @@
 import { db } from './db';
 import { EpgProgram } from '@/types/iptv';
 import { fetchHttp, toArray } from './iptv-service';
+import { CatchupService } from './catchup-service';
 
 /**
  * Service for fetching, storing, and retrieving EPG data
- * Handles Xtream Codes Short EPG and XMLTV sources.
+ * Handles Xtream Codes Short EPG, Full Simple Data Table, and XMLTV sources.
  */
 export class EPGService {
+  private static decodeBase64IfNeeded(raw: any): string {
+    if (!raw || typeof raw !== 'string') return '';
+    const trimmed = raw.trim();
+    // Xtream panels almost always Base64-encode EPG titles and descriptions
+    if (/^[A-Za-z0-9+/=]+$/.test(trimmed) && trimmed.length >= 4 && trimmed.length % 4 === 0) {
+      try {
+        const binary = atob(trimmed);
+        try {
+          return decodeURIComponent(escape(binary));
+        } catch {
+          return binary;
+        }
+      } catch {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+
+  private static parseTimestampMs(rawTs: any, rawDateStr: any, fallbackMs: number): number {
+    if (rawTs !== undefined && rawTs !== null && rawTs !== '') {
+      const n = Number(rawTs);
+      if (!isNaN(n) && n > 0) {
+        return n > 10000000000 ? n : n * 1000;
+      }
+    }
+    if (rawDateStr && typeof rawDateStr === 'string') {
+      // Handle "YYYY-MM-DD HH:mm:ss"
+      const normalized = rawDateStr.trim().replace(' ', 'T');
+      const parsed = new Date(normalized).getTime();
+      if (!isNaN(parsed)) return parsed;
+    }
+    return fallbackMs;
+  }
+
   /**
    * Fetches EPG from Xtream API for a specific stream/channel
-   * action=get_short_epg&stream_id=...
+   * Uses `get_simple_data_table` first (includes past catchup + current + future timeline),
+   * and falls back to `get_short_epg` if needed.
    */
   static async fetchXtreamShortEpg(params: {
     serverUrl: string;
@@ -20,60 +57,15 @@ export class EPGService {
   }): Promise<EpgProgram[]> {
     try {
       const baseUrl = params.serverUrl.endsWith('/') ? params.serverUrl.slice(0, -1) : params.serverUrl;
-      const url = `${baseUrl}/player_api.php?username=${encodeURIComponent(params.username)}&password=${encodeURIComponent(params.password)}&action=get_short_epg&stream_id=${params.streamId}&limit=10`;
+      const cleanStreamId = String(params.streamId).replace(/^ch_xtream_(?:live|vod|series)_/, '').trim();
+      const url = `${baseUrl}/player_api.php?username=${encodeURIComponent(params.username)}&password=${encodeURIComponent(params.password)}&action=get_short_epg&stream_id=${cleanStreamId}&limit=12`;
 
       const res = await fetchHttp(url, 'json');
       const listings = toArray(res?.epg_listings || res);
 
       if (listings.length === 0) return [];
 
-      const programs: EpgProgram[] = listings.map((item: any, idx: number) => {
-        // Base64 decode title if needed
-        let title = item.title || 'Programme';
-        try {
-          if (typeof title === 'string' && /^[A-Za-z0-9+/=]+$/.test(title) && title.length > 8) {
-            title = decodeURIComponent(escape(atob(title)));
-          }
-        } catch {}
-
-        let description = item.description || '';
-        try {
-          if (typeof description === 'string' && /^[A-Za-z0-9+/=]+$/.test(description) && description.length > 8) {
-            description = decodeURIComponent(escape(atob(description)));
-          }
-        } catch {}
-
-        const nowMs = Date.now();
-        const startMs = item.start_timestamp ? Number(item.start_timestamp) * 1000 : (item.start ? new Date(item.start).getTime() : nowMs);
-        const endMs = item.stop_timestamp ? Number(item.stop_timestamp) * 1000 : (item.end ? new Date(item.end).getTime() : startMs + 3600000);
-        const startIso = new Date(startMs).toISOString();
-        const endIso = new Date(endMs).toISOString();
-        const durationMin = Math.max(1, Math.round((endMs - startMs) / 60000));
-
-        // Generate catchup URL if program has finished and is within replay window (e.g. last 7 days)
-        const isPast = endMs < nowMs;
-        const startTimestampSec = Math.floor(startMs / 1000);
-        let catchupUrl: string | undefined = undefined;
-        let hasCatchup = false;
-
-        if (isPast && params.serverUrl && params.username && params.password && params.streamId) {
-          const cleanServer = params.serverUrl.endsWith('/') ? params.serverUrl.slice(0, -1) : params.serverUrl;
-          catchupUrl = `${cleanServer}/timeshift/${encodeURIComponent(params.username)}/${encodeURIComponent(params.password)}/${durationMin}/${startTimestampSec}/${params.streamId}.ts`;
-          hasCatchup = true;
-        }
-
-        return {
-          id: `epg_${params.channelId}_${item.id || idx}_${startTimestampSec}`,
-          channel_id: params.channelId,
-          title: title.trim(),
-          description: description.trim(),
-          start: startIso,
-          end: endIso,
-          duration_min: durationMin,
-          has_catchup: hasCatchup,
-          catchup_url: catchupUrl,
-        };
-      });
+      const programs = this.parseListings(listings, { ...params, streamId: cleanStreamId });
 
       // Save to IndexedDB
       if (programs.length > 0) {
@@ -134,21 +126,30 @@ export class EPGService {
   }): Promise<EpgProgram[]> {
     try {
       const baseUrl = params.serverUrl.endsWith('/') ? params.serverUrl.slice(0, -1) : params.serverUrl;
-      const url = `${baseUrl}/player_api.php?username=${encodeURIComponent(params.username)}&password=${encodeURIComponent(params.password)}&action=get_simple_data_table&stream_id=${params.streamId}`;
+      const cleanStreamId = String(params.streamId).replace(/^ch_xtream_(?:live|vod|series)_/, '').trim();
+      const url = `${baseUrl}/player_api.php?username=${encodeURIComponent(params.username)}&password=${encodeURIComponent(params.password)}&action=get_simple_data_table&stream_id=${cleanStreamId}`;
 
       const res = await fetchHttp(url, 'json');
       const listings = toArray(res?.epg_listings || res);
 
       if (listings.length === 0) {
-        // Fallback to short EPG with limit=30
-        const shortUrl = `${baseUrl}/player_api.php?username=${encodeURIComponent(params.username)}&password=${encodeURIComponent(params.password)}&action=get_short_epg&stream_id=${params.streamId}&limit=30`;
+        // Fallback to short EPG with limit=50
+        const shortUrl = `${baseUrl}/player_api.php?username=${encodeURIComponent(params.username)}&password=${encodeURIComponent(params.password)}&action=get_short_epg&stream_id=${cleanStreamId}&limit=50`;
         const shortRes = await fetchHttp(shortUrl, 'json');
         const shortListings = toArray(shortRes?.epg_listings || shortRes);
         if (shortListings.length === 0) return [];
-        return this.parseListings(shortListings, params);
+        const parsedShort = this.parseListings(shortListings, { ...params, streamId: cleanStreamId });
+        if (parsedShort.length > 0) {
+          try { await db.epg_programs.bulkPut(parsedShort); } catch {}
+        }
+        return parsedShort;
       }
 
-      return this.parseListings(listings, params);
+      const parsed = this.parseListings(listings, { ...params, streamId: cleanStreamId });
+      if (parsed.length > 0) {
+        try { await db.epg_programs.bulkPut(parsed); } catch {}
+      }
+      return parsed;
     } catch (err) {
       console.warn('Failed to fetch full EPG for stream', params.streamId, err);
       return [];
@@ -160,36 +161,33 @@ export class EPGService {
     params: { serverUrl: string; username: string; password: string; streamId: string | number; channelId: string }
   ): EpgProgram[] {
     const nowMs = Date.now();
-    return listings.map((item: any, idx: number) => {
-      let title = item.title || 'Programme';
-      try {
-        if (typeof title === 'string' && /^[A-Za-z0-9+/=]+$/.test(title) && title.length > 8) {
-          title = decodeURIComponent(escape(atob(title)));
-        }
-      } catch {}
+    const mapped = listings.map((item: any, idx: number) => {
+      const title = this.decodeBase64IfNeeded(item.title) || 'Programme';
+      const description = this.decodeBase64IfNeeded(item.description) || '';
 
-      let description = item.description || '';
-      try {
-        if (typeof description === 'string' && /^[A-Za-z0-9+/=]+$/.test(description) && description.length > 8) {
-          description = decodeURIComponent(escape(atob(description)));
-        }
-      } catch {}
-
-      const startMs = item.start_timestamp ? Number(item.start_timestamp) * 1000 : (item.start ? new Date(item.start).getTime() : nowMs);
-      const endMs = item.stop_timestamp ? Number(item.stop_timestamp) * 1000 : (item.end ? new Date(item.end).getTime() : startMs + 3600000);
+      const startMs = this.parseTimestampMs(item.start_timestamp, item.start, nowMs);
+      const endMs = this.parseTimestampMs(item.stop_timestamp, item.end || item.stop, startMs + 3600000);
       const startIso = new Date(startMs).toISOString();
       const endIso = new Date(endMs).toISOString();
       const durationMin = Math.max(1, Math.round((endMs - startMs) / 60000));
 
-      const isPast = endMs < nowMs;
+      const isPast = endMs <= nowMs;
+      const hasArchiveFlag = Number(item.has_archive) === 1 || isPast;
       const startTimestampSec = Math.floor(startMs / 1000);
       let catchupUrl: string | undefined = undefined;
       let hasCatchup = false;
 
-      if (isPast && params.serverUrl && params.username && params.password && params.streamId) {
-        const cleanServer = params.serverUrl.endsWith('/') ? params.serverUrl.slice(0, -1) : params.serverUrl;
-        catchupUrl = `${cleanServer}/timeshift/${encodeURIComponent(params.username)}/${encodeURIComponent(params.password)}/${durationMin}/${startTimestampSec}/${params.streamId}.ts`;
-        hasCatchup = true;
+      if ((isPast || hasArchiveFlag) && params.serverUrl && params.username && params.password && params.streamId) {
+        catchupUrl =
+          CatchupService.generateCatchupUrl({
+            serverUrl: params.serverUrl,
+            username: params.username,
+            password: params.password,
+            streamId: params.streamId,
+            startTimestamp: startTimestampSec,
+            durationMinutes: durationMin,
+          }) || undefined;
+        hasCatchup = Boolean(catchupUrl);
       }
 
       return {
@@ -204,5 +202,10 @@ export class EPGService {
         catchup_url: catchupUrl,
       };
     });
+
+    // Sort strictly in chronological order
+    mapped.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    return mapped;
   }
 }
+
