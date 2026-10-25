@@ -43,18 +43,35 @@ export class EPGService {
           }
         } catch {}
 
-        const startIso = item.start ? new Date(item.start).toISOString() : new Date().toISOString();
-        const endIso = item.end ? new Date(item.end).toISOString() : new Date(Date.now() + 3600000).toISOString();
-        const durationMin = Math.max(1, Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000));
+        const nowMs = Date.now();
+        const startMs = item.start_timestamp ? Number(item.start_timestamp) * 1000 : (item.start ? new Date(item.start).getTime() : nowMs);
+        const endMs = item.stop_timestamp ? Number(item.stop_timestamp) * 1000 : (item.end ? new Date(item.end).getTime() : startMs + 3600000);
+        const startIso = new Date(startMs).toISOString();
+        const endIso = new Date(endMs).toISOString();
+        const durationMin = Math.max(1, Math.round((endMs - startMs) / 60000));
+
+        // Generate catchup URL if program has finished and is within replay window (e.g. last 7 days)
+        const isPast = endMs < nowMs;
+        const startTimestampSec = Math.floor(startMs / 1000);
+        let catchupUrl: string | undefined = undefined;
+        let hasCatchup = false;
+
+        if (isPast && params.serverUrl && params.username && params.password && params.streamId) {
+          const cleanServer = params.serverUrl.endsWith('/') ? params.serverUrl.slice(0, -1) : params.serverUrl;
+          catchupUrl = `${cleanServer}/timeshift/${encodeURIComponent(params.username)}/${encodeURIComponent(params.password)}/${durationMin}/${startTimestampSec}/${params.streamId}.ts`;
+          hasCatchup = true;
+        }
 
         return {
-          id: `epg_${params.channelId}_${item.id || idx}_${item.start_timestamp || Date.now()}`,
+          id: `epg_${params.channelId}_${item.id || idx}_${startTimestampSec}`,
           channel_id: params.channelId,
           title: title.trim(),
           description: description.trim(),
           start: startIso,
           end: endIso,
           duration_min: durationMin,
+          has_catchup: hasCatchup,
+          catchup_url: catchupUrl,
         };
       });
 

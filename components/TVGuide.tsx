@@ -1086,6 +1086,14 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                   </div>
                 )}
 
+                {/* Replay / Catchup badge or button */}
+                {activeChannel?.has_archive && (
+                  <div className="p-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center space-x-2 text-[11px] text-emerald-300">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse flex-shrink-0" />
+                    <span>Replay & Retour arrière disponibles sur cette chaîne</span>
+                  </div>
+                )}
+
                 <button
                   type="button"
                   onClick={onToggleFullscreen}

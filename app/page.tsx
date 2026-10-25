@@ -37,6 +37,8 @@ import {
   shouldExcludeChannelByPrefix,
 } from '@/lib/iptv-service';
 import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
+import { EPGService } from '@/lib/epg-service';
+import { CatchupService } from '@/lib/catchup-service';
 
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
@@ -1379,9 +1381,52 @@ export default function KeoTVHome() {
 
       setIsStopped(false);
       setActiveChannel(targetChannel);
-      const epg = getMockEpgForChannel(targetChannel.id);
-      setCurrentEpg(epg.current);
-      setNextEpg(epg.next);
+
+      // 1. Initial immediate EPG display (Mock fallback or existing Dexie)
+      const mockEpg = getMockEpgForChannel(targetChannel.id);
+      setCurrentEpg(mockEpg.current);
+      setNextEpg(mockEpg.next);
+
+      // 2. Fetch real live EPG and Catchup from Xtream if available
+      (async () => {
+        try {
+          const pl = (await db.playlists.toArray()).find((p) => p.type === 'xtream' && p.username && p.password);
+          let serverUrl = pl?.server_url || '';
+          let username = pl?.username || '';
+          let password = pl?.password || '';
+
+          if (!serverUrl) {
+            const saved = await getSetting<any>('last_xtream_config', null);
+            if (saved?.server_url && saved?.username && saved?.password) {
+              serverUrl = saved.server_url;
+              username = saved.username;
+              password = saved.password;
+            }
+          }
+
+          const streamId = targetChannel.stream_id || (targetChannel.id.match(/\d+$/) ? targetChannel.id.match(/\d+$/)![0] : null);
+
+          if (serverUrl && username && password && streamId) {
+            const realPrograms = await EPGService.fetchXtreamShortEpg({
+              serverUrl,
+              username,
+              password,
+              streamId,
+              channelId: targetChannel.id,
+            });
+
+            if (realPrograms.length > 0) {
+              const now = new Date().toISOString();
+              const curr = realPrograms.find((p) => p.start <= now && p.end > now) || realPrograms[0];
+              const next = realPrograms.find((p) => p.start >= (curr ? curr.end : now)) || (realPrograms.length > 1 ? realPrograms[1] : null);
+              setCurrentEpg(curr || null);
+              setNextEpg(next || null);
+            }
+          }
+        } catch (epgErr) {
+          console.warn('Live EPG fetch non-fatal error:', epgErr);
+        }
+      })();
 
       // ---- SÉRIES: A click on a series opens its dedicated page with seasons and all episodes! ----
       if (targetChannel.stream_type === 'series' || targetChannel.type === 'series' || (activeSection === 'series' && targetChannel.stream_type !== 'live')) {

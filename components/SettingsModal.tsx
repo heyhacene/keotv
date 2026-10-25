@@ -105,8 +105,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleShowFavoritesCategory,
   excludedPrefixes = [],
   onUpdateExcludedPrefixes,
-}) => {
   const [activeTab, setActiveTab] = useState<'playlists' | 'controls' | 'categories' | 'parental' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
+  const [localPlaylists, setLocalPlaylists] = useState<PlaylistConfig[]>(playlists);
+
+  useEffect(() => {
+    setLocalPlaylists(playlists);
+  }, [playlists]);
+
   const [editingPrefixInput, setEditingPrefixInput] = useState<string>(excludedPrefixes.join(', '));
 
   useEffect(() => {
@@ -464,12 +469,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             setContentFocusIndex(nextIndex);
             items[nextIndex]?.focus();
             items[nextIndex]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-          } else if (contentFocusIndex < items.length - 1) {
-            // Fallback: move to next item
-            const fallback = contentFocusIndex + 1;
-            setContentFocusIndex(fallback);
-            items[fallback]?.focus();
-            items[fallback]?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
           }
           return;
         }
@@ -592,11 +591,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           </button>
         </div>
 
-        {/* Main Content Area: Split-Screen Master-Detail */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Master Sidebar (Vertical Navigation Tabs) */}
-          <div className="w-72 md:w-80 bg-tv-card/60 border-r border-tv-border/80 flex flex-col p-4 space-y-1.5 overflow-y-auto flex-shrink-0">
-            <div className="px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
+        {/* Main Content Area: Split-Screen Master-Detail (Responsive for Mobile & TV) */}
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
+          {/* Master Navigation Bar (Horizontal on Mobile, Vertical Master Sidebar on Desktop/TV) */}
+          <div className="w-full md:w-80 bg-tv-card/60 border-b md:border-b-0 md:border-r border-tv-border/80 flex flex-row md:flex-col p-2.5 md:p-4 space-x-1.5 md:space-x-0 md:space-y-1.5 overflow-x-auto md:overflow-y-auto flex-shrink-0">
+            <div className="hidden md:block px-3 py-2 text-[11px] font-bold uppercase tracking-wider text-slate-400">
               Rubriques
             </div>
             {TABS.map((tab, idx) => {
@@ -613,7 +612,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     setSelectedTabNavIndex(idx);
                     setFocusArea('tabs');
                   }}
-                  className={`w-full flex items-center space-x-3.5 px-4 py-3.5 rounded-xl text-xs font-bold tracking-wide transition text-left focus:outline-none ${
+                  className={`flex items-center space-x-2 md:space-x-3.5 px-3 py-2.5 md:px-4 md:py-3.5 rounded-xl text-xs font-bold tracking-wide transition text-left flex-shrink-0 md:w-full focus:outline-none ${
                     isTabFocused
                       ? 'bg-tv-focus text-white ring-4 ring-white shadow-2xl scale-[1.02] z-10'
                       : isTabActive
@@ -621,16 +620,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       : 'text-slate-300 hover:text-white hover:bg-white/5 border border-transparent'
                   }`}
                 >
-                  <Icon className={`w-5 h-5 flex-shrink-0 ${isTabFocused ? 'text-white' : isTabActive ? 'text-tv-accent' : 'text-slate-400'}`} />
-                  <span className="truncate flex-1">{tab.label}</span>
+                  <Icon className={`w-4 h-4 md:w-5 md:h-5 flex-shrink-0 ${isTabFocused ? 'text-white' : isTabActive ? 'text-tv-accent' : 'text-slate-400'}`} />
+                  <span className="whitespace-nowrap md:truncate flex-1">{tab.label}</span>
                   {isTabActive && (
-                    <span className="w-2 h-2 rounded-full bg-tv-accent flex-shrink-0 animate-pulse" />
+                    <span className="w-1.5 h-1.5 md:w-2 md:h-2 rounded-full bg-tv-accent flex-shrink-0 animate-pulse ml-1" />
                   )}
                 </button>
               );
             })}
 
-            <div className="pt-4 mt-auto space-y-2">
+            <div className="hidden md:block pt-4 mt-auto space-y-2">
               <button
                 id={`settings-tab-${TABS.length}`}
                 onClick={onClose}
@@ -681,20 +680,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
               {/* Playlists List */}
               <div className="space-y-2.5">
-                {playlists.length === 0 ? (
+                {localPlaylists.length === 0 ? (
                   <div className="p-6 bg-tv-card/40 rounded-xl border border-tv-border text-center space-y-3">
                     <p className="text-xs text-slate-400">
                       Aucune playlist configurée pour le moment.
                     </p>
                     <button
-                      onClick={onRestoreDemoPlaylist}
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          await onRestoreDemoPlaylist();
+                        } catch (err) {
+                          console.error('Failed to restore demo playlist:', err);
+                        }
+                      }}
                       className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                     >
                       Restaurer la playlist de test gratuite
                     </button>
                   </div>
                 ) : (
-                  playlists.map((pl) => (
+                  localPlaylists.map((pl) => (
                     <div
                       key={pl.id}
                       className="p-4 bg-tv-card/70 rounded-xl border border-tv-border/80 flex items-center justify-between transition hover:border-tv-border"
@@ -721,6 +727,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               e.stopPropagation();
                               const targetId = pl.id;
                               setDeletingId(null);
+                              // Optimistic UI update immediately
+                              setLocalPlaylists((prev) => prev.filter((p) => p.id !== targetId));
                               try {
                                 await onDeletePlaylist(targetId);
                               } catch (err) {

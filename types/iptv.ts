@@ -15,6 +15,9 @@ export interface Channel {
   is_adult?: boolean;
   is_separator?: boolean;
   type?: string;
+  stream_id?: number | string;
+  has_archive?: boolean;
+  archive_days?: number;
 }
 
 export interface Category {
@@ -38,6 +41,8 @@ export interface EpgProgram {
   duration_min: number;
   category?: string;
   rating?: string;
+  has_catchup?: boolean;
+  catchup_url?: string;
 }
 
 export interface PlaylistConfig {

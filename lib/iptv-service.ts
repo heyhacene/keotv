@@ -1011,6 +1011,9 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
     const itemCatId = item.category_id ? String(item.category_id).trim() : rawCatId;
 
     // Prefix group_id with stream type to prevent any primary key collisions
+    const hasArchive = Boolean(item.tv_archive === 1 || item.tv_archive === '1' || item.stream_type === 'live' && item.direct_source);
+    const archiveDays = Number(item.tv_archive_duration || item.archive_days || 0);
+
     channels.push({
       id: `ch_xtream_${type}_${streamId}`,
       num: chNum,
@@ -1026,6 +1029,9 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
       custom_order: chNum,
       resolution: detectResolution(itemName),
       is_separator: isSeparatorChannel({ name: itemName, stream_url: streamUrl } as any),
+      stream_id: streamId,
+      has_archive: hasArchive,
+      archive_days: archiveDays,
     });
   }
 

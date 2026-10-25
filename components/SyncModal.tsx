@@ -85,6 +85,85 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     }
   }, [isOpen, getFocusableElements]);
 
+  const [focusIndex, setFocusIndex] = useState<number>(0);
+
+  // Sync visual TV focus attribute onto active element
+  useEffect(() => {
+    if (!isOpen) return;
+    const els = getFocusableElements();
+    els.forEach((el, idx) => {
+      if (idx === focusIndex) {
+        el.setAttribute('data-tv-focused', 'true');
+        el.focus();
+        el.scrollIntoView({ block: 'nearest', behavior: 'auto' });
+      } else {
+        el.removeAttribute('data-tv-focused');
+      }
+    });
+  }, [isOpen, focusIndex, getFocusableElements, mode, activeUser]);
+
+  // Spatial navigation helper for SyncModal
+  const findNextSyncElement = useCallback(
+    (direction: 'down' | 'up' | 'left' | 'right', currentIndex: number): number => {
+      const items = getFocusableElements();
+      if (items.length <= 1 || currentIndex < 0 || currentIndex >= items.length) return currentIndex;
+
+      const currentRect = items[currentIndex].getBoundingClientRect();
+      const currentCenterX = currentRect.left + currentRect.width / 2;
+      const currentCenterY = currentRect.top + currentRect.height / 2;
+
+      let bestIndex = currentIndex;
+      let minDistance = Infinity;
+
+      for (let i = 0; i < items.length; i++) {
+        if (i === currentIndex) continue;
+        const rect = items[i].getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+
+        const deltaY = centerY - currentCenterY;
+        const deltaX = centerX - currentCenterX;
+
+        if (direction === 'down') {
+          if (rect.top >= currentRect.bottom - 4 || deltaY > 15) {
+            const distance = Math.abs(deltaY) * 1.5 + Math.abs(deltaX);
+            if (distance < minDistance) {
+              minDistance = distance;
+              bestIndex = i;
+            }
+          }
+        } else if (direction === 'up') {
+          if (rect.bottom <= currentRect.top + 4 || deltaY < -15) {
+            const distance = Math.abs(deltaY) * 1.5 + Math.abs(deltaX);
+            if (distance < minDistance) {
+              minDistance = distance;
+              bestIndex = i;
+            }
+          }
+        } else if (direction === 'right') {
+          if (rect.left >= currentRect.right - 4 && Math.abs(deltaY) < Math.max(rect.height, currentRect.height)) {
+            const distance = Math.abs(deltaX) + Math.abs(deltaY) * 2;
+            if (distance < minDistance) {
+              minDistance = distance;
+              bestIndex = i;
+            }
+          }
+        } else if (direction === 'left') {
+          if (rect.right <= currentRect.left + 4 && Math.abs(deltaY) < Math.max(rect.height, currentRect.height)) {
+            const distance = Math.abs(deltaX) + Math.abs(deltaY) * 2;
+            if (distance < minDistance) {
+              minDistance = distance;
+              bestIndex = i;
+            }
+          }
+        }
+      }
+
+      return bestIndex;
+    },
+    [getFocusableElements]
+  );
+
   // Full TV Remote D-Pad Navigation inside SyncModal
   useEffect(() => {
     if (!isOpen) return;
@@ -148,28 +227,50 @@ export const SyncModal: React.FC<SyncModalProps> = ({
         return;
       }
 
-      // Handle D-Pad movement across focusable buttons/inputs
-      if (isUp || isDown || isLeft || isRight) {
-        const els = getFocusableElements();
-        if (els.length === 0) return;
+      const els = getFocusableElements();
+      if (els.length === 0) return;
 
-        const currentIndex = target ? els.indexOf(target) : -1;
+      const currentIdx = target ? els.indexOf(target) : focusIndex;
+      const validCurrent = currentIdx >= 0 ? currentIdx : 0;
 
-        if (isDown || (isRight && !isInputFocused)) {
-          e.preventDefault();
-          const nextIndex = currentIndex < els.length - 1 ? currentIndex + 1 : 0;
-          els[nextIndex].focus();
-          els[nextIndex].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-          return;
+      if (isDown) {
+        e.preventDefault();
+        const next = findNextSyncElement('down', validCurrent);
+        if (next !== validCurrent) {
+          setFocusIndex(next);
+        } else if (validCurrent < els.length - 1) {
+          setFocusIndex(validCurrent + 1);
         }
+        return;
+      }
 
-        if (isUp || (isLeft && !isInputFocused)) {
-          e.preventDefault();
-          const prevIndex = currentIndex > 0 ? currentIndex - 1 : els.length - 1;
-          els[prevIndex].focus();
-          els[prevIndex].scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-          return;
+      if (isUp) {
+        e.preventDefault();
+        const prev = findNextSyncElement('up', validCurrent);
+        if (prev !== validCurrent) {
+          setFocusIndex(prev);
+        } else if (validCurrent > 0) {
+          setFocusIndex(validCurrent - 1);
         }
+        return;
+      }
+
+      if (isRight && !isInputFocused) {
+        e.preventDefault();
+        const rightNext = findNextSyncElement('right', validCurrent);
+        if (rightNext !== validCurrent) {
+          setFocusIndex(rightNext);
+        }
+        return;
+      }
+
+      if (isLeft && !isInputFocused) {
+        e.preventDefault();
+        const leftPrev = findNextSyncElement('left', validCurrent);
+        if (leftPrev !== validCurrent) {
+          setFocusIndex(leftPrev);
+        }
+        return;
       }
 
       if (isEnter && target && target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
@@ -178,9 +279,9 @@ export const SyncModal: React.FC<SyncModalProps> = ({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose, getFocusableElements]);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isOpen, onClose, getFocusableElements, findNextSyncElement, focusIndex]);
 
   if (!isOpen) return null;
 
