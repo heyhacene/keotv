@@ -131,7 +131,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ isVisible, isFading 
       {/* Build Number Watermark at the bottom */}
       <div className="absolute bottom-6 left-0 right-0 text-center pointer-events-none">
         <span className="text-[11px] font-mono font-medium text-slate-500/80 tracking-widest uppercase">
-          KeoTV v1.0.0 • Build {buildNumber}
+          KeoTV v1.3.{buildNumber} • Build {buildNumber}
         </span>
       </div>
     </div>

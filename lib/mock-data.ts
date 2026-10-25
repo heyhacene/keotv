@@ -637,69 +637,89 @@ export function getMockEpgForChannel(channelId: string): { current: EpgProgram; 
   };
 }
 
+const FRENCH_DAYS_SHORT = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
+const FRENCH_MONTHS_SHORT = ['janv.', 'févr.', 'mars', 'avr.', 'mai', 'juin', 'juil.', 'août', 'sept.', 'oct.', 'nov.', 'déc.'];
+
+function fastFormatHHMM(d: Date): string {
+  const h = d.getHours();
+  const m = d.getMinutes();
+  return `${h < 10 ? '0' : ''}${h}:${m < 10 ? '0' : ''}${m}`;
+}
+
+function fastFormatDayShort(d: Date): string {
+  return `${FRENCH_DAYS_SHORT[d.getDay()]} ${d.getDate()} ${FRENCH_MONTHS_SHORT[d.getMonth()]}`;
+}
+
 /**
- * Generates a complete 7-day chronological timeline of programs (168 past + 1 current + 48 future)
- * so the user can rewind all the way back through 7 days of Replay / Catchup and 48h ahead,
- * even for channels where the provider's EPG table only has partial entries.
+ * Generates a single synthetic EPG program slot for any relative offset (-168..+48) in O(1) time
+ * with zero Intl.DateTimeFormat overhead!
  */
-export function getMockTimelineForChannel(channelId: string, channelName?: string): EpgProgram[] {
+export function getSyntheticSlotForOffset(
+  channelId: string,
+  channelName: string | undefined,
+  offset: number,
+  baseStartMs?: number
+): EpgProgram {
   const { current, next } = getMockEpgForChannel(channelId);
-  const curStartMs = new Date(current.start).getTime();
-  const nxtEndMs = new Date(next.end).getTime();
+  if (offset === 0) return current;
+  if (offset === 1) return next;
 
   const label = channelName || 'la chaîne';
-  const timeline: EpgProgram[] = [];
+  const curStartMs = baseStartMs ?? new Date(current.start).getTime();
+  const nxtEndMs = new Date(next.end).getTime();
 
-  // 168 past hourly slots (7 full days of Replay / Catchup archive!)
-  for (let i = 168; i >= 1; i--) {
+  if (offset < 0) {
+    const i = Math.abs(offset);
     const slotStartMs = curStartMs - i * 60 * 60000;
-    const slotEndMs = curStartMs - (i - 1) * 60 * 60000;
+    const slotEndMs = slotStartMs + 60 * 60000;
     const slotDate = new Date(slotStartMs);
-    const timeStr = slotDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-    const dayStr = slotDate.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+    const timeStr = fastFormatHHMM(slotDate);
+    const dayStr = fastFormatDayShort(slotDate);
 
-    let title = `Tranche ${timeStr} • ${label}`;
+    let title = `Replay ${timeStr} (${dayStr}) • ${label}`;
     if (i === 1) title = `Avant-Programme (${timeStr}) • ${label}`;
     else if (i === 2) title = `Le Grand Magazine (${timeStr}) • ${label}`;
     else if (i === 3) title = `Édition Précédente (${timeStr}) • ${label}`;
 
-    timeline.push({
+    return {
       id: `epg_p${i}_${channelId}`,
       channel_id: channelId,
       title,
       description: `Replay intégral du ${dayStr} à ${timeStr} sur ${label}. Appuyez sur OK pour lancer le rattrapage à cet horaire exact.`,
-      start: new Date(slotStartMs).toISOString(),
+      start: slotDate.toISOString(),
       end: new Date(slotEndMs).toISOString(),
       duration_min: 60,
       category: current.category,
       has_catchup: true,
-    });
+    };
   }
 
-  // Current (index 168) and Next (index 169)
-  timeline.push(current);
-  timeline.push(next);
+  // Future offset >= 2
+  const f = offset;
+  const slotStartMs = nxtEndMs + (f - 2) * 60 * 60000;
+  const slotEndMs = slotStartMs + 60 * 60000;
+  const slotDate = new Date(slotStartMs);
+  const timeStr = fastFormatHHMM(slotDate);
 
-  // 47 additional future hourly slots (2 full days ahead)
-  for (let f = 2; f <= 48; f++) {
-    const slotStartMs = nxtEndMs + (f - 2) * 60 * 60000;
-    const slotEndMs = nxtEndMs + (f - 1) * 60 * 60000;
-    const slotDate = new Date(slotStartMs);
-    const timeStr = slotDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-
-    timeline.push({
-      id: `epg_f${f}_${channelId}`,
-      channel_id: channelId,
-      title: f === 2 ? `Grand Soir & Décryptage` : f === 3 ? `Programme de la Nuit` : `Programme ${timeStr} • ${label}`,
-      description: `La suite de votre programmation à ${timeStr} sur ${label}.`,
-      start: new Date(slotStartMs).toISOString(),
-      end: new Date(slotEndMs).toISOString(),
-      duration_min: 60,
-      category: current.category,
-    });
-  }
-
-  return timeline;
+  return {
+    id: `epg_f${f}_${channelId}`,
+    channel_id: channelId,
+    title: f === 2 ? `Grand Soir & Décryptage` : f === 3 ? `Programme de la Nuit` : `Programme ${timeStr} • ${label}`,
+    description: `La suite de votre programmation à ${timeStr} sur ${label}.`,
+    start: slotDate.toISOString(),
+    end: new Date(slotEndMs).toISOString(),
+    duration_min: 60,
+    category: current.category,
+  };
 }
+
+/**
+ * Generates a lightweight default timeline (offsets -3..+3) for compatibility.
+ */
+export function getMockTimelineForChannel(channelId: string, channelName?: string): EpgProgram[] {
+  const offsets = [-3, -2, -1, 0, 1, 2, 3];
+  return offsets.map((off) => getSyntheticSlotForOffset(channelId, channelName, off));
+}
+
 
 

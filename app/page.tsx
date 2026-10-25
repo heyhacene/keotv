@@ -841,6 +841,14 @@ export default function KeoTVHome() {
     if (hasInitRunRef.current) return;
     hasInitRunRef.current = true;
 
+    // Hard failsafe: NEVER let the Splash Screen stay visible longer than 2.5 seconds even if IndexedDB or network is slow!
+    const splashFailsafeTimer = setTimeout(() => {
+      setIsSplashFading(true);
+      setTimeout(() => {
+        setIsSplashVisible(false);
+      }, 300);
+    }, 2500);
+
     async function initDB() {
       try {
         const savedCatSort = await getSetting<'playlist' | 'alpha' | 'count'>('category_sort', 'playlist');
@@ -970,20 +978,6 @@ export default function KeoTVHome() {
           }
         }
 
-
-        // Sanitize any cached channels from Build 64/65 where has_archive was falsely set with archive_days === 0
-        try {
-          const sanitizedFlag = await getSetting<boolean>('sanitized_has_archive_v66', false);
-          if (!sanitizedFlag) {
-            await db.channels
-              .filter((c) => Boolean(c.has_archive) && (!c.archive_days || c.archive_days <= 0))
-              .modify({ has_archive: false, archive_days: 0 });
-            await setSetting('sanitized_has_archive_v66', true);
-          }
-        } catch (sanErr) {
-          console.warn('Archive sanitization notice:', sanErr);
-        }
-
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
         const loadedPlaylists = await db.playlists.toArray();
 
@@ -1012,6 +1006,13 @@ export default function KeoTVHome() {
 
         setSelectedCategory(initialCat || null);
 
+        // Dismiss splash screen immediately so the UI is interactive right away!
+        clearTimeout(splashFailsafeTimer);
+        setIsSplashFading(true);
+        setTimeout(() => {
+          setIsSplashVisible(false);
+        }, 300);
+
         if (initialCat) {
           await loadCategoryChannels(initialCat, savedChSort);
         }
@@ -1032,12 +1033,6 @@ export default function KeoTVHome() {
           await setSetting('sync_code', code);
         }
         setSyncCode(code);
-
-        // Dismiss splash screen with smooth fade-out
-        setIsSplashFading(true);
-        setTimeout(() => {
-          setIsSplashVisible(false);
-        }, 350);
 
         const savedAutoRefresh = await getSetting<number>('auto_refresh_interval', 24);
         const savedLastRefresh = await getSetting<string>('last_auto_refresh_at', '');
@@ -1066,10 +1061,11 @@ export default function KeoTVHome() {
       } catch (err) {
         console.error('Initialization error:', err);
       } finally {
+        clearTimeout(splashFailsafeTimer);
         setIsSplashFading(true);
         setTimeout(() => {
           setIsSplashVisible(false);
-        }, 350);
+        }, 300);
       }
     }
     initDB();
@@ -2139,7 +2135,7 @@ export default function KeoTVHome() {
       if (offset < 0) {
         // Past program selected in TiviMate timeline -> launch Replay!
         const storedProgs = await EPGService.getProgramsForChannel(ch.id);
-        const slots = buildProgramSlotsForChannel(ch, storedProgs);
+        const slots = buildProgramSlotsForChannel(ch, storedProgs, [offset]);
         const targetProg = slots[offset];
         if (targetProg) {
           handlePlayCatchupProgram(targetProg, ch);

@@ -203,10 +203,10 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v1.0.0-build.${{ github.run_number }}
-          name: "KeoTV v1.0.0 (Build ${{ github.run_number }})"
+          tag_name: v1.3.${{ github.run_number }}-build.${{ github.run_number }}
+          name: "KeoTV v1.3.${{ github.run_number }} (Build ${{ github.run_number }})"
           body: |
-            ### 📺 KeoTV v1.0.0 (Build ${{ github.run_number }})
+            ### 📺 KeoTV v1.3.${{ github.run_number }} (Build ${{ github.run_number }})
             Cliquez sur le fichier **KeoTV-Build-${{ github.run_number }}.apk** ci-dessous pour installer ou mettre à jour directement votre application.
 
             #### 🚀 Nouveautés & Correctifs Majeurs (Build ${{ github.run_number }}) :

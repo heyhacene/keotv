@@ -30,7 +30,7 @@ import {
   fetchSeriesInfo,
 } from '@/lib/iptv-service';
 import { EPGService } from '@/lib/epg-service';
-import { getMockTimelineForChannel } from '@/lib/mock-data';
+import { getMockTimelineForChannel, getSyntheticSlotForOffset } from '@/lib/mock-data';
 
 interface TVGuideProps {
   categories: Category[];
@@ -157,18 +157,27 @@ function getProgramRemainingMin(prog: EpgProgram): number {
  * - offsets -168..-1: past programs up to 7 days back (Replay / Catchup)
  * - offset 0: current live program ("En direct")
  * - offsets +1..+48: upcoming programs up to 48 hours ahead ("À suivre")
+ *
+ * CRITICAL PERFORMANCE: Only computes the requested `targetOffsets` (default 4 visible slots + 0),
+ * avoiding any expensive loop or Intl.DateTimeFormat calls on the Android TV main thread!
  */
 export function buildProgramSlotsForChannel(
   channel: Channel,
-  realEpgList?: EpgProgram[]
+  realEpgList?: EpgProgram[],
+  targetOffsets: number[] = [0, 1, 2, 3]
 ): Record<number, EpgProgram> {
-  const list =
-    realEpgList && realEpgList.length > 0
-      ? realEpgList
-      : getMockTimelineForChannel(channel.id, channel.name);
+  const slots: Record<number, EpgProgram> = {};
+  const offsetsToBuild = Array.from(new Set([0, ...targetOffsets]));
+
+  if (!realEpgList || realEpgList.length === 0) {
+    for (const offset of offsetsToBuild) {
+      slots[offset] = getSyntheticSlotForOffset(channel.id, channel.name, offset);
+    }
+    return slots;
+  }
 
   const nowMs = Date.now();
-  let liveIdx = list.findIndex((p) => {
+  let liveIdx = realEpgList.findIndex((p) => {
     const s = new Date(p.start).getTime();
     const e = new Date(p.end).getTime();
     return s <= nowMs && e > nowMs;
@@ -176,7 +185,7 @@ export function buildProgramSlotsForChannel(
 
   if (liveIdx === -1) {
     let bestDiff = Infinity;
-    list.forEach((p, idx) => {
+    realEpgList.forEach((p, idx) => {
       const s = new Date(p.start).getTime();
       const diff = Math.abs(s - nowMs);
       if (diff < bestDiff) {
@@ -188,65 +197,43 @@ export function buildProgramSlotsForChannel(
 
   if (liveIdx === -1) liveIdx = 0;
 
-  const slots: Record<number, EpgProgram> = {};
-  let minFilledOffset = 0;
-  let maxFilledOffset = 0;
+  const firstReal = realEpgList[0];
+  const lastReal = realEpgList[realEpgList.length - 1];
+  const minRealOffset = -liveIdx;
+  const maxRealOffset = realEpgList.length - 1 - liveIdx;
 
-  for (let offset = -168; offset <= 48; offset++) {
+  const firstRealStartMs = firstReal ? new Date(firstReal.start).getTime() : nowMs;
+  const lastRealEndMs = lastReal ? new Date(lastReal.end).getTime() : nowMs + 3600000;
+
+  for (const offset of offsetsToBuild) {
     const targetIdx = liveIdx + offset;
-    if (targetIdx >= 0 && targetIdx < list.length) {
-      slots[offset] = list[targetIdx];
-      if (offset < minFilledOffset) minFilledOffset = offset;
-      if (offset > maxFilledOffset) maxFilledOffset = offset;
+    if (targetIdx >= 0 && targetIdx < realEpgList.length) {
+      slots[offset] = realEpgList[targetIdx];
+    } else if (offset < minRealOffset) {
+      // Anchor synthetic past slot strictly before the earliest real EPG entry
+      const extraHoursBack = minRealOffset - offset;
+      const syntheticAnchorMs = firstRealStartMs + minRealOffset * 60 * 60000;
+      const slot = getSyntheticSlotForOffset(channel.id, channel.name, offset, syntheticAnchorMs);
+      const sMs = firstRealStartMs - extraHoursBack * 60 * 60000;
+      const eMs = sMs + 60 * 60000;
+      slots[offset] = {
+        ...slot,
+        start: new Date(sMs).toISOString(),
+        end: new Date(eMs).toISOString(),
+      };
+    } else if (offset > maxRealOffset) {
+      const extraHoursFwd = offset - maxRealOffset - 1;
+      const sMs = lastRealEndMs + extraHoursFwd * 60 * 60000;
+      const eMs = sMs + 60 * 60000;
+      const slot = getSyntheticSlotForOffset(channel.id, channel.name, offset);
+      slots[offset] = {
+        ...slot,
+        start: new Date(sMs).toISOString(),
+        end: new Date(eMs).toISOString(),
+      };
+    } else {
+      slots[offset] = getSyntheticSlotForOffset(channel.id, channel.name, offset);
     }
-  }
-
-  // Ensure offset 0 is always defined
-  if (!slots[0]) {
-    const fallback = getMockTimelineForChannel(channel.id, channel.name);
-    slots[0] = fallback[168] || fallback[0];
-  }
-
-  // Extend backwards with 60-min Catchup slots all the way to -168 (7 days) if provider EPG stops earlier
-  const earliestProg = slots[minFilledOffset] || slots[0];
-  const earliestStartMs = earliestProg ? new Date(earliestProg.start).getTime() : nowMs;
-  for (let offset = minFilledOffset - 1; offset >= -168; offset--) {
-    const stepsBack = minFilledOffset - offset;
-    const sMs = earliestStartMs - stepsBack * 60 * 60000;
-    const eMs = sMs + 60 * 60000;
-    const sDate = new Date(sMs);
-    const timeStr = sDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-    const dayStr = sDate.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
-    slots[offset] = {
-      id: `epg_ext_past_${channel.id}_${ Math.abs(offset) }`,
-      channel_id: channel.id,
-      title: `Replay ${timeStr} (${dayStr}) • ${channel.name}`,
-      description: `Rattrapage TV du ${dayStr} à ${timeStr} sur ${channel.name}. Appuyez sur OK pour démarrer la lecture Replay à cet horaire.`,
-      start: new Date(sMs).toISOString(),
-      end: new Date(eMs).toISOString(),
-      duration_min: 60,
-      has_catchup: true,
-    };
-  }
-
-  // Extend forwards with 60-min slots up to +48 if provider EPG stops earlier
-  const latestProg = slots[maxFilledOffset] || slots[0];
-  const latestEndMs = latestProg ? new Date(latestProg.end).getTime() : nowMs + 3600000;
-  for (let offset = maxFilledOffset + 1; offset <= 48; offset++) {
-    const stepsFwd = offset - maxFilledOffset - 1;
-    const sMs = latestEndMs + stepsFwd * 60 * 60000;
-    const eMs = sMs + 60 * 60000;
-    const sDate = new Date(sMs);
-    const timeStr = sDate.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-    slots[offset] = {
-      id: `epg_ext_fut_${channel.id}_${offset}`,
-      channel_id: channel.id,
-      title: `Programme ${timeStr} • ${channel.name}`,
-      description: `Diffusion prévue à ${timeStr} sur ${channel.name}.`,
-      start: new Date(sMs).toISOString(),
-      end: new Date(eMs).toISOString(),
-      duration_min: 60,
-    };
   }
 
   return slots;
@@ -955,12 +942,6 @@ export const TVGuide: React.FC<TVGuideProps> = ({
     };
   }, [isLiveTimelineMode, focusedChannelIndex, channels, serverCreds]);
 
-  // Focused channel's program slots and currently highlighted program details for the Top TiviMate Info Deck
-  const focusedChannelSlots = useMemo(() => {
-    if (!focusedChannel || isSep) return {};
-    return buildProgramSlotsForChannel(focusedChannel, channelEpgMap[focusedChannel.id]);
-  }, [focusedChannel, isSep, channelEpgMap]);
-
   // Compute which 4 horizontal program offsets are displayed in the timeline row
   // Allows sliding all the way back to -168 (7 days) and forward to +48 (2 days)!
   const visibleOffsets = useMemo(() => {
@@ -980,6 +961,16 @@ export const TVGuide: React.FC<TVGuideProps> = ({
     }
     return [0, 1, 2, 3];
   }, [activePane, focusedProgramOffset, isPastUnlocked]);
+
+  // Focused channel's program slots and currently highlighted program details for the Top TiviMate Info Deck
+  const focusedChannelSlots = useMemo(() => {
+    if (!focusedChannel || isSep) return {};
+    return buildProgramSlotsForChannel(focusedChannel, channelEpgMap[focusedChannel.id], [
+      0,
+      focusedProgramOffset,
+      ...visibleOffsets,
+    ]);
+  }, [focusedChannel, isSep, channelEpgMap, focusedProgramOffset, visibleOffsets]);
 
   // Compute the 5 half-hour marks for the TiviMate Time Ruler ("12:00  12:30  13:00  13:30  14:00")
   // and the percentage position of the vertical blue Now Line!
@@ -1468,7 +1459,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                   const isActive = activeChannel?.id === ch.id;
 
                   if (isLiveTimelineMode) {
-                    const slots = buildProgramSlotsForChannel(ch, channelEpgMap[ch.id]);
+                    const slots = buildProgramSlotsForChannel(ch, channelEpgMap[ch.id], visibleOffsets);
                     return (
                       <TiviMateTimelineRow
                         key={ch.id}
