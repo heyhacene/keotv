@@ -1315,7 +1315,13 @@ export default function KeoTVHome() {
 
   // Play an episode chosen from the series detail page
   const handlePlaySeriesEpisode = useCallback(
-    async (episode: SeriesEpisode, allEpisodes: SeriesEpisode[], audioPref?: string, subPref?: string) => {
+    async (
+      episode: SeriesEpisode,
+      allEpisodes: SeriesEpisode[],
+      audioPref?: string,
+      subPref?: string,
+      options?: { startPositionMs?: number; forceRestart?: boolean }
+    ) => {
       const index = Math.max(0, allEpisodes.findIndex((e) => e.id === episode.id));
       const seriesKey = String(selectedSeriesForDetails?.id || selectedSeriesForDetails?.name || '');
       const savedAudio = audioPref || (typeof window !== 'undefined' ? localStorage.getItem(`keotv_series_audio_${seriesKey}`) || 'vf' : 'vf');
@@ -1325,13 +1331,15 @@ export default function KeoTVHome() {
         try {
           await NativePlayer.play({
             urls: allEpisodes.map((e) => e.url),
-            titles: allEpisodes.map((e) => `${selectedSeriesForDetails?.name || 'Série'} — S${String(e.season).padStart(2, '0')}E${String(e.episodeNum).padStart(2, '0')} ${e.title}`),
+            titles: allEpisodes.map((e) => `${selectedSeriesForDetails?.name || 'Série'} — S${String(e.season || 1).padStart(2, '0')}E${String(e.episodeNum).padStart(2, '0')} ${e.title}`),
             index,
             userAgent: NATIVE_PLAYER_USER_AGENT,
             isLive: false,
             seriesId: seriesKey,
             preferredAudio: savedAudio,
             preferredSubtitle: savedSub,
+            startPositionMs: options?.startPositionMs,
+            forceRestart: options?.forceRestart,
           });
         } catch (err: any) {
           console.error('Native player episode error:', err);
@@ -1356,7 +1364,7 @@ export default function KeoTVHome() {
 
   // Play a movie chosen from the movie detail page
   const handlePlayMovie = useCallback(
-    async (movieToPlay: Channel) => {
+    async (movieToPlay: Channel, options?: { startPositionMs?: number; forceRestart?: boolean }) => {
       if (isNativePlayerAvailable()) {
         try {
           const playlist = filteredChannels.length > 0 ? filteredChannels : [movieToPlay];
@@ -1367,6 +1375,8 @@ export default function KeoTVHome() {
             index: startIndex,
             userAgent: NATIVE_PLAYER_USER_AGENT,
             isLive: false,
+            startPositionMs: options?.startPositionMs,
+            forceRestart: options?.forceRestart,
           });
         } catch (err: any) {
           console.error('Native player movie error:', err);

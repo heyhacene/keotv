@@ -310,6 +310,9 @@ public class NativePlayerPlugin extends Plugin {
         PlayerActivity.pendingSeriesId = call.getString("seriesId", null);
         PlayerActivity.pendingPreferredAudio = call.getString("preferredAudio", null);
         PlayerActivity.pendingPreferredSubtitle = call.getString("preferredSubtitle", null);
+        Double startPosOpt = call.getDouble("startPositionMs", 0.0);
+        PlayerActivity.pendingStartPositionMs = startPosOpt != null ? Math.round(startPosOpt) : 0L;
+        PlayerActivity.pendingForceRestart = Boolean.TRUE.equals(call.getBoolean("forceRestart", false));
 
         Intent intent = new Intent(getContext(), PlayerActivity.class);
         getActivity().startActivity(intent);

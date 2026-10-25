@@ -9,6 +9,8 @@ export interface NativePlayerPlayOptions {
   seriesId?: string;
   preferredAudio?: string;
   preferredSubtitle?: string;
+  startPositionMs?: number;
+  forceRestart?: boolean;
 }
 
 export interface NativePlayerPreviewOptions {

@@ -59,17 +59,27 @@ public class MainActivity extends BridgeActivity {
 
             webView.setFocusable(true);
             webView.setFocusableInTouchMode(true);
-            webView.post(new Runnable() {
-                @Override
-                public void run() {
-                    webView.requestFocus();
-                    try {
-                        String script = "window.__KEOTV_IS_TV__ = " + (isTv ? "true" : "false") + "; window.dispatchEvent(new Event('resize'));";
-                        webView.evaluateJavascript(script, null);
-                    } catch (Exception ignored) {}
-                }
-            });
+            syncToWebView(webView, isTv);
         }
+    }
+
+    private void syncToWebView(final WebView webView, final boolean isTv) {
+        if (webView == null) return;
+        final String positionsJson = getSharedPreferences(PlayerActivity.PREFS_POSITIONS, MODE_PRIVATE)
+                .getString(PlayerActivity.KEY_POSITIONS_JSON, "{}");
+        final String escapedJson = org.json.JSONObject.quote(positionsJson);
+        webView.post(new Runnable() {
+            @Override
+            public void run() {
+                webView.requestFocus();
+                try {
+                    String script = "window.__KEOTV_IS_TV__ = " + (isTv ? "true" : "false") + ";"
+                            + "try { var rawPos = " + escapedJson + "; window.__KEOTV_PLAYBACK_POSITIONS__ = JSON.parse(rawPos); localStorage.setItem('keotv_playback_positions', rawPos); window.dispatchEvent(new Event('keotv-positions-updated')); } catch(e) {}"
+                            + "window.dispatchEvent(new Event('resize'));";
+                    webView.evaluateJavascript(script, null);
+                } catch (Exception ignored) {}
+            }
+        });
     }
 
     @Override
@@ -81,16 +91,7 @@ public class MainActivity extends BridgeActivity {
             final boolean isTv = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION)
                     || getPackageManager().hasSystemFeature("android.software.leanback")
                     || !getPackageManager().hasSystemFeature("android.hardware.touchscreen");
-            webView.post(new Runnable() {
-                @Override
-                public void run() {
-                    webView.requestFocus();
-                    try {
-                        String script = "window.__KEOTV_IS_TV__ = " + (isTv ? "true" : "false") + "; window.dispatchEvent(new Event('resize'));";
-                        webView.evaluateJavascript(script, null);
-                    } catch (Exception ignored) {}
-                }
-            });
+            syncToWebView(webView, isTv);
         }
     }
 

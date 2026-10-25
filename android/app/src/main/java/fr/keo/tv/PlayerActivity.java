@@ -62,15 +62,22 @@ public class PlayerActivity extends AppCompatActivity {
     public static String pendingSeriesId = null;
     public static String pendingPreferredAudio = null;
     public static String pendingPreferredSubtitle = null;
+    public static long pendingStartPositionMs = 0L;
+    public static boolean pendingForceRestart = false;
+
+    public static final String PREFS_POSITIONS = "keotv_playback_positions";
+    public static final String KEY_POSITIONS_JSON = "positions_json";
 
     private ExoPlayer player;
     private PlayerView playerView;
     private LinearLayout osdContainer;
+    private TextView badgeView;
     private TextView titleView;
     private TextView indexView;
     private TextView errorView;
     private final Set<Integer> triedTsFallback = new HashSet<>();
     private boolean isLive = true;
+    private boolean isReplayCascade = false;
 
     // Skip intro & Next episode overlays
     private TextView skipIntroBtn;
@@ -81,9 +88,12 @@ public class PlayerActivity extends AppCompatActivity {
     private TextView btnCancelNext;
 
     private boolean introSkippedForCurrent = false;
+    private boolean introAutoHiddenForCurrent = false;
+    private long introShownAtMs = 0L;
     private boolean nextEpisodeDismissed = false;
     private int nextEpisodeCountdownSeconds = 10;
     private boolean isCountdownActive = false;
+    private long lastSavedPositionAtMs = 0L;
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Handler osdHandler = new Handler(Looper.getMainLooper());
@@ -173,18 +183,18 @@ public class PlayerActivity extends AppCompatActivity {
         osdContainer.setBackground(osdBg);
 
         // Badge indicator
-        TextView badge = new TextView(this);
-        badge.setText(isLive ? "DIRECT TV" : "VOD");
-        badge.setTextColor(Color.parseColor("#38BDF8"));
-        badge.setTextSize(11f);
-        badge.setTypeface(Typeface.DEFAULT_BOLD);
-        badge.setPadding(dp(10), dp(4), dp(10), dp(4));
+        badgeView = new TextView(this);
+        badgeView.setText(isLive ? "DIRECT TV" : (pendingSeriesId != null && !pendingSeriesId.isEmpty() ? "SÉRIE" : "VOD"));
+        badgeView.setTextColor(Color.parseColor("#38BDF8"));
+        badgeView.setTextSize(11f);
+        badgeView.setTypeface(Typeface.DEFAULT_BOLD);
+        badgeView.setPadding(dp(10), dp(4), dp(10), dp(4));
         GradientDrawable badgeBg = new GradientDrawable();
         badgeBg.setColor(Color.parseColor("#2638BDF8"));
         badgeBg.setCornerRadius(dp(8));
         badgeBg.setStroke(dp(1), Color.parseColor("#4D38BDF8"));
-        badge.setBackground(badgeBg);
-        osdContainer.addView(badge);
+        badgeView.setBackground(badgeBg);
+        osdContainer.addView(badgeView);
 
         // Title text
         titleView = new TextView(this);
@@ -207,7 +217,7 @@ public class PlayerActivity extends AppCompatActivity {
         root.addView(osdContainer, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP));
 
-        // Skip intro button (VOD / series, bottom right)
+        // Skip intro button (Strictly Series episodes only, bottom right, auto-hides after 7s)
         skipIntroBtn = new TextView(this);
         skipIntroBtn.setText("⏩  Passer l'intro (+85s)");
         skipIntroBtn.setTextColor(Color.WHITE);
@@ -369,9 +379,13 @@ public class PlayerActivity extends AppCompatActivity {
         setContentView(root);
 
         // Detect if this is a Replay / Catchup multi-format fallback cascade
-        boolean isReplayCascade = !isLive && pendingSeriesId == null && pendingUrls.size() > 1
+        isReplayCascade = !isLive && (pendingSeriesId == null || pendingSeriesId.isEmpty())
                 && !pendingTitles.isEmpty() && pendingTitles.get(0) != null
                 && pendingTitles.get(0).startsWith("[Replay]");
+
+        if (isReplayCascade && badgeView != null) {
+            badgeView.setText("REPLAY TV");
+        }
 
         DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
                 .setUserAgent(pendingUserAgent)
@@ -404,16 +418,61 @@ public class PlayerActivity extends AppCompatActivity {
             items.add(buildItem(pendingUrls.get(i), title));
         }
         int start = Math.max(0, Math.min(pendingIndex, items.size() - 1));
-        player.setMediaItems(items, start, C.TIME_UNSET);
+        String startUrl = (start >= 0 && start < pendingUrls.size()) ? pendingUrls.get(start) : "";
+
+        // Determine start/resume position for VOD Movies and Series Episodes (never for Live TV or Replay)
+        long startPosMs = C.TIME_UNSET;
+        if (!isLive && !isReplayCascade && !startUrl.isEmpty()) {
+            if (pendingForceRestart) {
+                clearSavedPositionForUrl(startUrl);
+                startPosMs = 0L;
+            } else if (pendingStartPositionMs > 15000L) {
+                startPosMs = pendingStartPositionMs;
+            } else {
+                long savedPos = getSavedPositionForUrl(startUrl);
+                if (savedPos > 15000L) {
+                    startPosMs = savedPos;
+                }
+            }
+        }
+        // Reset static hand-over flags so subsequent transitions don't reuse them
+        pendingStartPositionMs = 0L;
+        pendingForceRestart = false;
+
+        player.setMediaItems(items, start, startPosMs);
+        if (startPosMs > 15000L && badgeView != null) {
+            badgeView.setText("▶ REPRISE À " + formatTimeMs(startPosMs));
+        }
 
         player.addListener(new Player.Listener() {
             @Override
             public void onMediaItemTransition(MediaItem mediaItem, int reason) {
                 introSkippedForCurrent = false;
+                introAutoHiddenForCurrent = false;
+                introShownAtMs = 0L;
                 nextEpisodeDismissed = false;
                 stopCountdown();
                 if (nextEpisodeCard != null) nextEpisodeCard.setVisibility(View.GONE);
                 if (skipIntroBtn != null) skipIntroBtn.setVisibility(View.GONE);
+
+                if (badgeView != null && !isLive && !isReplayCascade) {
+                    badgeView.setText(pendingSeriesId != null && !pendingSeriesId.isEmpty() ? "SÉRIE" : "VOD");
+                }
+
+                // When auto-advancing or switching to another episode in a series, check if it has a saved resume position
+                if (!isLive && !isReplayCascade && player != null && reason != Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
+                    int idx = player.getCurrentMediaItemIndex();
+                    if (idx >= 0 && idx < pendingUrls.size()) {
+                        String epUrl = pendingUrls.get(idx);
+                        long savedEpPos = getSavedPositionForUrl(epUrl);
+                        if (savedEpPos > 15000L && player.getCurrentPosition() < 5000L) {
+                            player.seekTo(savedEpPos);
+                            if (badgeView != null) {
+                                badgeView.setText("▶ REPRISE À " + formatTimeMs(savedEpPos));
+                            }
+                        }
+                    }
+                }
 
                 updateTitle();
                 showOsd();
@@ -426,6 +485,8 @@ public class PlayerActivity extends AppCompatActivity {
                 if (playbackState == Player.STATE_READY) {
                     errorView.setVisibility(View.GONE);
                 } else if (playbackState == Player.STATE_ENDED) {
+                    // Mark current item as completed (100%)
+                    saveCurrentPlaybackPosition(true);
                     // Auto-advance to next episode if available and not dismissed
                     if (!isLive && player != null && player.hasNextMediaItem() && !nextEpisodeDismissed) {
                         launchNextEpisode();
@@ -448,6 +509,106 @@ public class PlayerActivity extends AppCompatActivity {
         if (!isLive) {
             mainHandler.post(progressRunnable);
         }
+    }
+
+    private String formatTimeMs(long ms) {
+        long totalSec = Math.max(0L, ms / 1000L);
+        long hours = totalSec / 3600L;
+        long minutes = (totalSec % 3600L) / 60L;
+        long seconds = totalSec % 60L;
+        if (hours > 0) {
+            return String.format("%dh %02dmin", hours, minutes);
+        }
+        return String.format("%02d:%02d", minutes, seconds);
+    }
+
+    private long getSavedPositionForUrl(String url) {
+        if (url == null || url.isEmpty()) return 0L;
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_POSITIONS, Context.MODE_PRIVATE);
+            String jsonStr = prefs.getString(KEY_POSITIONS_JSON, "{}");
+            org.json.JSONObject root = new org.json.JSONObject(jsonStr);
+            org.json.JSONObject item = root.optJSONObject(url);
+            if (item != null) {
+                long pos = item.optLong("positionMs", 0L);
+                long dur = item.optLong("durationMs", 0L);
+                boolean completed = item.optBoolean("completed", false);
+                if (completed) return 0L;
+                if (dur > 0 && (pos >= dur - 45000L || ((double) pos / dur) >= 0.94)) {
+                    return 0L;
+                }
+                return pos;
+            }
+        } catch (Exception ignored) {}
+        return 0L;
+    }
+
+    private void clearSavedPositionForUrl(String url) {
+        if (url == null || url.isEmpty()) return;
+        try {
+            SharedPreferences prefs = getSharedPreferences(PREFS_POSITIONS, Context.MODE_PRIVATE);
+            String jsonStr = prefs.getString(KEY_POSITIONS_JSON, "{}");
+            org.json.JSONObject root = new org.json.JSONObject(jsonStr);
+            if (root.has(url)) {
+                root.remove(url);
+                prefs.edit().putString(KEY_POSITIONS_JSON, root.toString()).apply();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    private void saveCurrentPlaybackPosition(boolean forceCompleted) {
+        if (player == null || isLive || isReplayCascade) return;
+        try {
+            int idx = player.getCurrentMediaItemIndex();
+            if (idx < 0 || idx >= pendingUrls.size()) return;
+            String url = pendingUrls.get(idx);
+            if (url == null || url.isEmpty()) return;
+
+            long pos = player.getCurrentPosition();
+            long dur = player.getDuration();
+            if (dur <= 0 || dur == C.TIME_UNSET) return;
+
+            // Do not save if user watched less than 15 seconds and not completed
+            if (!forceCompleted && pos < 15000L) return;
+
+            boolean isCompleted = forceCompleted || (dur > 60000L && (pos >= dur - 45000L || ((double) pos / dur) >= 0.94));
+            String title = (idx < pendingTitles.size()) ? pendingTitles.get(idx) : "";
+            long now = System.currentTimeMillis();
+
+            SharedPreferences prefs = getSharedPreferences(PREFS_POSITIONS, Context.MODE_PRIVATE);
+            String jsonStr = prefs.getString(KEY_POSITIONS_JSON, "{}");
+            org.json.JSONObject root = new org.json.JSONObject(jsonStr);
+
+            org.json.JSONObject entry = new org.json.JSONObject();
+            entry.put("url", url);
+            entry.put("title", title);
+            entry.put("positionMs", isCompleted ? dur : pos);
+            entry.put("durationMs", dur);
+            entry.put("completed", isCompleted);
+            entry.put("updatedAt", now);
+            if (pendingSeriesId != null && !pendingSeriesId.isEmpty()) {
+                entry.put("seriesId", pendingSeriesId);
+                entry.put("episodeIndex", idx);
+            }
+            root.put(url, entry);
+
+            // Also store the last watched episode summary under "series_<seriesId>" for instant lookup in SeriesDetailModal
+            if (pendingSeriesId != null && !pendingSeriesId.isEmpty()) {
+                org.json.JSONObject seriesEntry = new org.json.JSONObject();
+                seriesEntry.put("seriesId", pendingSeriesId);
+                seriesEntry.put("url", url);
+                seriesEntry.put("title", title);
+                seriesEntry.put("episodeIndex", idx);
+                seriesEntry.put("positionMs", isCompleted ? dur : pos);
+                seriesEntry.put("durationMs", dur);
+                seriesEntry.put("completed", isCompleted);
+                seriesEntry.put("updatedAt", now);
+                root.put("series_" + pendingSeriesId, seriesEntry);
+            }
+
+            prefs.edit().putString(KEY_POSITIONS_JSON, root.toString()).apply();
+            lastSavedPositionAtMs = now;
+        } catch (Exception ignored) {}
     }
 
     private void applyLanguagePreferences() {
@@ -503,26 +664,45 @@ public class PlayerActivity extends AppCompatActivity {
         if (player == null || isLive) return;
         long pos = player.getCurrentPosition();
         long dur = player.getDuration();
+        long now = System.currentTimeMillis();
 
-        // 1. Skip intro management (between 3s and 125s of episode)
-        if (!introSkippedForCurrent && dur > 180000 && pos >= 3000 && pos <= 125000) {
+        // 0. Save playback position every 5 seconds for Movies and Series (never Replay)
+        if (!isReplayCascade && dur > 0 && now - lastSavedPositionAtMs >= 5000L) {
+            saveCurrentPlaybackPosition(false);
+        }
+
+        // 1. Skip intro management:
+        //    - STRICTLY for Series episodes (pendingSeriesId != null && !pendingSeriesId.isEmpty())
+        //    - NEVER on VOD movies or Replay streams!
+        //    - Appears at 5s into the episode and auto-hides after 7 seconds (7000ms) so it never annoys the viewer!
+        boolean isSeriesEpisode = pendingSeriesId != null && !pendingSeriesId.isEmpty() && !isReplayCascade;
+        if (isSeriesEpisode && !introSkippedForCurrent && !introAutoHiddenForCurrent && dur > 300000L && pos >= 5000L && pos <= 90000L) {
             if (skipIntroBtn != null && skipIntroBtn.getVisibility() != View.VISIBLE) {
+                introShownAtMs = now;
                 skipIntroBtn.setVisibility(View.VISIBLE);
                 skipIntroBtn.setAlpha(0f);
                 skipIntroBtn.animate().alpha(1f).setDuration(300).start();
+            } else if (skipIntroBtn != null && skipIntroBtn.getVisibility() == View.VISIBLE) {
+                // Auto-hide after 7 seconds (Netflix / Prime Video standard)
+                if (introShownAtMs > 0L && (now - introShownAtMs) >= 7000L) {
+                    introAutoHiddenForCurrent = true;
+                    skipIntroBtn.animate().alpha(0f).setDuration(300).withEndAction(() -> {
+                        if (skipIntroBtn != null) skipIntroBtn.setVisibility(View.GONE);
+                    }).start();
+                }
             }
         } else {
-            if (skipIntroBtn != null && skipIntroBtn.getVisibility() == View.VISIBLE && !skipIntroBtn.isFocused()) {
+            if (skipIntroBtn != null && skipIntroBtn.getVisibility() == View.VISIBLE) {
                 skipIntroBtn.animate().alpha(0f).setDuration(250).withEndAction(() -> {
                     if (skipIntroBtn != null) skipIntroBtn.setVisibility(View.GONE);
                 }).start();
             }
         }
 
-        // 2. Next episode countdown (in the last 40 seconds or >95% progress)
-        if (dur > 60000 && !nextEpisodeDismissed && player.hasNextMediaItem()) {
+        // 2. Next episode countdown (strictly for Series in the last 40 seconds or >95% progress)
+        if (isSeriesEpisode && dur > 60000L && !nextEpisodeDismissed && player.hasNextMediaItem()) {
             long remaining = dur - pos;
-            if (remaining <= 40000 || ((double) pos / dur) > 0.95) {
+            if (remaining <= 40000L || ((double) pos / dur) > 0.95) {
                 if (!isCountdownActive) {
                     startNextEpisodeCountdown();
                 }
@@ -578,6 +758,8 @@ public class PlayerActivity extends AppCompatActivity {
         if (nextEpisodeCard != null) {
             nextEpisodeCard.setVisibility(View.GONE);
         }
+        // Mark current episode as 100% completed before advancing
+        saveCurrentPlaybackPosition(true);
         if (player != null && player.hasNextMediaItem()) {
             player.seekToNextMediaItem();
             player.play();
@@ -795,6 +977,11 @@ public class PlayerActivity extends AppCompatActivity {
                     performSkipIntro();
                     return true;
                 }
+                if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
+                    introAutoHiddenForCurrent = true;
+                    skipIntroBtn.setVisibility(View.GONE);
+                    return true;
+                }
                 if (key == KeyEvent.KEYCODE_DPAD_RIGHT && !skipIntroBtn.isFocused() && !isControllerVisible()) {
                     skipIntroBtn.requestFocus();
                     return true;
@@ -910,8 +1097,9 @@ public class PlayerActivity extends AppCompatActivity {
                 return true;
             }
 
-            // 9. Back button (when controls are already hidden) returns to TV Guide
+            // 9. Back button (when controls are already hidden) saves position and returns to TV Guide
             if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
+                saveCurrentPlaybackPosition(false);
                 finish();
                 return true;
             }
@@ -929,6 +1117,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     @Override
     protected void onStop() {
+        saveCurrentPlaybackPosition(false);
         super.onStop();
         mainHandler.removeCallbacks(progressRunnable);
         stopCountdown();
@@ -939,6 +1128,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        saveCurrentPlaybackPosition(false);
         super.onDestroy();
         mainHandler.removeCallbacks(progressRunnable);
         stopCountdown();

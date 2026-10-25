@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
-import { ArrowLeft, Loader2, Play, AlertCircle, Film, Volume2, MessageSquare, Star, Clock, Calendar, User, Clapperboard } from 'lucide-react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { ArrowLeft, Loader2, Play, RotateCcw, CheckCircle2, AlertCircle, Film, Volume2, MessageSquare, Star, Clock, Calendar, User, Clapperboard } from 'lucide-react';
 import { Channel } from '@/types/iptv';
 import {
   fetchVodInfo,
@@ -13,6 +13,19 @@ import {
   MovieDetails,
 } from '@/lib/iptv-service';
 import { db } from '@/lib/db';
+import {
+  SavedPlaybackPosition,
+  getSavedPositionForUrl,
+  isResumablePosition,
+  getProgressPercent,
+  formatResumeTime,
+  formatRemainingTime,
+} from '@/lib/playback-positions';
+
+export interface MoviePlayOptions {
+  startPositionMs?: number;
+  forceRestart?: boolean;
+}
 
 interface MovieDetailModalProps {
   movie: Channel | null;
@@ -20,7 +33,7 @@ interface MovieDetailModalProps {
   username: string;
   password: string;
   onClose: () => void;
-  onPlay: (movie: Channel) => void;
+  onPlay: (movie: Channel, options?: MoviePlayOptions) => void;
   onSelectAnotherMovie?: (movie: Channel) => void;
   onToggleFavorite?: (movie: Channel, explicitNewState?: boolean) => void;
 }
@@ -40,6 +53,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isFavorite, setIsFavorite] = useState<boolean>(Boolean(movie?.is_favorite));
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [savedPosition, setSavedPosition] = useState<SavedPlaybackPosition | null>(null);
 
   // Actor photos state: map of actor name -> photo URL
   const [actorPhotos, setActorPhotos] = useState<Record<string, string>>({});
@@ -52,12 +66,36 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
   const [searchedPerson, setSearchedPerson] = useState<string | null>(null);
 
   // TV Remote Navigation states
-  const [focusedSection, setFocusedSection] = useState<'back' | 'play' | 'fav' | 'director' | 'actors' | 'films'>('play');
+  const [focusedSection, setFocusedSection] = useState<'back' | 'play' | 'restart' | 'fav' | 'director' | 'actors' | 'films'>('play');
   const [focusedActorIndex, setFocusedActorIndex] = useState<number>(0);
   const [focusedFilmIndex, setFocusedFilmIndex] = useState<number>(0);
 
   const playButtonRef = useRef<HTMLButtonElement | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const refreshSavedPosition = useCallback(() => {
+    if (!movie) {
+      setSavedPosition(null);
+      return;
+    }
+    const streamUrl = details?.streamUrl || movie.stream_url;
+    const pos = getSavedPositionForUrl(streamUrl) || getSavedPositionForUrl(movie.stream_url);
+    setSavedPosition(pos);
+  }, [movie, details?.streamUrl]);
+
+  useEffect(() => {
+    refreshSavedPosition();
+    const onPosUpdated = () => refreshSavedPosition();
+    window.addEventListener('keotv-positions-updated', onPosUpdated);
+    window.addEventListener('focus', onPosUpdated);
+    return () => {
+      window.removeEventListener('keotv-positions-updated', onPosUpdated);
+      window.removeEventListener('focus', onPosUpdated);
+    };
+  }, [refreshSavedPosition]);
+
+  const hasResume = isResumablePosition(savedPosition);
+  const progressPercent = getProgressPercent(savedPosition);
 
   // Load movie details on open
   useEffect(() => {
@@ -243,12 +281,66 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
         }
       }
 
-      // SECTION 1: Play button
+      // SECTION 1: Play / Resume button
       if (focusedSection === 'play') {
         if (isUp) {
           e.preventDefault();
           setFocusedSection('back');
           document.getElementById('movie-detail-back')?.focus();
+          return;
+        }
+        if (isRight) {
+          e.preventDefault();
+          if (hasResume) {
+            setFocusedSection('restart');
+            document.getElementById('movie-detail-restart')?.focus();
+          } else {
+            setFocusedSection('fav');
+            document.getElementById('movie-detail-fav')?.focus();
+          }
+          return;
+        }
+        if (isDown) {
+          e.preventDefault();
+          if (details?.director) {
+            setFocusedSection('director');
+            const target = document.getElementById('movie-detail-director');
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          } else if (details?.actors && details.actors.length > 0) {
+            setFocusedSection('actors');
+            const target = document.getElementById(`actor-chip-${focusedActorIndex}`) || document.getElementById('actor-chip-0');
+            target?.focus();
+            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+          return;
+        }
+        if (isEnter) {
+          e.preventDefault();
+          if (movie) {
+            onPlay(
+              movie,
+              hasResume && savedPosition
+                ? { startPositionMs: savedPosition.positionMs, forceRestart: false }
+                : { startPositionMs: 0, forceRestart: false }
+            );
+          }
+          return;
+        }
+      }
+
+      // SECTION 1A: Restart from beginning button (when saved position exists)
+      if (focusedSection === 'restart') {
+        if (isUp) {
+          e.preventDefault();
+          setFocusedSection('back');
+          document.getElementById('movie-detail-back')?.focus();
+          return;
+        }
+        if (isLeft) {
+          e.preventDefault();
+          setFocusedSection('play');
+          playButtonRef.current?.focus();
           return;
         }
         if (isRight) {
@@ -274,7 +366,9 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
         }
         if (isEnter) {
           e.preventDefault();
-          if (movie) onPlay(movie);
+          if (movie) {
+            onPlay(movie, { startPositionMs: 0, forceRestart: true });
+          }
           return;
         }
       }
@@ -289,8 +383,13 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
         }
         if (isLeft) {
           e.preventDefault();
-          setFocusedSection('play');
-          playButtonRef.current?.focus();
+          if (hasResume) {
+            setFocusedSection('restart');
+            document.getElementById('movie-detail-restart')?.focus();
+          } else {
+            setFocusedSection('play');
+            playButtonRef.current?.focus();
+          }
           return;
         }
         if (isDown) {
@@ -497,6 +596,8 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
     selectedPerson,
     selectedRole,
     movie,
+    hasResume,
+    savedPosition,
     onClose,
     onPlay,
     onSelectAnotherMovie,
@@ -608,6 +709,12 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
                     {details.genre}
                   </span>
                 )}
+                {savedPosition?.completed && (
+                  <span className="bg-emerald-500/20 text-emerald-300 px-2.5 py-1 rounded-xl border border-emerald-500/40 font-bold flex items-center space-x-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Déjà vu</span>
+                  </span>
+                )}
               </div>
 
               {/* Audio & Subtitles Badges */}
@@ -654,12 +761,40 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
                 </div>
               )}
 
-              {/* Action Buttons: Prominent "Lecture" & "Favoris" Buttons */}
+              {/* Saved Playback Progress Bar (Netflix / Prime Video standard) */}
+              {hasResume && savedPosition && (
+                <div className="pt-1 max-w-md space-y-1.5">
+                  <div className="flex items-center justify-between text-xs font-semibold">
+                    <span className="text-sky-300 flex items-center space-x-1.5">
+                      <Clock className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Lecture en cours ({progressPercent}%)</span>
+                    </span>
+                    <span className="text-slate-400 font-mono text-[11px]">
+                      {formatRemainingTime(savedPosition)}
+                    </span>
+                  </div>
+                  <div className="w-full h-2 rounded-full bg-slate-800/90 overflow-hidden border border-white/10">
+                    <div
+                      className="h-full bg-gradient-to-r from-tv-accent to-sky-400 rounded-full transition-all duration-300"
+                      style={{ width: `${progressPercent}%` }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons: Prominent "Reprendre / Lancer", "Recommencer" & "Favoris" Buttons */}
               <div className="pt-2 flex flex-wrap items-center gap-3">
                 <button
                   id="movie-detail-play"
                   ref={playButtonRef}
-                  onClick={() => onPlay(movie)}
+                  onClick={() =>
+                    onPlay(
+                      movie,
+                      hasResume && savedPosition
+                        ? { startPositionMs: savedPosition.positionMs, forceRestart: false }
+                        : { startPositionMs: 0, forceRestart: false }
+                    )
+                  }
                   className={`px-6 py-3.5 rounded-2xl bg-gradient-to-r from-tv-accent to-sky-500 text-slate-950 font-black text-sm sm:text-base flex items-center space-x-2.5 shadow-xl transition focus:outline-none ${
                     focusedSection === 'play'
                       ? 'ring-4 ring-tv-accent ring-offset-2 ring-offset-tv-bg scale-[1.03] shadow-2xl shadow-sky-400/50'
@@ -667,8 +802,28 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
                   }`}
                 >
                   <Play className="w-5 h-5 fill-slate-950" />
-                  <span>Lancer le film</span>
+                  <span>
+                    {hasResume && savedPosition
+                      ? `Reprendre à ${formatResumeTime(savedPosition.positionMs)}`
+                      : 'Lancer le film'}
+                  </span>
                 </button>
+
+                {hasResume && (
+                  <button
+                    id="movie-detail-restart"
+                    type="button"
+                    onClick={() => onPlay(movie, { startPositionMs: 0, forceRestart: true })}
+                    className={`px-5 py-3.5 rounded-2xl font-bold text-sm sm:text-base flex items-center space-x-2 transition select-none bg-tv-card text-slate-200 hover:text-white border border-tv-border focus:outline-none ${
+                      focusedSection === 'restart'
+                        ? 'ring-4 ring-sky-400 ring-offset-2 ring-offset-tv-bg scale-[1.03] shadow-2xl shadow-sky-400/40 bg-tv-focus text-white border-tv-accent'
+                        : ''
+                    }`}
+                  >
+                    <RotateCcw className="w-4 h-4 text-sky-400" />
+                    <span>Recommencer</span>
+                  </button>
+                )}
 
                 <button
                   id="movie-detail-fav"

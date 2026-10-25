@@ -1,11 +1,24 @@
 'use client';
 
-import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { ArrowLeft, Loader2, Play, AlertCircle, ChevronDown, ChevronRight, Film, Volume2, MessageSquare, Star } from 'lucide-react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
+import { ArrowLeft, Loader2, Play, RotateCcw, CheckCircle2, Clock, AlertCircle, ChevronDown, ChevronRight, Film, Volume2, MessageSquare, Star } from 'lucide-react';
 import { Channel } from '@/types/iptv';
 import { fetchSeriesInfo, SeriesDetails, SeriesEpisode } from '@/lib/iptv-service';
 import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
 import { db } from '@/lib/db';
+import {
+  PlaybackPositionsMap,
+  getAllSavedPositions,
+  isResumablePosition,
+  getProgressPercent,
+  formatResumeTime,
+  formatRemainingTime,
+} from '@/lib/playback-positions';
+
+export interface SeriesEpisodePlayOptions {
+  startPositionMs?: number;
+  forceRestart?: boolean;
+}
 
 interface SeriesDetailModalProps {
   series: Channel | null;
@@ -13,11 +26,11 @@ interface SeriesDetailModalProps {
   username: string;
   password: string;
   onClose: () => void;
-  onPlayEpisode?: (episode: SeriesEpisode, allEpisodes: SeriesEpisode[], audioPref?: string, subPref?: string) => void;
+  onPlayEpisode?: (episode: SeriesEpisode, allEpisodes: SeriesEpisode[], audioPref?: string, subPref?: string, options?: SeriesEpisodePlayOptions) => void;
   onToggleFavorite?: (series: Channel, explicitNewState?: boolean) => void;
 }
 
-type FocusedSection = 'back' | 'fav' | 'audio' | 'sub' | 'seasons' | 'episodes';
+type FocusedSection = 'back' | 'fav' | 'resume' | 'restart' | 'audio' | 'sub' | 'seasons' | 'episodes';
 
 // Full page for a series: seasons (collapsible) and all episodes with full TV remote navigation
 export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
@@ -35,9 +48,10 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
   const [openSeason, setOpenSeason] = useState<number | null>(null);
   const [isFavorite, setIsFavorite] = useState<boolean>(Boolean(series?.is_favorite));
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [positionsMap, setPositionsMap] = useState<PlaybackPositionsMap>({});
 
   // Persistent audio & subtitle choices per series
-  const seriesKey = series?.id || series?.name || '';
+  const seriesKey = String(series?.id || series?.name || '');
   const [seriesAudio, setSeriesAudio] = useState<'vf' | 'vo'>('vf');
   const [seriesSub, setSeriesSub] = useState<'off' | 'fr' | 'en'>('off');
 
@@ -47,6 +61,70 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
   const [focusedSubChoice, setFocusedSubChoice] = useState<'off' | 'fr' | 'en'>('off');
   const [focusedSeasonIndex, setFocusedSeasonIndex] = useState<number>(0);
   const [focusedEpisodeIndex, setFocusedEpisodeIndex] = useState<number>(0);
+
+  const refreshPositions = useCallback(() => {
+    setPositionsMap({ ...getAllSavedPositions() });
+  }, []);
+
+  useEffect(() => {
+    refreshPositions();
+    const onPosUpdated = () => refreshPositions();
+    window.addEventListener('keotv-positions-updated', onPosUpdated);
+    window.addEventListener('focus', onPosUpdated);
+    return () => {
+      window.removeEventListener('keotv-positions-updated', onPosUpdated);
+      window.removeEventListener('focus', onPosUpdated);
+    };
+  }, [refreshPositions]);
+
+  // Compute the active resume target (either an in-progress episode, or the next episode after a completed one)
+  const resumeTarget = useMemo(() => {
+    if (!details || details.seasons.length === 0) return null;
+    const allWithSeason: Array<{ ep: SeriesEpisode; seasonNum: number; sIdx: number; epIdx: number }> = [];
+    details.seasons.forEach((s, sIdx) => {
+      s.episodes.forEach((ep, epIdx) => {
+        allWithSeason.push({ ep, seasonNum: s.season, sIdx, epIdx });
+      });
+    });
+
+    // 1. Check the most recently watched episode for this series
+    let latestIdx = -1;
+    let latestUpdatedAt = 0;
+    allWithSeason.forEach((item, idx) => {
+      const saved = positionsMap[item.ep.url];
+      if (saved && (saved.updatedAt || 0) >= latestUpdatedAt && (saved.positionMs > 15000 || saved.completed)) {
+        latestUpdatedAt = saved.updatedAt || 1;
+        latestIdx = idx;
+      }
+    });
+
+    if (latestIdx >= 0) {
+      const current = allWithSeason[latestIdx];
+      const saved = positionsMap[current.ep.url];
+      if (saved && isResumablePosition(saved)) {
+        return {
+          mode: 'resume' as const,
+          ep: current.ep,
+          seasonNum: current.seasonNum,
+          sIdx: current.sIdx,
+          epIdx: current.epIdx,
+          saved,
+        };
+      }
+      if (saved && saved.completed && latestIdx + 1 < allWithSeason.length) {
+        const nextItem = allWithSeason[latestIdx + 1];
+        return {
+          mode: 'next' as const,
+          ep: nextItem.ep,
+          seasonNum: nextItem.seasonNum,
+          sIdx: nextItem.sIdx,
+          epIdx: nextItem.epIdx,
+          saved: null,
+        };
+      }
+    }
+    return null;
+  }, [details, positionsMap]);
 
   // Load saved series language preferences
   useEffect(() => {
@@ -126,10 +204,27 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
           if (cancelled) return;
           setDetails(d);
           if (d.seasons.length > 0) {
-            setOpenSeason(d.seasons[0].season);
-            setFocusedSeasonIndex(0);
-            setFocusedEpisodeIndex(0);
-            setFocusedSection('episodes');
+            const currentPosMap = getAllSavedPositions();
+            // Auto-open the season of the last watched episode if available
+            let targetSIdx = 0;
+            let targetEpIdx = 0;
+            let hasSavedResume = false;
+            let latestTime = 0;
+            d.seasons.forEach((s, sIdx) => {
+              s.episodes.forEach((ep, epIdx) => {
+                const sv = currentPosMap[ep.url];
+                if (sv && (sv.updatedAt || 0) >= latestTime && (sv.positionMs > 15000 || sv.completed)) {
+                  latestTime = sv.updatedAt || 1;
+                  targetSIdx = sIdx;
+                  targetEpIdx = epIdx;
+                  hasSavedResume = true;
+                }
+              });
+            });
+            setOpenSeason(d.seasons[targetSIdx].season);
+            setFocusedSeasonIndex(targetSIdx);
+            setFocusedEpisodeIndex(targetEpIdx);
+            setFocusedSection(hasSavedResume ? 'resume' : 'episodes');
           }
           if (d.seasons.length === 0) setError('Aucun épisode disponible pour cette série sur ce serveur.');
         })
@@ -187,13 +282,23 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
     };
   }, [series, serverUrl, username, password]);
 
-  const playEpisode = useCallback(async (episode: SeriesEpisode) => {
+  const playEpisode = useCallback(async (episode: SeriesEpisode, options?: SeriesEpisodePlayOptions) => {
     if (!details || !series) return;
-    const all = details.seasons.flatMap((s) => s.episodes);
+    const all = details.seasons.flatMap((s) => s.episodes.map((ep) => ({ ...ep, season: ep.season ?? s.season })));
     const index = Math.max(0, all.findIndex((e) => e.id === episode.id));
+    const savedEpPos = positionsMap[episode.url];
+    const startPositionMs =
+      options?.forceRestart
+        ? 0
+        : options?.startPositionMs !== undefined
+        ? options.startPositionMs
+        : isResumablePosition(savedEpPos)
+        ? savedEpPos!.positionMs
+        : 0;
+    const forceRestart = Boolean(options?.forceRestart);
 
     if (onPlayEpisode) {
-      onPlayEpisode(episode, all, seriesAudio, seriesSub);
+      onPlayEpisode(episode, all, seriesAudio, seriesSub, { startPositionMs, forceRestart });
       return;
     }
 
@@ -201,13 +306,15 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
       try {
         await NativePlayer.play({
           urls: all.map((e) => e.url),
-          titles: all.map((e) => `${series.name} — S${String(e.season).padStart(2, '0')}E${String(e.episodeNum).padStart(2, '0')} ${e.title}`),
+          titles: all.map((e) => `${series.name} — S${String(e.season || 1).padStart(2, '0')}E${String(e.episodeNum).padStart(2, '0')} ${e.title}`),
           index,
           userAgent: NATIVE_PLAYER_USER_AGENT,
           isLive: false,
           seriesId: seriesKey,
           preferredAudio: seriesAudio,
           preferredSubtitle: seriesSub,
+          startPositionMs,
+          forceRestart,
         });
       } catch (err: any) {
         alert(`Lecture impossible : ${err?.message || err}`);
@@ -216,7 +323,7 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
     }
 
     alert('La lecture des épisodes nécessite l’application Android KeoTV.');
-  }, [details, series, onPlayEpisode, seriesAudio, seriesSub, seriesKey]);
+  }, [details, series, onPlayEpisode, seriesAudio, seriesSub, seriesKey, positionsMap]);
 
   // Active season & current episode list
   const activeSeasonData = details?.seasons.find((s) => s.season === openSeason);
@@ -282,8 +389,13 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
         }
         if (isDown) {
           e.preventDefault();
-          setFocusedSection('audio');
-          scrollToFocusedElement('series-pref-audio');
+          if (resumeTarget) {
+            setFocusedSection('resume');
+            scrollToFocusedElement('series-btn-resume');
+          } else {
+            setFocusedSection('audio');
+            scrollToFocusedElement('series-pref-audio');
+          }
           return;
         }
         return;
@@ -299,8 +411,13 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
         }
         if (isDown) {
           e.preventDefault();
-          setFocusedSection('audio');
-          scrollToFocusedElement('series-pref-audio');
+          if (resumeTarget) {
+            setFocusedSection('resume');
+            scrollToFocusedElement('series-btn-resume');
+          } else {
+            setFocusedSection('audio');
+            scrollToFocusedElement('series-pref-audio');
+          }
           return;
         }
         if (isEnter) {
@@ -311,12 +428,93 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
         return;
       }
 
+      // 1C. SECTION: RESUME BUTTON
+      if (focusedSection === 'resume') {
+        if (isUp) {
+          e.preventDefault();
+          setFocusedSection('back');
+          scrollToFocusedElement('series-btn-back');
+          return;
+        }
+        if (isRight) {
+          e.preventDefault();
+          if (resumeTarget?.mode === 'resume') {
+            setFocusedSection('restart');
+            scrollToFocusedElement('series-btn-restart');
+          } else {
+            setFocusedSection('fav');
+            scrollToFocusedElement('series-btn-fav');
+          }
+          return;
+        }
+        if (isDown) {
+          e.preventDefault();
+          setFocusedSection('audio');
+          scrollToFocusedElement('series-pref-audio');
+          return;
+        }
+        if (isEnter) {
+          e.preventDefault();
+          if (resumeTarget) {
+            playEpisode(
+              resumeTarget.ep,
+              resumeTarget.mode === 'resume' && resumeTarget.saved
+                ? { startPositionMs: resumeTarget.saved.positionMs, forceRestart: false }
+                : { startPositionMs: 0, forceRestart: false }
+            );
+          }
+          return;
+        }
+        return;
+      }
+
+      // 1D. SECTION: RESTART EPISODE BUTTON
+      if (focusedSection === 'restart') {
+        if (isUp) {
+          e.preventDefault();
+          setFocusedSection('back');
+          scrollToFocusedElement('series-btn-back');
+          return;
+        }
+        if (isLeft) {
+          e.preventDefault();
+          setFocusedSection('resume');
+          scrollToFocusedElement('series-btn-resume');
+          return;
+        }
+        if (isRight) {
+          e.preventDefault();
+          setFocusedSection('fav');
+          scrollToFocusedElement('series-btn-fav');
+          return;
+        }
+        if (isDown) {
+          e.preventDefault();
+          setFocusedSection('audio');
+          scrollToFocusedElement('series-pref-audio');
+          return;
+        }
+        if (isEnter) {
+          e.preventDefault();
+          if (resumeTarget) {
+            playEpisode(resumeTarget.ep, { startPositionMs: 0, forceRestart: true });
+          }
+          return;
+        }
+        return;
+      }
+
       // 2. SECTION: AUDIO PREFERENCE
       if (focusedSection === 'audio') {
         if (isUp) {
           e.preventDefault();
-          setFocusedSection('fav');
-          scrollToFocusedElement('series-btn-fav');
+          if (resumeTarget) {
+            setFocusedSection('resume');
+            scrollToFocusedElement('series-btn-resume');
+          } else {
+            setFocusedSection('fav');
+            scrollToFocusedElement('series-btn-fav');
+          }
           return;
         }
         if (isLeft) {
@@ -506,6 +704,7 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
     focusedEpisodeIndex,
     openSeason,
     currentEpisodes,
+    resumeTarget,
     onClose,
     playEpisode,
   ]);
@@ -611,6 +810,76 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
                 <p className="text-xs sm:text-sm text-slate-300 mt-3 leading-relaxed line-clamp-4 sm:line-clamp-6">
                   {details.plot}
                 </p>
+              )}
+
+              {/* Prominent Series Resume / Next Episode Hero Bar (Netflix / Prime Video standard) */}
+              {resumeTarget && (
+                <div className="mt-3.5 p-3 rounded-2xl bg-sky-950/40 border border-sky-500/40 space-y-2 shadow-lg">
+                  {resumeTarget.mode === 'resume' && resumeTarget.saved && (
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between text-xs font-semibold">
+                        <span className="text-sky-300 flex items-center space-x-1.5">
+                          <Clock className="w-3.5 h-3.5 text-sky-400" />
+                          <span>
+                            S{String(resumeTarget.seasonNum).padStart(2, '0')}E{String(resumeTarget.ep.episodeNum).padStart(2, '0')} en cours ({getProgressPercent(resumeTarget.saved)}%)
+                          </span>
+                        </span>
+                        <span className="text-slate-400 font-mono text-[11px]">
+                          {formatRemainingTime(resumeTarget.saved)}
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 rounded-full bg-slate-800/90 overflow-hidden border border-white/10">
+                        <div
+                          className="h-full bg-gradient-to-r from-tv-accent to-sky-400 rounded-full transition-all duration-300"
+                          style={{ width: `${getProgressPercent(resumeTarget.saved)}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center gap-2.5 pt-0.5">
+                    <button
+                      id="series-btn-resume"
+                      type="button"
+                      onClick={() =>
+                        playEpisode(
+                          resumeTarget.ep,
+                          resumeTarget.mode === 'resume' && resumeTarget.saved
+                            ? { startPositionMs: resumeTarget.saved.positionMs, forceRestart: false }
+                            : { startPositionMs: 0, forceRestart: false }
+                        )
+                      }
+                      className={`px-5 py-2.5 rounded-xl bg-gradient-to-r from-tv-accent to-sky-500 text-slate-950 font-black text-xs sm:text-sm flex items-center space-x-2 shadow-lg transition focus:outline-none ${
+                        focusedSection === 'resume'
+                          ? 'ring-4 ring-tv-accent ring-offset-2 ring-offset-tv-bg scale-[1.03] shadow-2xl shadow-sky-400/50'
+                          : 'hover:scale-[1.02]'
+                      }`}
+                    >
+                      <Play className="w-4 h-4 fill-slate-950" />
+                      <span>
+                        {resumeTarget.mode === 'resume' && resumeTarget.saved
+                          ? `Reprendre S${String(resumeTarget.seasonNum).padStart(2, '0')}E${String(resumeTarget.ep.episodeNum).padStart(2, '0')} à ${formatResumeTime(resumeTarget.saved.positionMs)}`
+                          : `Lancer la suite : S${String(resumeTarget.seasonNum).padStart(2, '0')}E${String(resumeTarget.ep.episodeNum).padStart(2, '0')} — ${resumeTarget.ep.title}`}
+                      </span>
+                    </button>
+
+                    {resumeTarget.mode === 'resume' && (
+                      <button
+                        id="series-btn-restart"
+                        type="button"
+                        onClick={() => playEpisode(resumeTarget.ep, { startPositionMs: 0, forceRestart: true })}
+                        className={`px-4 py-2.5 rounded-xl font-bold text-xs sm:text-sm flex items-center space-x-1.5 transition select-none bg-tv-card text-slate-200 hover:text-white border border-tv-border focus:outline-none ${
+                          focusedSection === 'restart'
+                            ? 'ring-4 ring-sky-400 ring-offset-2 ring-offset-tv-bg scale-[1.03] shadow-2xl shadow-sky-400/40 bg-tv-focus text-white border-tv-accent'
+                            : ''
+                        }`}
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 text-sky-400" />
+                        <span>Recommencer l&apos;épisode</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
               )}
 
               {/* Series Audio & Subtitles Preference Selector with remote focus */}
@@ -782,6 +1051,11 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
                           openSeason === season.season &&
                           focusedEpisodeIndex === epIdx;
 
+                        const epSaved = positionsMap[ep.url];
+                        const epResumable = isResumablePosition(epSaved);
+                        const epCompleted = Boolean(epSaved?.completed);
+                        const epPercent = getProgressPercent(epSaved);
+
                         return (
                           <div
                             key={ep.id}
@@ -801,13 +1075,19 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
                               className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 shadow transition ${
                                 isEpisodeFocused
                                   ? 'bg-tv-accent text-slate-950 scale-105'
+                                  : epCompleted
+                                  ? 'bg-emerald-500/25 text-emerald-300 border border-emerald-500/40'
                                   : 'bg-tv-focus/80 text-white'
                               }`}
                             >
-                              <Play className={`w-4 h-4 ml-0.5 ${isEpisodeFocused ? 'fill-slate-950 text-slate-950' : 'fill-white text-white'}`} />
+                              {epCompleted && !isEpisodeFocused ? (
+                                <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                              ) : (
+                                <Play className={`w-4 h-4 ml-0.5 ${isEpisodeFocused ? 'fill-slate-950 text-slate-950' : 'fill-white text-white'}`} />
+                              )}
                             </span>
                             <div className="min-w-0 flex-1">
-                              <div className="flex items-center space-x-2">
+                              <div className="flex flex-wrap items-center gap-2">
                                 <span className="text-xs sm:text-sm font-bold truncate">
                                   Épisode {ep.episodeNum} : {ep.title}
                                 </span>
@@ -816,11 +1096,43 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
                                     {ep.duration}
                                   </span>
                                 )}
+                                {epResumable && epSaved && (
+                                  <span
+                                    className={`text-[10px] px-2 py-0.5 rounded-md font-bold flex items-center space-x-1 ${
+                                      isEpisodeFocused
+                                        ? 'bg-slate-950/50 text-sky-200 border border-white/20'
+                                        : 'bg-sky-500/20 text-sky-300 border border-sky-500/30'
+                                    }`}
+                                  >
+                                    <Clock className="w-3 h-3" />
+                                    <span>Reprendre à {formatResumeTime(epSaved.positionMs)}</span>
+                                  </span>
+                                )}
+                                {epCompleted && (
+                                  <span
+                                    className={`text-[10px] px-2 py-0.5 rounded-md font-bold flex items-center space-x-1 ${
+                                      isEpisodeFocused
+                                        ? 'bg-slate-950/50 text-emerald-200 border border-white/20'
+                                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                    }`}
+                                  >
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    <span>Déjà vu</span>
+                                  </span>
+                                )}
                               </div>
                               {ep.plot && (
                                 <p className={`text-[11px] mt-1 line-clamp-2 leading-tight ${isEpisodeFocused ? 'text-slate-100' : 'text-slate-400'}`}>
                                   {ep.plot}
                                 </p>
+                              )}
+                              {epResumable && (
+                                <div className="mt-2 w-full max-w-xs h-1.5 rounded-full bg-black/40 overflow-hidden border border-white/10">
+                                  <div
+                                    className={`h-full rounded-full ${isEpisodeFocused ? 'bg-white' : 'bg-sky-400'}`}
+                                    style={{ width: `${epPercent}%` }}
+                                  />
+                                </div>
                               )}
                             </div>
                           </div>
