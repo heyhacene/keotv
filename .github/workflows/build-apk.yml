@@ -71,7 +71,7 @@ jobs:
 
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if ! grep -q "fr.keo.tv.PlayerActivity\|\.PlayerActivity" "$MANIFEST"; then
-            sed -i 's#</application>#        <activity android:name=".PlayerActivity" android:exported="false" android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" android:theme="@style/Theme.AppCompat.NoActionBar" />\n    </application>#' "$MANIFEST"
+            sed -i 's#</application>#        <activity android:name=".PlayerActivity" android:exported="false" android:screenOrientation="sensor" android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" android:theme="@style/Theme.AppCompat.NoActionBar" />\n    </application>#' "$MANIFEST"
           fi
 
           echo "--- build.gradle (extrait) ---"
