@@ -158,7 +158,7 @@ jobs:
         run: |
           chmod +x ./gradlew
           echo "🚀 Compilation Release officielle avec Gradle..."
-          ./gradlew assembleRelease --stacktrace
+          ./gradlew assembleRelease --stacktrace --info || { echo "❌ Gradle compilation failed!"; exit 1; }
 
           UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           echo "APK généré : $UNSIGNED_APK"
