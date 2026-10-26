@@ -259,9 +259,9 @@ const CategoryRow = React.memo<CategoryRowProps>(
         onClick={() => onSelect(category, index)}
         className={`flex items-center justify-between px-3 py-2.5 mx-2 my-0.5 rounded-xl text-left text-sm border cursor-pointer select-none outline-none ${
           isFocused
-            ? 'bg-tv-focus border-white text-white font-black ring-4 ring-white z-10 shadow-lg scale-[1.02] transition-transform duration-75'
+            ? 'bg-tv-focus border-white text-white font-black ring-2 ring-white z-10'
             : isSelected
-            ? 'bg-tv-card/90 text-tv-accent font-bold border-l-4 border-tv-accent pl-2.5 shadow-sm'
+            ? 'bg-tv-card/90 text-tv-accent font-bold border-l-4 border-tv-accent pl-2.5'
             : 'text-slate-300 hover:bg-tv-cardHover/70 border-transparent hover:text-white'
         }`}
       >
@@ -345,9 +345,9 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
             e.preventDefault();
             onOpenContextMenu?.(channel);
           }}
-          className={`flex items-center justify-between px-3.5 h-[44px] mx-2 my-0.5 rounded-md select-none cursor-default transition-all duration-75 ${
+          className={`flex items-center justify-between px-3.5 h-[44px] mx-2 my-0.5 rounded-md select-none cursor-default ${
             isChannelFocused || isEpgRowFocused
-              ? 'bg-sky-500 text-white font-bold ring-2 ring-white shadow-md'
+              ? 'bg-sky-500 text-white font-bold ring-2 ring-white'
               : 'bg-white/[0.04] border border-white/5 text-slate-400 font-semibold'
           }`}
         >
@@ -383,9 +383,9 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
         {/* LEFT PART: TIVIMATE CHANNEL COLUMN (Num + Logo + Channel Name + Replay Clock / Blue Play Triangle) */}
         <div
           onClick={() => onSelectChannel(channel, index)}
-          className={`w-[240px] xl:w-[270px] flex-shrink-0 flex items-center justify-between px-2.5 mr-2 rounded-md cursor-pointer transition-all ${
+          className={`w-[240px] xl:w-[270px] flex-shrink-0 flex items-center justify-between px-2.5 mr-2 rounded-md cursor-pointer ${
             isChannelFocused
-              ? 'bg-slate-200 text-slate-950 font-black shadow-lg ring-2 ring-white z-20'
+              ? 'bg-slate-200 text-slate-950 font-black ring-2 ring-white z-20'
               : isEpgRowFocused
               ? 'bg-white/10 text-white font-bold'
               : 'bg-transparent text-slate-200 hover:bg-white/5'
@@ -412,6 +412,7 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
                   src={channel.logo}
                   alt={channel.name}
                   loading="lazy"
+                  decoding="async"
                   className="max-w-full max-h-full object-contain"
                   onError={(e) => {
                     (e.target as HTMLElement).style.display = 'none';
@@ -477,9 +478,9 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
                 key={offset}
                 style={{ flex: `${weight} 1 0%` }}
                 onClick={() => onSelectProgramCell(channel, index, offset, prog)}
-                className={`min-w-0 px-3 flex items-center justify-between rounded-[5px] cursor-pointer transition-all relative overflow-hidden ${
+                className={`min-w-0 px-3 flex items-center justify-between rounded-[5px] cursor-pointer relative overflow-hidden ${
                   isCellFocused
-                    ? 'bg-[#d8dee9] text-slate-950 font-bold shadow-md z-10'
+                    ? 'bg-[#d8dee9] text-slate-950 font-bold z-10'
                     : isPastProg
                     ? 'bg-emerald-950/40 hover:bg-emerald-900/50 text-emerald-100 border border-emerald-500/20'
                     : 'bg-[#1c222d]/90 hover:bg-[#252d3b] text-slate-200'
@@ -515,6 +516,30 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
         </div>
       </div>
     );
+  },
+  (prev, next) => {
+    if (
+      prev.isChannelFocused !== next.isChannelFocused ||
+      prev.isEpgRowFocused !== next.isEpgRowFocused ||
+      prev.isActive !== next.isActive ||
+      prev.channel.id !== next.channel.id ||
+      prev.channel.is_favorite !== next.channel.is_favorite ||
+      prev.index !== next.index
+    ) {
+      return false;
+    }
+    // Only re-render on focusedProgramOffset change if THIS row is the focused EPG row!
+    if (next.isEpgRowFocused && prev.focusedProgramOffset !== next.focusedProgramOffset) {
+      return false;
+    }
+    if (prev.visibleOffsets.length !== next.visibleOffsets.length) return false;
+    for (let i = 0; i < next.visibleOffsets.length; i++) {
+      const off = next.visibleOffsets[i];
+      if (prev.visibleOffsets[i] !== off) return false;
+      if (prev.programSlots[off]?.id !== next.programSlots[off]?.id) return false;
+      if (prev.programSlots[off]?.title !== next.programSlots[off]?.title) return false;
+    }
+    return true;
   }
 );
 TiviMateTimelineRow.displayName = 'TiviMateTimelineRow';
@@ -542,9 +567,9 @@ const ChannelRow = React.memo<ChannelRowProps>(
         <div
           id={`channel-item-${index}`}
           onClick={() => onSelect(channel, index)}
-          className={`flex items-center justify-between px-3.5 py-1.5 mx-2 my-1 rounded-xl select-none cursor-default transition-all duration-75 ${
+          className={`flex items-center justify-between px-3.5 py-1.5 mx-2 my-1 rounded-xl select-none cursor-default ${
             isFocused
-              ? 'bg-tv-focus text-white font-bold ring-2 ring-tv-accent shadow-md'
+              ? 'bg-tv-focus text-white font-bold ring-2 ring-tv-accent'
               : 'bg-white/5 border border-white/5 text-slate-400 font-semibold hover:bg-white/10'
           }`}
         >
@@ -569,7 +594,7 @@ const ChannelRow = React.memo<ChannelRowProps>(
         }}
         className={`flex items-center justify-between px-3.5 py-2 mx-2 my-0.5 rounded-xl cursor-pointer border select-none outline-none ${
           isFocused
-            ? 'bg-tv-focus border-white text-white font-bold ring-4 ring-white z-10 shadow-lg scale-[1.02] transition-transform duration-75'
+            ? 'bg-tv-focus border-white text-white font-bold ring-2 ring-white z-10'
             : isActive
             ? 'bg-tv-card border-tv-accent/50 text-slate-100'
             : 'bg-tv-card/40 border-transparent hover:bg-tv-cardHover/50 text-slate-300'
@@ -589,6 +614,7 @@ const ChannelRow = React.memo<ChannelRowProps>(
                 src={channel.logo}
                 alt={channel.name}
                 loading="lazy"
+                decoding="async"
                 className="w-full h-full object-cover"
                 onError={(e) => {
                   (e.target as HTMLElement).style.display = 'none';
@@ -634,7 +660,14 @@ const ChannelRow = React.memo<ChannelRowProps>(
         </button>
       </div>
     );
-  }
+  },
+  (prev, next) =>
+    prev.isFocused === next.isFocused &&
+    prev.isActive === next.isActive &&
+    prev.index === next.index &&
+    prev.channel.id === next.channel.id &&
+    prev.channel.is_favorite === next.channel.is_favorite &&
+    prev.channel.name === next.channel.name
 );
 ChannelRow.displayName = 'ChannelRow';
 
@@ -685,7 +718,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   // Live clock for TiviMate Time Ruler ("dim. 25 oct. à 12:29") and 30-min marks
   const [nowDate, setNowDate] = useState<Date>(() => new Date());
   useEffect(() => {
-    const interval = setInterval(() => setNowDate(new Date()), 30000);
+    const interval = setInterval(() => setNowDate(new Date()), 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -723,13 +756,13 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   }, [boundaryHit]);
 
   useEffect(() => {
-    setChannelNotice(null);
-    setChannelBounce(null);
+    setChannelNotice((prev) => (prev !== null ? null : prev));
+    setChannelBounce((prev) => (prev !== null ? null : prev));
   }, [focusedChannelIndex]);
 
   useEffect(() => {
-    setCategoryNotice(null);
-    setCategoryBounce(null);
+    setCategoryNotice((prev) => (prev !== null ? null : prev));
+    setCategoryBounce((prev) => (prev !== null ? null : prev));
   }, [focusedCategoryIndex]);
 
   const focusedChannel = channels[focusedChannelIndex] || activeChannel;
@@ -756,8 +789,8 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   useEffect(() => {
     if (!focusedChannel || isSep || !isVodOrSeriesSection) {
       if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-      setMediaDetails(null);
-      setLoadingMediaDetails(false);
+      setMediaDetails((prev: any) => (prev !== null ? null : prev));
+      setLoadingMediaDetails((prev) => (prev !== false ? false : prev));
       return;
     }
 
@@ -853,41 +886,54 @@ export const TVGuide: React.FC<TVGuideProps> = ({
     };
   }, [focusedChannel, isSep, isVodOrSeriesSection, serverCreds, activeSection]);
 
-  // INSTANT AUTO-SCROLL
+  // ZERO-LATENCY CONTAINER-RELATIVE AUTO-SCROLL (Only mutates scrollTop when item exits visible viewport!)
   useEffect(() => {
     if (activePane === 'channels' || activePane === 'epg_grid') {
+      const container = channelListRef.current;
       const el = document.getElementById(`channel-item-${focusedChannelIndex}`);
-      if (el) {
-        el.scrollIntoView({
-          behavior: 'auto',
-          block: 'nearest',
-        });
+      if (container && el) {
+        const cRect = container.getBoundingClientRect();
+        const eRect = el.getBoundingClientRect();
+        if (eRect.top < cRect.top + 4) {
+          container.scrollTop -= cRect.top - eRect.top + 8;
+        } else if (eRect.bottom > cRect.bottom - 4) {
+          container.scrollTop += eRect.bottom - cRect.bottom + 8;
+        }
       }
     }
   }, [focusedChannelIndex, activePane]);
 
   useEffect(() => {
     if (activePane === 'categories') {
+      const container = categoryListRef.current;
       const el = document.getElementById(`category-item-${focusedCategoryIndex}`);
-      if (el) {
-        el.scrollIntoView({
-          behavior: 'auto',
-          block: 'nearest',
-        });
+      if (container && el) {
+        const cRect = container.getBoundingClientRect();
+        const eRect = el.getBoundingClientRect();
+        if (eRect.top < cRect.top + 4) {
+          container.scrollTop -= cRect.top - eRect.top + 8;
+        } else if (eRect.bottom > cRect.bottom - 4) {
+          container.scrollTop += eRect.bottom - cRect.bottom + 8;
+        }
       }
     }
   }, [focusedCategoryIndex, activePane]);
 
-  // VIRTUALIZED WINDOWING FOR LARGE CHANNEL LISTS (54px per row = 7 rows visible in bottom half!)
+  // CHUNKED VIRTUALIZED WINDOWING FOR LARGE CHANNEL LISTS
+  // Quantizing startIndex in steps of 15 means 14 out of 15 D-Pad presses mount/unmount ZERO DOM nodes!
   const ROW_HEIGHT = 54;
-  const WINDOW_PAD_TOP = 25;
+  const WINDOW_STEP = 15;
+  const WINDOW_PAD_TOP = 20;
   const WINDOW_PAD_BOTTOM = 35;
 
   const totalChannels = channels.length;
-  const shouldWindow = totalChannels > 70;
+  const shouldWindow = totalChannels > 60;
 
-  const startIndex = shouldWindow ? Math.max(0, focusedChannelIndex - WINDOW_PAD_TOP) : 0;
-  const endIndex = shouldWindow ? Math.min(totalChannels, focusedChannelIndex + WINDOW_PAD_BOTTOM) : totalChannels;
+  const rawStart = shouldWindow ? Math.max(0, focusedChannelIndex - WINDOW_PAD_TOP) : 0;
+  const startIndex = shouldWindow ? Math.floor(rawStart / WINDOW_STEP) * WINDOW_STEP : 0;
+  const endIndex = shouldWindow
+    ? Math.min(totalChannels, startIndex + WINDOW_PAD_TOP + WINDOW_PAD_BOTTOM)
+    : totalChannels;
 
   const visibleChannels = useMemo(() => {
     return shouldWindow ? channels.slice(startIndex, endIndex) : channels;
@@ -897,6 +943,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   const bottomSpacerHeight = shouldWindow ? (totalChannels - endIndex) * ROW_HEIGHT : 0;
 
   // Background batch-loader for real Xtream EPG of channels around focusedChannelIndex
+  // Batches all updates into a SINGLE setChannelEpgMap call after 320ms idle so active navigation is never interrupted!
   useEffect(() => {
     if (!isLiveTimelineMode || !serverCreds?.serverUrl || !serverCreds?.username || !serverCreds?.password) {
       return;
@@ -912,9 +959,23 @@ export const TVGuide: React.FC<TVGuideProps> = ({
         return true;
       });
 
+      if (batch.length === 0) return;
+      const newEntries: Record<string, EpgProgram[]> = {};
+      let hasAnyNew = false;
+
       for (const ch of batch) {
         if (cancelled) break;
         fetchedChannelIdsRef.current.add(ch.id);
+
+        try {
+          const cachedDb = await EPGService.getProgramsForChannel(ch.id);
+          if (cachedDb && cachedDb.length > 0) {
+            newEntries[ch.id] = cachedDb;
+            hasAnyNew = true;
+            continue;
+          }
+        } catch {}
+
         const streamId = ch.stream_id || (ch.id.match(/\d+$/) ? ch.id.match(/\d+$/)![0] : null);
         if (!streamId) continue;
 
@@ -927,14 +988,19 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             channelId: ch.id,
           });
           if (!cancelled && programs.length > 0) {
-            setChannelEpgMap((prev) => ({
-              ...prev,
-              [ch.id]: programs,
-            }));
+            newEntries[ch.id] = programs;
+            hasAnyNew = true;
           }
         } catch {}
       }
-    }, 180);
+
+      if (!cancelled && hasAnyNew) {
+        setChannelEpgMap((prev) => ({
+          ...prev,
+          ...newEntries,
+        }));
+      }
+    }, 320);
 
     return () => {
       cancelled = true;
@@ -1056,7 +1122,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
       {/* 1. CATEGORIES / BOUQUETS COLUMN (Visible when in categories or channels; collapses on DPAD_RIGHT into epg_grid!) */}
       {!isCategoriesCollapsed && (
         <div
-          className={`relative w-56 xl:w-64 border-r border-white/10 flex flex-col flex-shrink-0 transition-all duration-150 ${
+          className={`relative w-56 xl:w-64 border-r border-white/10 flex flex-col flex-shrink-0 transition-colors duration-100 ${
             activePane === 'categories' || activePane === 'category_header' ? 'bg-tv-surface/95' : 'bg-tv-surface/50'
           }`}
         >

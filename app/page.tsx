@@ -253,6 +253,25 @@ export default function KeoTVHome() {
   // Catchup / Replay Modal state
   const [isCatchupModalOpen, setIsCatchupModalOpen] = useState<boolean>(false);
   const [catchupTargetChannel, setCatchupTargetChannel] = useState<Channel | null>(null);
+  const [replayHubChannels, setReplayHubChannels] = useState<Channel[]>([]);
+
+  const handleOpenReplayHub = useCallback(async () => {
+    try {
+      let archiveList = await db.channels
+        .filter((c) => Boolean(c.has_archive) && !c.is_hidden)
+        .toArray();
+      if (archiveList.length === 0) {
+        archiveList = filteredChannels.filter((c) => !c.stream_type || c.stream_type === 'live');
+      }
+      setReplayHubChannels(archiveList);
+      const initial = (activeChannel && archiveList.find((c) => c.id === activeChannel.id)) || archiveList[0] || activeChannel;
+      setCatchupTargetChannel(initial || null);
+      setIsCatchupModalOpen(true);
+    } catch {
+      setCatchupTargetChannel(activeChannel);
+      setIsCatchupModalOpen(true);
+    }
+  }, [filteredChannels, activeChannel]);
 
   // Parental lock & PIN states
   const [isParentalPinModalOpen, setIsParentalPinModalOpen] = useState<boolean>(false);
@@ -1281,37 +1300,31 @@ export default function KeoTVHome() {
     });
   }, [channels, hiddenChannelIds, excludedPrefixes]);
 
-  // Update EPG info whenever focused channel changes (debounced by 80ms for ultra-fluid DPAD navigation)
+  // Update EPG info strictly when activeChannel changes (never on focusedChannelIndex to ensure 60fps zero-latency D-Pad navigation!)
   useEffect(() => {
-    const focusedChannel = filteredChannels[focusedChannelIndex];
-    if (!focusedChannel) {
+    if (!activeChannel) {
       setCurrentEpg(null);
       setNextEpg(null);
       return;
     }
 
-    const isSep = isSeparatorChannel(focusedChannel);
+    const isSep = isSeparatorChannel(activeChannel);
     const isVodOrSeries =
       activeSection === 'vod' ||
       activeSection === 'series' ||
-      focusedChannel.stream_type === 'vod' ||
-      focusedChannel.stream_type === 'series';
+      activeChannel.stream_type === 'vod' ||
+      activeChannel.stream_type === 'series';
 
-    // Never generate dummy EPG for separators or films/series
     if (isSep || isVodOrSeries) {
       setCurrentEpg(null);
       setNextEpg(null);
       return;
     }
 
-    const timer = setTimeout(() => {
-      const epg = getMockEpgForChannel(focusedChannel.id);
-      setCurrentEpg(epg.current);
-      setNextEpg(epg.next);
-    }, 80);
-
-    return () => clearTimeout(timer);
-  }, [focusedChannelIndex, filteredChannels, activeSection]);
+    const epg = getMockEpgForChannel(activeChannel.id);
+    setCurrentEpg(epg.current);
+    setNextEpg(epg.next);
+  }, [activeChannel, activeSection]);
 
   // Play an episode chosen from the series detail page
   const handlePlaySeriesEpisode = useCallback(
@@ -2227,12 +2240,13 @@ export default function KeoTVHome() {
     },
     onSelectMenuItem: (menuIdx) => {
       if (menuIdx === 0) handleSelectSection('live');
-      else if (menuIdx === 1) handleSelectSection('vod');
-      else if (menuIdx === 2) handleSelectSection('series');
-      else if (menuIdx === 3) handleSelectSection('fav');
-      else if (menuIdx === 4) setIsSearchModalOpen(true);
-      else if (menuIdx === 5) setIsSettingsModalOpen(true);
-      else if (menuIdx === 6) setIsSyncModalOpen(true);
+      else if (menuIdx === 1) handleOpenReplayHub();
+      else if (menuIdx === 2) handleSelectSection('vod');
+      else if (menuIdx === 3) handleSelectSection('series');
+      else if (menuIdx === 4) handleSelectSection('fav');
+      else if (menuIdx === 5) setIsSearchModalOpen(true);
+      else if (menuIdx === 6) setIsSettingsModalOpen(true);
+      else if (menuIdx === 7) setIsSyncModalOpen(true);
     },
     isFullscreen,
     setIsFullscreen,
@@ -3063,11 +3077,14 @@ export default function KeoTVHome() {
         <div className="flex h-full w-full bg-tv-bg overflow-hidden select-none">
           {/* A. Ultra-compact TV-style Sidebar (48px) */}
           <div className="w-12 bg-tv-surface border-r border-tv-border flex flex-col items-center py-2 justify-between flex-shrink-0 z-20">
-            {/* KeoTV mini logo */}
-            <div className="flex flex-col items-center mb-1">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-sky-600 to-tv-accent flex items-center justify-center shadow-md shadow-sky-500/20">
-                <Tv className="w-4 h-4 text-white" />
-              </div>
+            {/* KeoTV brand text */}
+            <div className="flex flex-col items-center mb-1 pointer-events-none pb-1 border-b border-white/5 w-full">
+              <span className="text-[10px] font-black tracking-wider text-tv-accent">
+                KEOTV
+              </span>
+              <span className="text-[6px] font-mono font-bold text-sky-400/80 uppercase">
+                by HO
+              </span>
             </div>
 
             {/* Navigation Icons (Direct, Films, Séries, Favoris, Recherche) */}
@@ -3494,6 +3511,7 @@ export default function KeoTVHome() {
               onOpenSyncModal={() => setIsSyncModalOpen(true)}
               onOpenSettingsModal={() => setIsSettingsModalOpen(true)}
               onOpenSearchModal={() => setIsSearchModalOpen(true)}
+              onOpenReplayModal={handleOpenReplayHub}
               boundaryHit={boundaryHit}
             />
 
@@ -3755,6 +3773,7 @@ export default function KeoTVHome() {
       <CatchupModal
         isOpen={isCatchupModalOpen}
         channel={catchupTargetChannel}
+        replayChannels={replayHubChannels}
         serverCreds={activeXtreamCreds}
         onClose={() => {
           setIsCatchupModalOpen(false);

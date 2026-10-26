@@ -113,11 +113,14 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ isVisible, isFading 
         </div>
 
         {/* Brand Text */}
-        <div className="flex flex-col items-center space-y-1.5 text-center">
+        <div className="flex flex-col items-center space-y-1 text-center">
           <h1 className="text-2xl md:text-3xl font-extrabold tracking-wider bg-gradient-to-r from-sky-200 via-white to-sky-400 bg-clip-text text-transparent">
             KeoTV
           </h1>
-          <p className="text-[11px] text-slate-400 font-medium tracking-wide">
+          <span className="text-[10px] font-mono font-bold tracking-[0.25em] uppercase text-sky-400/80">
+            by HO
+          </span>
+          <p className="text-[11px] text-slate-400 font-medium tracking-wide pt-1">
             Chargement de vos bouquets en mémoire...
           </p>
         </div>
@@ -131,7 +134,7 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ isVisible, isFading 
       {/* Build Number Watermark at the bottom */}
       <div className="absolute bottom-6 left-0 right-0 text-center pointer-events-none">
         <span className="text-[11px] font-mono font-medium text-slate-500/80 tracking-widest uppercase">
-          KeoTV v1.3.{buildNumber} • Build {buildNumber}
+          KeoTV v1.3.{buildNumber} • Build {buildNumber} • by HO
         </span>
       </div>
     </div>

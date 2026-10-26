@@ -574,9 +574,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
             <div>
               <div className="flex items-center space-x-3">
-                <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-wide">Paramètres KeoTV</h2>
+                <h2 className="text-xl md:text-2xl font-extrabold text-white tracking-wide">
+                  Paramètres KeoTV <span className="text-sm md:text-base font-semibold text-tv-accent/90">• by HO</span>
+                </h2>
                 <span className="px-3 py-0.5 rounded-full text-[11px] font-mono font-semibold bg-sky-500/15 text-tv-accent border border-sky-500/30">
-                  v1.0.0 (Build {currentBuildNumber})
+                  v1.3.{currentBuildNumber} (Build {currentBuildNumber})
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1">Playlists, synchronisation cloud, interface TV, contrôles parentaux & mises à jour</p>
@@ -1476,14 +1478,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-slate-300">Version installée</span>
                   <span className="text-xs font-mono font-bold text-tv-accent">
-                    v1.0.0 (Build {process.env.NEXT_PUBLIC_BUILD_NUMBER || currentBuildNumber || 22})
+                    v1.3.{currentBuildNumber} (Build {currentBuildNumber})
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium text-slate-300">Signature officielle</span>
                   <span className="text-xs font-medium text-emerald-400 flex items-center">
-                    <ShieldCheck className="w-4 h-4 mr-1" /> Certifié KeoTV Permanent
+                    <ShieldCheck className="w-4 h-4 mr-1" /> Certifié KeoTV • by HO
                   </span>
                 </div>
 
@@ -1515,7 +1517,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Télécharger l&apos;APK ({updateInfo?.hasUpdate ? `Build ${updateInfo.latestBuild}` : `Build ${currentBuildNumber || 22}`})</span>
+                    <span>Télécharger l&apos;APK ({updateInfo?.hasUpdate ? `Build ${updateInfo.latestBuild}` : `Build ${currentBuildNumber}`})</span>
                   </a>
                 </div>
 
@@ -1806,7 +1808,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
         {/* Footer */}
         <div className="px-6 py-3 border-t border-tv-border bg-black/20 flex justify-between items-center flex-shrink-0">
-          <span className="text-[11px] text-slate-500 font-mono">KeoTV IPTV • v1.0.0 (Build {currentBuildNumber})</span>
+          <span className="text-[11px] text-slate-400 font-mono">KeoTV IPTV • <strong className="text-tv-accent">by HO</strong> • v1.3.{currentBuildNumber} (Build {currentBuildNumber})</span>
           <button
             onClick={onClose}
             className="px-4 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-lg text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"

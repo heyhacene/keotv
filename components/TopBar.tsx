@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Search, Clock, Wifi, Maximize2 } from 'lucide-react';
+import { Clock, Wifi, Maximize2 } from 'lucide-react';
 
 interface TopBarProps {
   currentCategoryName?: string;
@@ -9,7 +9,7 @@ interface TopBarProps {
   onToggleFullscreen: () => void;
 }
 
-export const TopBar: React.FC<TopBarProps> = ({
+export const TopBar: React.FC<TopBarProps> = React.memo(({
   currentCategoryName,
   onToggleFullscreen,
 }) => {
@@ -21,21 +21,21 @@ export const TopBar: React.FC<TopBarProps> = ({
         new Date().toLocaleTimeString('fr-FR', {
           hour: '2-digit',
           minute: '2-digit',
-          second: '2-digit',
         })
       );
     };
     update();
-    const timer = setInterval(update, 1000);
+    const timer = setInterval(update, 15000);
     return () => clearInterval(timer);
   }, []);
 
   return (
-    <header className="h-12 border-b border-tv-border bg-tv-surface/80 backdrop-blur-md px-6 flex items-center justify-between text-slate-200 select-none">
-      <div className="flex items-center space-x-4">
+    <header className="h-11 border-b border-tv-border bg-[#0b1018] px-6 flex items-center justify-between text-slate-200 select-none flex-shrink-0">
+      <div className="flex items-center space-x-3">
         <span className="text-xs font-bold uppercase tracking-wider text-tv-accent">
           {currentCategoryName || 'En direct'}
         </span>
+        <span className="text-[10px] font-mono text-slate-500 hidden sm:inline">• by HO</span>
       </div>
 
       <div className="flex items-center space-x-6">
@@ -59,4 +59,6 @@ export const TopBar: React.FC<TopBarProps> = ({
       </div>
     </header>
   );
-};
+});
+TopBar.displayName = 'TopBar';
+
