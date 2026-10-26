@@ -1547,7 +1547,7 @@ public class PlayerActivity extends AppCompatActivity {
         trackIndices.add(-1);
 
         int selectedIndex = 0;
-        boolean isDisabled = player.getTrackSelectionParameters().isTrackTypeDisabled(C.TRACK_TYPE_TEXT);
+        boolean isDisabled = player.getTrackSelectionParameters().disabledTrackTypes.contains(C.TRACK_TYPE_TEXT);
 
         for (Tracks.Group group : tracks.getGroups()) {
             if (group.getType() == C.TRACK_TYPE_TEXT) {
