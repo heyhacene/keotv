@@ -1211,6 +1211,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             >
               <LiveVideoPlayer
                 channel={activeChannel || focusedChannel}
+                playlist={channels}
                 currentEpg={currentEpg}
                 nextEpg={nextEpg}
                 isFullscreen={false}

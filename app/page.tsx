@@ -2722,6 +2722,7 @@ export default function KeoTVHome() {
         >
           <LiveVideoPlayer
             channel={activeChannel}
+            playlist={filteredChannels}
             currentEpg={currentEpg}
             nextEpg={nextEpg}
             isFullscreen={isFullscreen}
@@ -3343,6 +3344,7 @@ export default function KeoTVHome() {
             >
               <LiveVideoPlayer
                 channel={activeChannel}
+                playlist={filteredChannels}
                 currentEpg={currentEpg}
                 nextEpg={nextEpg}
                 isFullscreen={isFullscreen}

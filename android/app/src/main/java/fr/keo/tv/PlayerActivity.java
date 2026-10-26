@@ -255,13 +255,11 @@ public class PlayerActivity extends AppCompatActivity {
 
         // Auto orientation: Landscape on TV, Sensor-based on Mobile/Tablet
         UiModeManager uiModeManager = (UiModeManager) getSystemService(UI_MODE_SERVICE);
-        boolean isTv = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION)
-                || getPackageManager().hasSystemFeature("android.software.leanback")
-                || !getPackageManager().hasSystemFeature("android.hardware.touchscreen");
+        boolean isTv = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION);
         if (isTv) {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         } else {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
         }
 
         FrameLayout root = new FrameLayout(this);
@@ -526,6 +524,16 @@ public class PlayerActivity extends AppCompatActivity {
         aspParams.setMarginStart(dp(10));
         btnAspectRatio.setLayoutParams(aspParams);
         bottomControls.addView(btnAspectRatio);
+
+        // Rotation button (allows 1-tap switch between Landscape and Portrait on mobile)
+        if (!isTv) {
+            TextView btnRotate = createOsdButton("🔄  Rotation", v -> toggleScreenOrientation());
+            LinearLayout.LayoutParams rotParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rotParams.setMarginStart(dp(10));
+            btnRotate.setLayoutParams(rotParams);
+            bottomControls.addView(btnRotate);
+        }
 
         if (!isLive) {
             TextView btnRew = createOsdButton("⏪ -10s", v -> seekRelative(-10000));
@@ -1416,31 +1424,57 @@ public class PlayerActivity extends AppCompatActivity {
         return super.onTouchEvent(event);
     }
 
+    private void toggleScreenOrientation() {
+        int currentOrientation = getResources().getConfiguration().orientation;
+        if (currentOrientation == Configuration.ORIENTATION_LANDSCAPE) {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            showZapFeedback("📱 Mode Portrait", "Orientation verticale");
+        } else {
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
+            showZapFeedback("📺 Mode Paysage", "Orientation plein écran");
+        }
+        showOsd();
+    }
+
     private void zapNextChannel() {
         if (player == null) return;
-        if (player.hasNextMediaItem()) {
-            player.seekToNextMediaItem();
-        } else if (player.getMediaItemCount() > 0) {
-            player.seekToDefaultPosition(0);
+        int total = player.getMediaItemCount();
+        if (total <= 1) {
+            String chName = (titleView != null && !TextUtils.isEmpty(titleView.getText()))
+                    ? titleView.getText().toString() : "";
+            showZapFeedback("Chaîne unique", chName.isEmpty() ? "Aucune autre chaîne" : chName);
+            showOsd();
+            return;
         }
+        int currentIdx = player.getCurrentMediaItemIndex();
+        int nextIdx = (currentIdx + 1) % total;
+        player.seekToDefaultPosition(nextIdx);
+        player.prepare();
+        player.play();
         updateTitle();
         showOsd();
-        String channelName = (titleView != null && !TextUtils.isEmpty(titleView.getText()))
-                ? titleView.getText().toString() : "";
+        String channelName = (nextIdx < pendingTitles.size()) ? pendingTitles.get(nextIdx) : "";
         showZapFeedback("▲ Chaîne suivante", channelName);
     }
 
     private void zapPreviousChannel() {
         if (player == null) return;
-        if (player.hasPreviousMediaItem()) {
-            player.seekToPreviousMediaItem();
-        } else if (player.getMediaItemCount() > 0) {
-            player.seekToDefaultPosition(player.getMediaItemCount() - 1);
+        int total = player.getMediaItemCount();
+        if (total <= 1) {
+            String chName = (titleView != null && !TextUtils.isEmpty(titleView.getText()))
+                    ? titleView.getText().toString() : "";
+            showZapFeedback("Chaîne unique", chName.isEmpty() ? "Aucune autre chaîne" : chName);
+            showOsd();
+            return;
         }
+        int currentIdx = player.getCurrentMediaItemIndex();
+        int prevIdx = (currentIdx - 1 + total) % total;
+        player.seekToDefaultPosition(prevIdx);
+        player.prepare();
+        player.play();
         updateTitle();
         showOsd();
-        String channelName = (titleView != null && !TextUtils.isEmpty(titleView.getText()))
-                ? titleView.getText().toString() : "";
+        String channelName = (prevIdx < pendingTitles.size()) ? pendingTitles.get(prevIdx) : "";
         showZapFeedback("▼ Chaîne précédente", channelName);
     }
 

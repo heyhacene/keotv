@@ -8,6 +8,7 @@ import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from 
 
 interface LiveVideoPlayerProps {
   channel: Channel | null;
+  playlist?: Channel[];
   currentEpg?: EpgProgram | null;
   nextEpg?: EpgProgram | null;
   isFullscreen: boolean;
@@ -21,6 +22,7 @@ interface LiveVideoPlayerProps {
 
 export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   channel,
+  playlist,
   currentEpg,
   nextEpg,
   isFullscreen,
@@ -95,10 +97,22 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   const openNativePlayer = (e?: React.MouseEvent) => {
     e?.stopPropagation();
     if (!channel) return;
+
+    let urls = [channel.stream_url];
+    let titles = [channel.name];
+    let index = 0;
+
+    if (playlist && playlist.length > 0) {
+      urls = playlist.map((c) => c.stream_url);
+      titles = playlist.map((c) => c.name);
+      const foundIdx = playlist.findIndex((c) => c.id === channel.id);
+      index = foundIdx >= 0 ? foundIdx : 0;
+    }
+
     NativePlayer.play({
-      urls: [channel.stream_url],
-      titles: [channel.name],
-      index: 0,
+      urls,
+      titles,
+      index,
       userAgent: NATIVE_PLAYER_USER_AGENT,
       isLive: channel.stream_type === 'live',
     }).catch((err: any) => alert(`Lecture impossible : ${err?.message || err}`));

@@ -29,16 +29,14 @@ public class MainActivity extends BridgeActivity {
 
         // Orientation management:
         // - Force landscape orientation on Android TV devices
-        // - Allow sensor-based automatic rotation on mobile smartphones and tablets
+        // - Allow full sensor-based automatic rotation on mobile smartphones and tablets
         UiModeManager uiModeManager = (UiModeManager) getSystemService(UI_MODE_SERVICE);
-        final boolean isTv = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION)
-                || getPackageManager().hasSystemFeature("android.software.leanback")
-                || !getPackageManager().hasSystemFeature("android.hardware.touchscreen");
+        final boolean isTv = (uiModeManager != null && uiModeManager.getCurrentModeType() == Configuration.UI_MODE_TYPE_TELEVISION);
 
         if (isTv) {
             setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE);
         } else {
-            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
         }
 
         // Tag WebView user agent AND inject window.__KEOTV_IS_TV__ so frontend immediately knows device type
