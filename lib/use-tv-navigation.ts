@@ -402,7 +402,7 @@ export function useTVNavigation({
           const current = focusedMenuIndexRef.current;
           if (current <= 0) {
             if (shouldAllowWrap('menu', 'top', e.repeat)) {
-              setFocusedMenuIndex(7);
+              setFocusedMenuIndex(6);
             }
           } else {
             boundaryAttemptRef.current = null;
@@ -467,7 +467,7 @@ export function useTVNavigation({
           }
         } else if (activePane === 'menu') {
           const current = focusedMenuIndexRef.current;
-          if (current >= 7) {
+          if (current >= 6) {
             if (shouldAllowWrap('menu', 'bottom', e.repeat)) {
               setFocusedMenuIndex(0);
             }

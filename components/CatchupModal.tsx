@@ -11,13 +11,13 @@ import {
   X,
   Radio,
   Loader2,
+  ChevronRight,
   Tv,
 } from 'lucide-react';
 
 interface CatchupModalProps {
   isOpen: boolean;
   channel: Channel | null;
-  replayChannels?: Channel[];
   serverCreds?: { serverUrl: string; username: string; password: string } | null;
   onClose: () => void;
   onPlayProgram: (program: EpgProgram, channel: Channel) => void;
@@ -26,41 +26,18 @@ interface CatchupModalProps {
 export const CatchupModal: React.FC<CatchupModalProps> = ({
   isOpen,
   channel,
-  replayChannels = [],
   serverCreds,
   onClose,
   onPlayProgram,
 }) => {
-  const [selectedChannel, setSelectedChannel] = useState<Channel | null>(channel);
   const [loading, setLoading] = useState(false);
   const [programs, setPrograms] = useState<EpgProgram[]>([]);
   const [selectedDay, setSelectedDay] = useState<number>(0); // 0 = Aujourd'hui, -1 = Hier, etc.
-  const [channelFocusIdx, setChannelFocusIdx] = useState<number>(0);
   const [focusedIndex, setFocusedIndex] = useState<number>(0);
-  const [activeArea, setActiveArea] = useState<'channels' | 'days' | 'programs'>('programs');
+  const [activeArea, setActiveArea] = useState<'days' | 'programs'>('programs');
   const [dayIndex, setDayIndex] = useState<number>(0);
 
   const programsListRef = useRef<HTMLDivElement | null>(null);
-
-  // Sync selectedChannel when modal opens or channel prop changes
-  useEffect(() => {
-    if (channel) {
-      setSelectedChannel(channel);
-      setActiveArea('programs');
-    } else if (replayChannels.length > 0) {
-      setSelectedChannel(replayChannels[0]);
-      setActiveArea('channels');
-    }
-  }, [channel, replayChannels, isOpen]);
-
-  // Keep track of channelFocusIdx matching selectedChannel
-  useEffect(() => {
-    if (!selectedChannel || replayChannels.length === 0) return;
-    const idx = replayChannels.findIndex((c) => c.id === selectedChannel.id);
-    if (idx !== -1) {
-      setChannelFocusIdx(idx);
-    }
-  }, [selectedChannel, replayChannels]);
 
   // Generate last 7 days list
   const days = React.useMemo(() => {
@@ -85,29 +62,29 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
     return list;
   }, []);
 
-  // Fetch full EPG whenever selectedChannel opens
+  // Fetch full EPG whenever channel opens
   useEffect(() => {
-    if (!isOpen || !selectedChannel) return;
+    if (!isOpen || !channel) return;
     let isCancelled = false;
 
     async function loadPrograms() {
       setLoading(true);
       try {
-        const streamId = selectedChannel?.stream_id || (selectedChannel?.id.match(/\d+$/) ? selectedChannel?.id.match(/\d+$/)![0] : null);
+        const streamId = channel?.stream_id || (channel?.id.match(/\d+$/) ? channel?.id.match(/\d+$/)![0] : null);
         if (serverCreds && streamId) {
           const list = await EPGService.fetchXtreamFullEpg({
             serverUrl: serverCreds.serverUrl,
             username: serverCreds.username,
             password: serverCreds.password,
             streamId,
-            channelId: selectedChannel.id,
+            channelId: channel.id,
           });
           if (!isCancelled) {
             setPrograms(list);
           }
         } else {
           // Local fallback from IndexedDB
-          const list = await EPGService.getProgramsForChannel(selectedChannel.id);
+          const list = await EPGService.getProgramsForChannel(channel.id);
           if (!isCancelled) {
             setPrograms(list);
           }
@@ -123,7 +100,7 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
     return () => {
       isCancelled = true;
     };
-  }, [isOpen, selectedChannel, serverCreds]);
+  }, [isOpen, channel, serverCreds]);
 
   // Filter programs for the selected day
   const filteredPrograms = React.useMemo(() => {
@@ -135,10 +112,11 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
       return p.start.slice(0, 10) === targetDay.dateStr;
     });
 
+    // If no program strictly on that day, display all programs
     return matched.length > 0 ? matched : programs;
   }, [programs, selectedDay, days]);
 
-  // Reset program focus index when selected day changes
+  // Reset program focus index when selected day changes (keep activeArea intact so user can scroll days with Up/Down)
   useEffect(() => {
     setFocusedIndex(0);
   }, [selectedDay]);
@@ -149,11 +127,8 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
     if (activeArea === 'programs') {
       const el = document.getElementById(`catchup-prog-${focusedIndex}`);
       el?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-    } else if (activeArea === 'channels') {
-      const el = document.getElementById(`catchup-chan-${channelFocusIdx}`);
-      el?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
     }
-  }, [focusedIndex, channelFocusIdx, activeArea, isOpen]);
+  }, [focusedIndex, activeArea, isOpen]);
 
   // TV Remote D-Pad Navigation
   useEffect(() => {
@@ -210,43 +185,7 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
         return;
       }
 
-      const hasChannelColumn = replayChannels.length > 0;
-
-      if (activeArea === 'channels') {
-        if (isRight) {
-          e.preventDefault();
-          setActiveArea('days');
-          return;
-        }
-        if (isDown) {
-          e.preventDefault();
-          const next = channelFocusIdx < replayChannels.length - 1 ? channelFocusIdx + 1 : 0;
-          setChannelFocusIdx(next);
-          setSelectedChannel(replayChannels[next]);
-          return;
-        }
-        if (isUp) {
-          e.preventDefault();
-          const prev = channelFocusIdx > 0 ? channelFocusIdx - 1 : replayChannels.length - 1;
-          setChannelFocusIdx(prev);
-          setSelectedChannel(replayChannels[prev]);
-          return;
-        }
-        if (isEnter) {
-          e.preventDefault();
-          setActiveArea('days');
-          return;
-        }
-      }
-
       if (activeArea === 'days') {
-        if (isLeft) {
-          e.preventDefault();
-          if (hasChannelColumn) {
-            setActiveArea('channels');
-          }
-          return;
-        }
         if (isRight) {
           e.preventDefault();
           setActiveArea('programs');
@@ -296,8 +235,8 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
         if (isEnter) {
           e.preventDefault();
           const target = filteredPrograms[focusedIndex];
-          if (target && selectedChannel) {
-            onPlayProgram(target, selectedChannel);
+          if (target && channel) {
+            onPlayProgram(target, channel);
             onClose();
           }
           return;
@@ -307,29 +246,28 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
 
     window.addEventListener('keydown', handleKeyDown, true);
     return () => window.removeEventListener('keydown', handleKeyDown, true);
-  }, [isOpen, activeArea, channelFocusIdx, dayIndex, focusedIndex, days, filteredPrograms, selectedChannel, replayChannels, onPlayProgram, onClose]);
+  }, [isOpen, activeArea, dayIndex, focusedIndex, days, filteredPrograms, channel, onPlayProgram, onClose]);
 
-  const currentDisplayChannel = selectedChannel || channel;
-  if (!isOpen || !currentDisplayChannel) return null;
+  if (!isOpen || !channel) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 md:p-6 animate-in fade-in duration-150 select-none">
-      <div className="w-full max-w-5xl h-[88vh] bg-[#0c121e] border border-tv-border rounded-2xl flex flex-col shadow-2xl overflow-hidden">
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 md:p-8 animate-in fade-in duration-150 select-none">
+      <div className="w-full max-w-4xl h-[85vh] bg-[#0c121e] border border-tv-border rounded-2xl flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
-        <div className="px-6 py-3.5 bg-tv-card/90 border-b border-tv-border flex items-center justify-between flex-shrink-0">
+        <div className="px-6 py-4 bg-tv-card/90 border-b border-tv-border flex items-center justify-between flex-shrink-0">
           <div className="flex items-center space-x-3.5">
             <div className="p-2.5 rounded-xl bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-              <RotateCcw className="w-5 h-5" />
+              <RotateCcw className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center space-x-2">
                 <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20">
-                  Espace Replay 7 Jours
+                  Replay & Timeshift
                 </span>
-                <span className="text-[10px] font-mono text-slate-400">• by HO</span>
+                <span className="text-xs text-slate-400 font-mono">Derniers 7 jours</span>
               </div>
-              <h2 className="text-base md:text-lg font-black text-white truncate max-w-md mt-0.5">
-                {currentDisplayChannel.name}
+              <h2 className="text-lg md:text-xl font-black text-white truncate max-w-md mt-0.5">
+                {channel.name}
               </h2>
             </div>
           </div>
@@ -343,49 +281,12 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
           </button>
         </div>
 
-        {/* Body Split-Screen: Channels (optional) + Days on the Left, Programs on the Right */}
+        {/* Body Split-Screen: Days on the Left, Programs on the Right */}
         <div className="flex-1 flex overflow-hidden">
-          {/* Channel selector column (when in Replay Hub mode with replayChannels) */}
-          {replayChannels.length > 0 && (
-            <div className="w-48 md:w-56 bg-black/60 border-r border-white/5 p-2 space-y-1 overflow-y-auto flex-shrink-0">
-              <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center space-x-1.5">
-                <Tv className="w-3.5 h-3.5 text-tv-accent" />
-                <span>Chaînes Replay</span>
-              </div>
-
-              {replayChannels.map((ch, idx) => {
-                const isSelected = selectedChannel?.id === ch.id;
-                const isFocused = activeArea === 'channels' && channelFocusIdx === idx;
-
-                return (
-                  <button
-                    key={ch.id}
-                    id={`catchup-chan-${idx}`}
-                    onClick={() => {
-                      setSelectedChannel(ch);
-                      setChannelFocusIdx(idx);
-                      setActiveArea('days');
-                    }}
-                    className={`w-full text-left px-2.5 py-2 rounded-xl text-xs font-semibold transition flex items-center space-x-2 ${
-                      isFocused
-                        ? 'bg-tv-focus text-white ring-2 ring-white font-bold'
-                        : isSelected
-                        ? 'bg-white/15 text-emerald-300 border border-emerald-500/30'
-                        : 'text-slate-300 hover:bg-white/5 hover:text-white'
-                    }`}
-                  >
-                    <span className="text-[10px] font-mono text-slate-400 w-5 text-right flex-shrink-0">{ch.num}</span>
-                    <span className="truncate flex-1">{ch.name}</span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
           {/* Days selector column */}
-          <div className="w-36 md:w-44 bg-black/40 border-r border-white/5 p-2 space-y-1 overflow-y-auto flex-shrink-0">
-            <div className="px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center space-x-1.5">
-              <Calendar className="w-3.5 h-3.5 text-emerald-400" />
+          <div className="w-44 md:w-52 bg-black/40 border-r border-white/5 p-3 space-y-1 overflow-y-auto flex-shrink-0">
+            <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center space-x-1.5">
+              <Calendar className="w-3.5 h-3.5 text-tv-accent" />
               <span>Journées</span>
             </div>
 
@@ -401,9 +302,9 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
                     setDayIndex(idx);
                     setActiveArea('programs');
                   }}
-                  className={`w-full text-left px-3 py-2.5 rounded-xl text-xs font-bold transition flex items-center justify-between ${
+                  className={`w-full text-left px-3.5 py-3 rounded-xl text-xs font-bold transition flex items-center justify-between ${
                     isFocused
-                      ? 'bg-tv-focus text-white ring-2 ring-white z-10'
+                      ? 'bg-tv-focus text-white ring-4 ring-white shadow-xl scale-[1.02] z-10'
                       : isSelected
                       ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-black'
                       : 'text-slate-300 hover:bg-white/5 hover:text-white'
@@ -443,12 +344,12 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
                     key={prog.id}
                     id={`catchup-prog-${idx}`}
                     onClick={() => {
-                      onPlayProgram(prog, currentDisplayChannel);
+                      onPlayProgram(prog, channel);
                       onClose();
                     }}
                     className={`p-3.5 rounded-xl border transition cursor-pointer flex items-center justify-between ${
                       isFocused
-                        ? 'bg-tv-focus text-white ring-2 ring-white z-10'
+                        ? 'bg-tv-focus text-white ring-4 ring-white shadow-2xl scale-[1.01] z-10'
                         : 'bg-tv-card/70 border-white/5 hover:bg-tv-card hover:border-tv-border'
                     }`}
                   >
@@ -502,11 +403,10 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
 
         {/* Footer info bar */}
         <div className="px-6 py-2.5 bg-black/60 border-t border-tv-border flex items-center justify-between text-[11px] text-slate-400">
-          <span>💡 <strong>Télécommande :</strong> Gauche pour changer de jour ou de chaîne, Entrée pour lancer l&apos;émission.</span>
-          <span className="font-mono text-emerald-400 font-bold">KeoTV Replay Hub • by HO</span>
+          <span>💡 <strong>Télécommande :</strong> Gauche pour changer de jour, Entrée pour lancer l&apos;émission.</span>
+          <span className="font-mono text-emerald-400 font-bold">KeoTV Catchup Player</span>
         </div>
       </div>
     </div>
   );
 };
-

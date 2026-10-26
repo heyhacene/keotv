@@ -539,100 +539,80 @@ export const INITIAL_CHANNELS: Channel[] = [
   },
 ];
 
-// Module-level minute-bucketed cache so getMockEpgForChannel and getSyntheticSlotForOffset
-// perform ZERO Date/ISO allocations and return stable object references during 60fps D-Pad navigation!
-let cachedMinuteBucket = -1;
-let mockEpgCache = new Map<string, { current: EpgProgram; next: EpgProgram }>();
-let syntheticSlotCache = new Map<string, EpgProgram>();
-
-function ensureMinuteCacheFresh(): number {
-  const nowMs = Date.now();
-  const bucket = Math.floor(nowMs / 60000);
-  if (bucket !== cachedMinuteBucket) {
-    cachedMinuteBucket = bucket;
-    mockEpgCache.clear();
-    syntheticSlotCache.clear();
-  }
-  return bucket * 60000;
-}
-
-const PROGRAMS_MAP: Record<string, { currentTitle: string; currentDesc: string; nextTitle: string; cat: string }> = {
-  ch_tf1: {
-    currentTitle: 'Le Journal de 20h & Météo',
-    currentDesc: "Retrouvez toute l'actualité nationale et internationale présentée par la rédaction de TF1 avec des reportages exclusifs.",
-    nextTitle: 'Koh-Lanta : La Tribu Maudite',
-    cat: 'Information / Société',
-  },
-  ch_fr2: {
-    currentTitle: "N'oubliez pas les paroles !",
-    currentDesc: 'Jeu musical animé par Nagui où les maestros rivalisent de mémoire pour retrouver les paroles manquantes.',
-    nextTitle: 'Envoyé Spécial',
-    cat: 'Jeu télévisé',
-  },
-  ch_cplus: {
-    currentTitle: 'Oppenheimer (2023) - Exclusivité 4K',
-    currentDesc: 'Biographie historique réalisée par Christopher Nolan. Le projet Manhattan et la conception de la bombe atomique.',
-    nextTitle: 'Late avec Alain Chabat',
-    cat: 'Film / Drame',
-  },
-  ch_m6: {
-    currentTitle: 'Zone Interdite : Immersion au cœur des urgences',
-    currentDesc: 'Enquête au plus près du quotidien des urgentistes et soignants qui se battent chaque nuit pour sauver des vies.',
-    nextTitle: 'Enquête Exclusive',
-    cat: 'Magazine',
-  },
-  ch_arte: {
-    currentTitle: 'Les Mystères du Système Solaire',
-    currentDesc: 'Une odyssée spectaculaire en haute définition à travers les anneaux de Saturne et les lunes glacées.',
-    nextTitle: 'Le dessous des cartes',
-    cat: 'Documentaire',
-  },
-  ch_beinsport1: {
-    currentTitle: 'UEFA Champions League : Match en Direct',
-    currentDesc: 'Choc européen de prestige commenté en direct du stade, suivi du débriefing tactique en plateau.',
-    nextTitle: 'Club Champions Débrief',
-    cat: 'Football',
-  },
-  ch_canalplus_sport: {
-    currentTitle: 'Formula 1 : Qualifications du Grand Prix',
-    currentDesc: 'Séance de qualifications Q1, Q2 et Q3 pour déterminer la grille de départ.',
-    nextTitle: 'Formula One Le Mag',
-    cat: 'Sports mécaniques',
-  },
-  ch_f24: {
-    currentTitle: 'Le Journal du Monde & Débat International',
-    currentDesc: "Tour d'horizon complet des dossiers diplomatiques et géopolitiques avec nos correspondants sur place.",
-    nextTitle: "L'Entretien de France 24",
-    cat: 'Actualités',
-  },
-  ch_natgeo: {
-    currentTitle: 'Prédateurs des Abysses Océaniques',
-    currentDesc: 'Exploration sous-marine des fosses océaniques à la rencontre des espèces les plus secrètes de la planète.',
-    nextTitle: 'SOS Animaux en danger',
-    cat: 'Nature / Documentaire',
-  },
-};
-
-const DEFAULT_EPG_INFO = {
-  currentTitle: 'Émission Spéciale en Direct HD',
-  currentDesc: 'Programme diffusé en direct avec le son multicanal et une qualité haute définition.',
-  nextTitle: 'Film du Soir / Édition Nuit',
-  cat: 'Divertissement',
-};
-
-// Helper to generate dynamic mock EPG based on channel id and current time (O(1) cached per minute)
+// Helper to generate dynamic mock EPG based on channel id and current time
 export function getMockEpgForChannel(channelId: string): { current: EpgProgram; next: EpgProgram } {
-  const anchorMs = ensureMinuteCacheFresh();
-  const cached = mockEpgCache.get(channelId);
-  if (cached) return cached;
-
-  const currentStart = new Date(anchorMs - 25 * 60 * 1000);
-  const currentEnd = new Date(anchorMs + 65 * 60 * 1000);
+  const now = new Date();
+  const currentStart = new Date(now.getTime() - 25 * 60 * 1000);
+  const currentEnd = new Date(now.getTime() + 65 * 60 * 1000);
   const nextEnd = new Date(currentEnd.getTime() + 90 * 60 * 1000);
 
-  const info = PROGRAMS_MAP[channelId] || DEFAULT_EPG_INFO;
+  const programsMap: Record<string, { currentTitle: string; currentDesc: string; nextTitle: string; cat: string }> = {
+    ch_tf1: {
+      currentTitle: 'Le Journal de 20h & Météo',
+      currentDesc: "Retrouvez toute l'actualité nationale et internationale présentée par la rédaction de TF1 avec des reportages exclusifs.",
+      nextTitle: 'Koh-Lanta : La Tribu Maudite',
+      cat: 'Information / Société',
+    },
+    ch_fr2: {
+      currentTitle: "N'oubliez pas les paroles !",
+      currentDesc: 'Jeu musical animé par Nagui où les maestros rivalisent de mémoire pour retrouver les paroles manquantes.',
+      nextTitle: 'Envoyé Spécial',
+      cat: 'Jeu télévisé',
+    },
+    ch_cplus: {
+      currentTitle: 'Oppenheimer (2023) - Exclusivité 4K',
+      currentDesc: 'Biographie historique réalisée par Christopher Nolan. Le projet Manhattan et la conception de la bombe atomique.',
+      nextTitle: 'Late avec Alain Chabat',
+      cat: 'Film / Drame',
+    },
+    ch_m6: {
+      currentTitle: 'Zone Interdite : Immersion au cœur des urgences',
+      currentDesc: 'Enquête au plus près du quotidien des urgentistes et soignants qui se battent chaque nuit pour sauver des vies.',
+      nextTitle: 'Enquête Exclusive',
+      cat: 'Magazine',
+    },
+    ch_arte: {
+      currentTitle: 'Les Mystères du Système Solaire',
+      currentDesc: 'Une odyssée spectaculaire en haute définition à travers les anneaux de Saturne et les lunes glacées.',
+      nextTitle: 'Le dessous des cartes',
+      cat: 'Documentaire',
+    },
+    ch_beinsport1: {
+      currentTitle: 'UEFA Champions League : Match en Direct',
+      currentDesc: 'Choc européen de prestige commenté en direct du stade, suivi du débriefing tactique en plateau.',
+      nextTitle: 'Club Champions Débrief',
+      cat: 'Football',
+    },
+    ch_canalplus_sport: {
+      currentTitle: 'Formula 1 : Qualifications du Grand Prix',
+      currentDesc: 'Séance de qualifications Q1, Q2 et Q3 pour déterminer la grille de départ.',
+      nextTitle: 'Formula One Le Mag',
+      cat: 'Sports mécaniques',
+    },
+    ch_f24: {
+      currentTitle: "Le Journal du Monde & Débat International",
+      currentDesc: "Tour d'horizon complet des dossiers diplomatiques et géopolitiques avec nos correspondants sur place.",
+      nextTitle: "L'Entretien de France 24",
+      cat: 'Actualités',
+    },
+    ch_natgeo: {
+      currentTitle: 'Prédateurs des Abysses Océaniques',
+      currentDesc: 'Exploration sous-marine des fosses océaniques à la rencontre des espèces les plus secrètes de la planète.',
+      nextTitle: 'SOS Animaux en danger',
+      cat: 'Nature / Documentaire',
+    },
+  };
 
-  const entry = {
+  const defaultInfo = {
+    currentTitle: 'Émission Spéciale en Direct HD',
+    currentDesc: 'Programme diffusé en direct avec le son multicanal et une qualité haute définition.',
+    nextTitle: 'Film du Soir / Édition Nuit',
+    cat: 'Divertissement',
+  };
+
+  const info = programsMap[channelId] || defaultInfo;
+
+  return {
     current: {
       id: `epg_cur_${channelId}`,
       channel_id: channelId,
@@ -655,9 +635,6 @@ export function getMockEpgForChannel(channelId: string): { current: EpgProgram; 
       category: info.cat,
     },
   };
-
-  mockEpgCache.set(channelId, entry);
-  return entry;
 }
 
 const FRENCH_DAYS_SHORT = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
@@ -675,7 +652,7 @@ function fastFormatDayShort(d: Date): string {
 
 /**
  * Generates a single synthetic EPG program slot for any relative offset (-168..+48) in O(1) time
- * with zero Intl.DateTimeFormat overhead and reference-stable minute caching!
+ * with zero Intl.DateTimeFormat overhead!
  */
 export function getSyntheticSlotForOffset(
   channelId: string,
@@ -683,18 +660,13 @@ export function getSyntheticSlotForOffset(
   offset: number,
   baseStartMs?: number
 ): EpgProgram {
-  const anchorMs = ensureMinuteCacheFresh();
   const { current, next } = getMockEpgForChannel(channelId);
   if (offset === 0) return current;
   if (offset === 1) return next;
 
-  const cacheKey = baseStartMs === undefined ? `${channelId}:${offset}` : `${channelId}:${offset}:${baseStartMs}`;
-  const cachedSlot = syntheticSlotCache.get(cacheKey);
-  if (cachedSlot) return cachedSlot;
-
   const label = channelName || 'la chaîne';
-  const curStartMs = baseStartMs ?? (anchorMs - 25 * 60 * 1000);
-  const nxtEndMs = anchorMs + 155 * 60 * 1000;
+  const curStartMs = baseStartMs ?? new Date(current.start).getTime();
+  const nxtEndMs = new Date(next.end).getTime();
 
   if (offset < 0) {
     const i = Math.abs(offset);
@@ -709,7 +681,7 @@ export function getSyntheticSlotForOffset(
     else if (i === 2) title = `Le Grand Magazine (${timeStr}) • ${label}`;
     else if (i === 3) title = `Édition Précédente (${timeStr}) • ${label}`;
 
-    const slot: EpgProgram = {
+    return {
       id: `epg_p${i}_${channelId}`,
       channel_id: channelId,
       title,
@@ -720,8 +692,6 @@ export function getSyntheticSlotForOffset(
       category: current.category,
       has_catchup: true,
     };
-    syntheticSlotCache.set(cacheKey, slot);
-    return slot;
   }
 
   // Future offset >= 2
@@ -731,7 +701,7 @@ export function getSyntheticSlotForOffset(
   const slotDate = new Date(slotStartMs);
   const timeStr = fastFormatHHMM(slotDate);
 
-  const futureSlot: EpgProgram = {
+  return {
     id: `epg_f${f}_${channelId}`,
     channel_id: channelId,
     title: f === 2 ? `Grand Soir & Décryptage` : f === 3 ? `Programme de la Nuit` : `Programme ${timeStr} • ${label}`,
@@ -741,8 +711,6 @@ export function getSyntheticSlotForOffset(
     duration_min: 60,
     category: current.category,
   };
-  syntheticSlotCache.set(cacheKey, futureSlot);
-  return futureSlot;
 }
 
 /**
@@ -752,7 +720,6 @@ export function getMockTimelineForChannel(channelId: string, channelName?: strin
   const offsets = [-3, -2, -1, 0, 1, 2, 3];
   return offsets.map((off) => getSyntheticSlotForOffset(channelId, channelName, off));
 }
-
 
 
 
