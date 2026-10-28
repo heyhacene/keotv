@@ -61,6 +61,8 @@ interface SettingsModalProps {
   onToggleSingleStreamMode?: (enabled: boolean) => void;
   osdDuration?: '2s' | '3s' | '5s' | '7s' | '10s' | 'manual';
   onOsdDurationChange?: (duration: '2s' | '3s' | '5s' | '7s' | '10s' | 'manual') => void;
+  epgOverlayPosition?: 'bottom' | 'top';
+  onEpgOverlayPositionChange?: (position: 'bottom' | 'top') => void;
   excludedPrefixes?: string[];
   onUpdateExcludedPrefixes?: (prefixes: string[]) => void;
 }
@@ -111,6 +113,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleSingleStreamMode,
   osdDuration: osdDurationProp,
   onOsdDurationChange,
+  epgOverlayPosition: epgOverlayPositionProp,
+  onEpgOverlayPositionChange,
   excludedPrefixes = [],
   onUpdateExcludedPrefixes,
 }) => {
@@ -157,6 +161,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // TV Remote & Zapping configurable settings
   const [zappingMode, setZappingMode] = useState<'direct' | 'banner'>('direct');
   const [osdDuration, setOsdDuration] = useState<'2s' | '3s' | '5s' | '7s' | '10s' | 'manual'>(osdDurationProp || '5s');
+  const [epgOverlayPosition, setEpgOverlayPosition] = useState<'bottom' | 'top'>(epgOverlayPositionProp || 'bottom');
   const [okAction, setOkAction] = useState<'fullscreen' | 'preview'>('fullscreen');
   const [bufferSize, setBufferSize] = useState<'300ms' | '1000ms' | '2500ms'>('300ms');
 
@@ -165,25 +170,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (osdDurationProp) {
       setOsdDuration(osdDurationProp);
     }
+    if (epgOverlayPositionProp) {
+      setEpgOverlayPosition(epgOverlayPositionProp);
+    }
     try {
       const saved = localStorage.getItem('keotv_controls_settings');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.zappingMode) setZappingMode(parsed.zappingMode);
         if (parsed.osdDuration && !osdDurationProp) setOsdDuration(parsed.osdDuration);
+        if (parsed.epgOverlayPosition && !epgOverlayPositionProp) setEpgOverlayPosition(parsed.epgOverlayPosition);
         if (parsed.okAction) setOkAction(parsed.okAction);
         if (parsed.bufferSize) setBufferSize(parsed.bufferSize);
       }
     } catch {
       // ignore
     }
-  }, [osdDurationProp]);
+  }, [osdDurationProp, epgOverlayPositionProp]);
 
   const saveControlSetting = (key: string, val: string) => {
     try {
       const current = {
         zappingMode,
         osdDuration,
+        epgOverlayPosition,
         okAction,
         bufferSize,
         [key]: val,
@@ -1317,6 +1327,43 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         }}
                         className={`py-2 px-1.5 rounded-lg text-xs font-semibold border transition text-center focus:outline-none focus:ring-2 focus:ring-tv-accent ${
                           osdDuration === item.id
+                            ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
+                            : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
+                        }`}
+                      >
+                        <div className="font-bold">{item.label}</div>
+                        <div className="text-[10px] opacity-75">{item.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Réglage: Position de l'Overlay Programme (Plein Écran) */}
+                <div className="p-3.5 bg-tv-card/60 rounded-xl border border-tv-border space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-xs font-bold text-white block">Position de l&apos;Overlay Programme (Plein Écran)</span>
+                      <span className="text-[11px] text-slate-400 block">
+                        Choisissez où afficher les informations du programme lors du zapping ou de l&apos;appui sur OK
+                      </span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    {[
+                      { id: 'bottom', label: 'En bas (au-dessus des contrôles)', desc: 'Position standard recommandée' },
+                      { id: 'top', label: 'En haut (sous la barre de titre)', desc: 'Vue dégagée sur le bas de l\'écran' },
+                    ].map((item) => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          const val = item.id as 'bottom' | 'top';
+                          setEpgOverlayPosition(val);
+                          saveControlSetting('epgOverlayPosition', val);
+                          onEpgOverlayPositionChange?.(val);
+                        }}
+                        className={`py-2 px-3 rounded-lg text-xs font-semibold border transition text-left focus:outline-none focus:ring-2 focus:ring-tv-accent ${
+                          epgOverlayPosition === item.id
                             ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
                             : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
                         }`}

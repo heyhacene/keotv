@@ -21,6 +21,7 @@ export interface NativePlayerPlayOptions {
   epgTimes?: string[];
   epgNextTitles?: string[];
   osdTimeoutMs?: number;
+  epgOverlayPosition?: 'bottom' | 'top';
 }
 
 export interface NativePlayerPreviewOptions {

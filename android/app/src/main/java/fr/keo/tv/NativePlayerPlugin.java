@@ -42,6 +42,8 @@ import java.util.ArrayList;
 @CapacitorPlugin(name = "NativePlayer")
 public class NativePlayerPlugin extends Plugin {
 
+    public static volatile boolean isPlayerActivityActive = false;
+
     private ExoPlayer previewPlayer;
     private PlayerView previewView;
     private String currentPreviewUrl = null;
@@ -173,13 +175,14 @@ public class NativePlayerPlugin extends Plugin {
         final String ua = call.getString("userAgent", "IPTVSmartersPro/3.1.5 (Linux; Android 12)");
 
         final Activity activity = getActivity();
-        if (activity == null || url == null || url.isEmpty() || width <= 10 || height <= 10) {
+        if (activity == null || isPlayerActivityActive || url == null || url.isEmpty() || width <= 10 || height <= 10) {
             call.resolve();
             return;
         }
 
         activity.runOnUiThread(() -> {
             try {
+                if (isPlayerActivityActive) return;
                 previewUserAgent = ua;
                 ensurePreviewView(activity);
                 ensurePreviewPlayer(activity, ua);
@@ -230,6 +233,22 @@ public class NativePlayerPlugin extends Plugin {
 
         final Activity activity = getActivity();
         if (activity == null) {
+            call.resolve();
+            return;
+        }
+
+        if (isPlayerActivityActive) {
+            activity.runOnUiThread(() -> {
+                if (previewPlayer != null) {
+                    try {
+                        previewPlayer.setVolume(0f);
+                        previewPlayer.pause();
+                    } catch (Exception ignored) {}
+                }
+                if (previewView != null) {
+                    previewView.setVisibility(View.GONE);
+                }
+            });
             call.resolve();
             return;
         }
@@ -301,6 +320,7 @@ public class NativePlayerPlugin extends Plugin {
             return;
         }
 
+        isPlayerActivityActive = true;
         // Release embedded preview player before launching full-screen PlayerActivity so we never open 2 connections!
         final Activity activity = getActivity();
         if (activity != null) {
@@ -320,6 +340,7 @@ public class NativePlayerPlugin extends Plugin {
         PlayerActivity.pendingStartPositionMs = startPosOpt != null ? Math.round(startPosOpt) : 0L;
         PlayerActivity.pendingForceRestart = Boolean.TRUE.equals(call.getBoolean("forceRestart", false));
         PlayerActivity.pendingSingleStreamMode = Boolean.TRUE.equals(call.getBoolean("singleStreamMode", false));
+        PlayerActivity.pendingEpgOverlayPosition = call.getString("epgOverlayPosition", "bottom");
         PlayerActivity.pendingCurrentProgramTitle = call.getString("currentProgramTitle", null);
         PlayerActivity.pendingCurrentProgramDesc = call.getString("currentProgramDesc", null);
         PlayerActivity.pendingCurrentProgramTime = call.getString("currentProgramTime", null);

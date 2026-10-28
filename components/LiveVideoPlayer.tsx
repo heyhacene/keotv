@@ -21,6 +21,7 @@ interface LiveVideoPlayerProps {
   singleStreamMode?: boolean;
   channelEpgMap?: Record<string, EpgProgram[]>;
   osdTimeoutMs?: number;
+  epgOverlayPosition?: 'bottom' | 'top';
 }
 
 export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
@@ -38,6 +39,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   singleStreamMode = false,
   channelEpgMap,
   osdTimeoutMs = 5000,
+  epgOverlayPosition = 'bottom',
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -161,6 +163,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       epgTimes,
       epgNextTitles,
       osdTimeoutMs,
+      epgOverlayPosition,
     }).catch((err: any) => alert(`Lecture impossible : ${err?.message || err}`));
   };
 
@@ -176,7 +179,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
     return () => {
       subPromise?.then?.((s: any) => s?.remove?.());
     };
-  }, [nativeMode, channel, playlist, currentEpg, nextEpg, channelEpgMap, singleStreamMode, osdTimeoutMs]);
+  }, [nativeMode, channel, playlist, currentEpg, nextEpg, channelEpgMap, singleStreamMode, osdTimeoutMs, epgOverlayPosition]);
 
   // Embedded Native ExoPlayer Mini Preview Window (TiviMate top-left 16:9 box on Android TV)
   useEffect(() => {

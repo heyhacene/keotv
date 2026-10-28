@@ -103,6 +103,7 @@ public class PlayerActivity extends AppCompatActivity {
     public static List<String> pendingEpgTimes = new ArrayList<>();
     public static List<String> pendingEpgNextTitles = new ArrayList<>();
     public static int pendingOsdTimeoutMs = 5000;
+    public static String pendingEpgOverlayPosition = "bottom";
 
     public static final String PREFS_POSITIONS = "keotv_playback_positions";
     public static final String KEY_POSITIONS_JSON = "positions_json";
@@ -221,9 +222,10 @@ public class PlayerActivity extends AppCompatActivity {
                         });
             }
             if (epgOverlayCard != null) {
+                float targetTranslationY = "top".equalsIgnoreCase(pendingEpgOverlayPosition) ? -dp(8) : dp(8);
                 epgOverlayCard.animate()
                         .alpha(0f)
-                        .translationY(-dp(8))
+                        .translationY(targetTranslationY)
                         .setDuration(250)
                         .withEndAction(() -> {
                             if (epgOverlayCard != null) epgOverlayCard.setVisibility(View.GONE);
@@ -317,6 +319,7 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        NativePlayerPlugin.isPlayerActivityActive = true;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         hideSystemUi();
         isLive = pendingIsLive;
@@ -402,13 +405,13 @@ public class PlayerActivity extends AppCompatActivity {
         root.addView(osdContainer, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP));
 
-        // Rich EPG info overlay card (semi-transparent, shows current & next program on TV/Mobile without interrupting stream)
+        // Rich EPG info overlay card (semi-transparent glass, shows current & next program on TV/Mobile without interrupting stream)
         epgOverlayCard = new LinearLayout(this);
         epgOverlayCard.setOrientation(LinearLayout.VERTICAL);
-        epgOverlayCard.setPadding(dp(22), dp(16), dp(22), dp(16));
+        epgOverlayCard.setPadding(dp(16), dp(10), dp(16), dp(10));
         GradientDrawable epgCardBg = new GradientDrawable();
-        epgCardBg.setColor(Color.parseColor("#E60B1220")); // sleek semi-transparent deep slate
-        epgCardBg.setCornerRadius(dp(16));
+        epgCardBg.setColor(Color.parseColor("#73090E17")); // sleek translucent dark glass (45% opacity)
+        epgCardBg.setCornerRadius(dp(14));
         epgCardBg.setStroke(dp(1), Color.parseColor("#3338BDF8"));
         epgOverlayCard.setBackground(epgCardBg);
         epgOverlayCard.setVisibility(View.GONE);
@@ -452,9 +455,9 @@ public class PlayerActivity extends AppCompatActivity {
         epgNowDesc = new TextView(this);
         epgNowDesc.setTextColor(Color.parseColor("#CBD5E1"));
         epgNowDesc.setTextSize(12f);
-        epgNowDesc.setMaxLines(3);
+        epgNowDesc.setMaxLines(2);
         epgNowDesc.setEllipsize(TextUtils.TruncateAt.END);
-        epgNowDesc.setPadding(0, 0, 0, dp(8));
+        epgNowDesc.setPadding(0, 0, 0, dp(6));
         epgOverlayCard.addView(epgNowDesc);
 
         // Next program summary row
@@ -465,9 +468,20 @@ public class PlayerActivity extends AppCompatActivity {
         epgNextTitle.setEllipsize(TextUtils.TruncateAt.END);
         epgOverlayCard.addView(epgNextTitle);
 
-        FrameLayout.LayoutParams epgCardLp = new FrameLayout.LayoutParams(
-                dp(480), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
-        epgCardLp.setMargins(dp(24), dp(84), dp(24), 0);
+        boolean isTopOverlay = "top".equalsIgnoreCase(pendingEpgOverlayPosition);
+        int screenWidthDp = getResources().getConfiguration().screenWidthDp;
+        int cardWidth = (screenWidthDp < 560) ? ViewGroup.LayoutParams.MATCH_PARENT : dp(480);
+
+        FrameLayout.LayoutParams epgCardLp;
+        if (isTopOverlay) {
+            epgCardLp = new FrameLayout.LayoutParams(
+                    cardWidth, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
+            epgCardLp.setMargins(dp(16), dp(72), dp(16), 0);
+        } else {
+            epgCardLp = new FrameLayout.LayoutParams(
+                    cardWidth, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM | Gravity.START);
+            epgCardLp.setMargins(dp(16), 0, dp(16), dp(84));
+        }
         root.addView(epgOverlayCard, epgCardLp);
 
         // Skip intro button (Strictly Series episodes only, bottom right, auto-hides after 7s)
@@ -1796,6 +1810,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         boolean swapped = trySwapToPrefetched(targetIdx);
         if (!swapped) {
+            releasePrefetchPlayer();
             player.seekToDefaultPosition(targetIdx);
             player.prepare();
             player.play();
@@ -1824,7 +1839,12 @@ public class PlayerActivity extends AppCompatActivity {
     private void releasePrefetchPlayer() {
         mainHandler.removeCallbacks(prefetchRunnable);
         if (prefetchPlayer != null) {
-            try { prefetchPlayer.release(); } catch (Exception ignored) {}
+            try {
+                prefetchPlayer.setVolume(0f);
+                prefetchPlayer.stop();
+                prefetchPlayer.clearMediaItems();
+                prefetchPlayer.release();
+            } catch (Exception ignored) {}
             prefetchPlayer = null;
         }
         prefetchTargetIdx = -1;
@@ -1860,6 +1880,13 @@ public class PlayerActivity extends AppCompatActivity {
                 items.add(buildItem(pendingUrls.get(i), title));
             }
             pre.setMediaItems(items, targetIdx, C.TIME_UNSET);
+            // Explicitly disable AUDIO track decoding on prefetch so it NEVER outputs sound or holds audio sinks
+            pre.setTrackSelectionParameters(
+                    pre.getTrackSelectionParameters()
+                            .buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, true)
+                            .build()
+            );
             pre.setVolume(0f);
             pre.addListener(new Player.Listener() {
                 @Override
@@ -1901,19 +1928,35 @@ public class PlayerActivity extends AppCompatActivity {
         mainHandler.removeCallbacks(prefetchRunnable);
 
         try {
-            old.removeListener(playerListener);
-            old.setPlayWhenReady(false);
-            next.addListener(playerListener);
+            // Mute and stop old player immediately so its audio never overlaps
+            if (old != null) {
+                try {
+                    old.removeListener(playerListener);
+                    old.setVolume(0f);
+                    old.stop();
+                } catch (Exception ignored) {}
+            }
+            // Re-enable audio on the promoted player
+            next.setTrackSelectionParameters(
+                    next.getTrackSelectionParameters()
+                            .buildUpon()
+                            .setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, false)
+                            .build()
+            );
             next.setVolume(1f);
+            next.addListener(playerListener);
             player = next;
             playerView.setPlayer(next);
             next.setPlayWhenReady(true);
             if (errorView != null) errorView.setVisibility(View.GONE);
             applyLanguagePreferences();
-            // Release the previous player off the critical path
-            mainHandler.postDelayed(() -> {
-                try { old.release(); } catch (Exception ignored) {}
-            }, 300);
+            // Release the previous player immediately
+            if (old != null) {
+                try {
+                    old.clearMediaItems();
+                    old.release();
+                } catch (Exception ignored) {}
+            }
             return true;
         } catch (Exception e) {
             return false;
@@ -2102,6 +2145,7 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         saveCurrentPlaybackPosition(false);
+        NativePlayerPlugin.isPlayerActivityActive = false;
         super.onDestroy();
         mainHandler.removeCallbacks(progressRunnable);
         stopCountdown();

@@ -270,6 +270,7 @@ export default function KeoTVHome() {
   const [showFavoritesCategory, setShowFavoritesCategory] = useState<boolean>(true);
   const [singleStreamMode, setSingleStreamMode] = useState<boolean>(false);
   const [osdDuration, setOsdDuration] = useState<'2s' | '3s' | '5s' | '7s' | '10s' | 'manual'>('5s');
+  const [epgOverlayPosition, setEpgOverlayPosition] = useState<'bottom' | 'top'>('bottom');
   const [excludedPrefixes, setExcludedPrefixes] = useState<string[]>([]);
   const [hiddenChannelIds, setHiddenChannelIds] = useState<Set<string>>(new Set());
   const [watchedPositions, setWatchedPositions] = useState<Array<{ id: string; title: string; url: string; poster?: string; position: number; duration: number; stream_type: 'vod' | 'series' }>>([]);
@@ -330,6 +331,7 @@ export default function KeoTVHome() {
     getSetting('show_favorites_category', true).then((show) => setShowFavoritesCategory(show ?? true));
     getSetting('single_stream_mode', false).then((sm) => setSingleStreamMode(Boolean(sm)));
     getSetting('osd_duration', '5s').then((d) => setOsdDuration((d as any) || '5s'));
+    getSetting<'bottom' | 'top'>('epg_overlay_position', 'bottom').then((p) => setEpgOverlayPosition(p || 'bottom'));
     getSetting<string[]>('excluded_prefixes', []).then((prefixes) => setExcludedPrefixes(prefixes || []));
     getSetting<string[]>('hidden_channel_ids', []).then((ids) => setHiddenChannelIds(new Set(ids || [])));
 
@@ -1774,6 +1776,7 @@ export default function KeoTVHome() {
             epgTimes,
             epgNextTitles,
             osdTimeoutMs,
+            epgOverlayPosition,
           });
         } catch (err: any) {
           console.error('Native player error:', err);
@@ -1787,7 +1790,7 @@ export default function KeoTVHome() {
         setIsFullscreen(true);
       }
     },
-    [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession, adultCategoryIds, singleStreamMode, currentEpg, nextEpg, osdTimeoutMs, channelEpgMap, isTvMode]
+    [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession, adultCategoryIds, singleStreamMode, currentEpg, nextEpg, osdTimeoutMs, epgOverlayPosition, channelEpgMap, isTvMode]
   );
 
   // Play a specific past Catchup / Replay program via Timeshift (with multi-format fallback cascade!)
@@ -2976,6 +2979,7 @@ export default function KeoTVHome() {
             onPreviousChannel={handlePreviousChannel}
             singleStreamMode={singleStreamMode}
             osdTimeoutMs={osdTimeoutMs}
+            epgOverlayPosition={epgOverlayPosition}
             isModalCovering={
               isSplashVisible ||
               isSettingsModalOpen ||
@@ -3626,6 +3630,7 @@ export default function KeoTVHome() {
                 onPreviousChannel={handlePreviousChannel}
                 singleStreamMode={singleStreamMode}
                 osdTimeoutMs={osdTimeoutMs}
+                epgOverlayPosition={epgOverlayPosition}
                 isModalCovering={
                   isSplashVisible ||
                   isSettingsModalOpen ||
@@ -3926,6 +3931,11 @@ export default function KeoTVHome() {
         onOsdDurationChange={(dur) => {
           setOsdDuration(dur);
           setSetting('osd_duration', dur);
+        }}
+        epgOverlayPosition={epgOverlayPosition}
+        onEpgOverlayPositionChange={(pos) => {
+          setEpgOverlayPosition(pos);
+          setSetting('epg_overlay_position', pos);
         }}
       />
 
