@@ -1250,15 +1250,17 @@ export default function KeoTVHome() {
               }, 1200);
             }
           }
-        } else if (savedAutoRefresh > 0) {
-          // Check if auto-refresh is due
-          const lastTime = savedLastRefresh ? new Date(savedLastRefresh).getTime() : 0;
-          const elapsedHours = (Date.now() - lastTime) / (1000 * 60 * 60);
-          if (elapsedHours >= savedAutoRefresh) {
-            // Trigger background refresh quietly after 4 seconds (app is fully interactive first)
-            setTimeout(() => {
-              triggerSilentRefresh();
-            }, 4000);
+
+          if (savedAutoRefresh > 0) {
+            // Check if auto-refresh is due
+            const lastTime = savedLastRefresh ? new Date(savedLastRefresh).getTime() : 0;
+            const elapsedHours = (Date.now() - lastTime) / (1000 * 60 * 60);
+            if (elapsedHours >= savedAutoRefresh) {
+              // Trigger background refresh quietly after 4 seconds (app is fully interactive first)
+              setTimeout(() => {
+                triggerSilentRefresh();
+              }, 4000);
+            }
           }
         }
       } catch (err) {
