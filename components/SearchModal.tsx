@@ -520,6 +520,8 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           })}
         </div>
 
+        {/* Main Body: TV Keypad (Left) + Search Results (Right) */}
+        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {/* TV Virtual Keyboard Column */}
           <div className="w-full md:w-80 p-2.5 sm:p-3 border-b md:border-b-0 md:border-r border-tv-border bg-black/60 flex flex-col space-y-1.5 flex-shrink-0">
             <div className="flex items-center justify-between text-xs text-slate-400 px-1 mb-0.5">
