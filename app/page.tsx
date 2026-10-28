@@ -2714,7 +2714,7 @@ export default function KeoTVHome() {
         <div className="flex flex-col h-full w-full bg-tv-bg overflow-hidden">
         {/* Top Video Player (Expands to fixed inset-0 if isFullscreen is active) */}
         <div
-          className={`bg-black flex-shrink-0 transition-all ${
+          className={`bg-black flex-shrink-0 transition-transform ${
             isFullscreen
               ? 'fixed inset-0 z-50 w-screen h-screen'
               : 'w-full aspect-video relative'
@@ -2859,7 +2859,7 @@ export default function KeoTVHome() {
               <button
                 key={cat.id}
                 onClick={() => handleSelectCategory(cat, idx, true)}
-                className={`flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-all ${
+                className={`flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold whitespace-nowrap transition-transform ${
                   isSelected
                     ? 'bg-tv-focus text-white shadow-md'
                     : 'bg-tv-card text-slate-400 hover:text-white border border-tv-border/60'
@@ -3209,7 +3209,7 @@ export default function KeoTVHome() {
                   <button
                     key={cat.id}
                     onClick={() => handleSelectCategory(cat, idx, true)}
-                    className={`flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap transition-all ${
+                    className={`flex items-center space-x-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap transition-transform ${
                       isSelected
                         ? 'bg-tv-focus text-white shadow-sm'
                         : 'bg-tv-card text-slate-400 hover:text-white border border-tv-border/60'
@@ -3336,7 +3336,7 @@ export default function KeoTVHome() {
           <div className="w-[320px] md:w-[360px] lg:w-[400px] flex flex-col bg-tv-surface/60 border-l border-tv-border overflow-y-auto flex-shrink-0">
             {/* 1. Live Video Player (Aspect 16:9) */}
             <div
-              className={`bg-black flex-shrink-0 transition-all ${
+              className={`bg-black flex-shrink-0 transition-transform ${
                 isFullscreen
                   ? 'fixed inset-0 z-50 w-screen h-screen'
                   : 'w-full aspect-video relative rounded-lg overflow-hidden border border-white/10 shadow-lg'
@@ -3402,7 +3402,7 @@ export default function KeoTVHome() {
                   <div className="mt-1.5">
                     <div className="w-full bg-slate-800 rounded-full h-1 overflow-hidden">
                       <div
-                        className="bg-tv-accent h-1 rounded-full transition-all"
+                        className="bg-tv-accent h-1 rounded-full transition-transform"
                         style={{ width: `${Math.min(100, Math.max(5, getEpgProgressPercent(currentEpg)))}%` }}
                       />
                     </div>
@@ -3773,28 +3773,28 @@ export default function KeoTVHome() {
 
       {/* User Toast Message */}
       {toastMessage && (
-        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white border border-amber-500/50 px-5 py-3 rounded-2xl text-sm font-semibold shadow-2xl flex items-center space-x-2.5 backdrop-blur-md animate-fade-in pointer-events-none">
+        <div className="fixed top-6 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white border border-amber-500/50 px-5 py-3 rounded-2xl text-sm font-semibold shadow-2xl flex items-center space-x-2.5 animate-fade-in pointer-events-none">
           <span>{toastMessage}</span>
         </div>
       )}
 
       {/* Floating Status & Back Toast Notifications */}
       {syncStatusBanner && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-sky-950/95 text-sky-200 border border-sky-500/50 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-2xl flex items-center space-x-2 backdrop-blur-md animate-fade-in pointer-events-none">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-sky-950/95 text-sky-200 border border-sky-500/50 px-4 py-2.5 rounded-xl text-xs font-semibold shadow-2xl flex items-center space-x-2 animate-fade-in pointer-events-none">
           <RefreshCw className="w-4 h-4 animate-spin text-sky-400" />
           <span>{syncStatusBanner}</span>
         </div>
       )}
 
       {!syncStatusBanner && bgLoadStatus && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-emerald-950/95 text-emerald-200 border border-emerald-500/50 px-4 py-2 rounded-xl text-[11px] font-semibold shadow-2xl flex items-center space-x-2 backdrop-blur-md animate-fade-in pointer-events-none">
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-emerald-950/95 text-emerald-200 border border-emerald-500/50 px-4 py-2 rounded-xl text-[11px] font-semibold shadow-2xl flex items-center space-x-2 animate-fade-in pointer-events-none">
           <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
           <span>{bgLoadStatus}</span>
         </div>
       )}
 
       {backToastVisible && (
-        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white text-xs font-semibold px-4 py-2 rounded-full border border-tv-border shadow-2xl backdrop-blur-md animate-fade-in pointer-events-none">
+        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white text-xs font-semibold px-4 py-2 rounded-full border border-tv-border shadow-2xl animate-fade-in pointer-events-none">
           Appuyez à nouveau pour quitter KeoTV
         </div>
       )}

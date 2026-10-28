@@ -345,7 +345,7 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
             e.preventDefault();
             onOpenContextMenu?.(channel);
           }}
-          className={`flex items-center justify-between px-3.5 h-[44px] mx-2 my-0.5 rounded-md select-none cursor-default transition-all duration-75 ${
+          className={`flex items-center justify-between px-3.5 h-[44px] mx-2 my-0.5 rounded-md select-none cursor-default transition-transform duration-75 ${
             isChannelFocused || isEpgRowFocused
               ? 'bg-sky-500 text-white font-bold ring-2 ring-white shadow-md'
               : 'bg-white/[0.04] border border-white/5 text-slate-400 font-semibold'
@@ -383,7 +383,7 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
         {/* LEFT PART: TIVIMATE CHANNEL COLUMN (Num + Logo + Channel Name + Replay Clock / Blue Play Triangle) */}
         <div
           onClick={() => onSelectChannel(channel, index)}
-          className={`w-[240px] xl:w-[270px] flex-shrink-0 flex items-center justify-between px-2.5 mr-2 rounded-md cursor-pointer transition-all ${
+          className={`w-[240px] xl:w-[270px] flex-shrink-0 flex items-center justify-between px-2.5 mr-2 rounded-md cursor-pointer transition-transform ${
             isChannelFocused
               ? 'bg-slate-200 text-slate-950 font-black shadow-lg ring-2 ring-white z-20'
               : isEpgRowFocused
@@ -477,7 +477,7 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
                 key={offset}
                 style={{ flex: `${weight} 1 0%` }}
                 onClick={() => onSelectProgramCell(channel, index, offset, prog)}
-                className={`min-w-0 px-3 flex items-center justify-between rounded-[5px] cursor-pointer transition-all relative overflow-hidden ${
+                className={`min-w-0 px-3 flex items-center justify-between rounded-[5px] cursor-pointer transition-transform relative overflow-hidden ${
                   isCellFocused
                     ? 'bg-[#d8dee9] text-slate-950 font-bold shadow-md z-10'
                     : isPastProg
@@ -542,7 +542,7 @@ const ChannelRow = React.memo<ChannelRowProps>(
         <div
           id={`channel-item-${index}`}
           onClick={() => onSelect(channel, index)}
-          className={`flex items-center justify-between px-3.5 py-1.5 mx-2 my-1 rounded-xl select-none cursor-default transition-all duration-75 ${
+          className={`flex items-center justify-between px-3.5 py-1.5 mx-2 my-1 rounded-xl select-none cursor-default transition-transform duration-75 ${
             isFocused
               ? 'bg-tv-focus text-white font-bold ring-2 ring-tv-accent shadow-md'
               : 'bg-white/5 border border-white/5 text-slate-400 font-semibold hover:bg-white/10'
@@ -903,42 +903,97 @@ export const TVGuide: React.FC<TVGuideProps> = ({
     }
 
     let cancelled = false;
+    let flushTimer: ReturnType<typeof setTimeout> | null = null;
+    const pending: Record<string, EpgProgram[]> = {};
+
+    // Coalesce every result into ONE state update (one re-render instead of one per channel)
+    const flush = () => {
+      flushTimer = null;
+      if (cancelled) return;
+      const keys = Object.keys(pending);
+      if (keys.length === 0) return;
+      const snapshot: Record<string, EpgProgram[]> = {};
+      for (const k of keys) {
+        snapshot[k] = pending[k];
+        delete pending[k];
+      }
+      setChannelEpgMap((prev) => ({ ...prev, ...snapshot }));
+    };
+    const scheduleFlush = () => {
+      if (flushTimer === null) flushTimer = setTimeout(flush, 40);
+    };
+
     const timer = setTimeout(async () => {
       const sliceStart = Math.max(0, focusedChannelIndex - 2);
       const sliceEnd = Math.min(channels.length, focusedChannelIndex + 6);
-      const batch = channels.slice(sliceStart, sliceEnd).filter((ch) => {
-        if (!ch || ch.is_separator || isSeparatorChannel(ch)) return false;
-        if (fetchedChannelIdsRef.current.has(ch.id)) return false;
-        return true;
-      });
+      const batch = channels
+        .slice(sliceStart, sliceEnd)
+        .filter((ch) => {
+          if (!ch || ch.is_separator || isSeparatorChannel(ch)) return false;
+          if (fetchedChannelIdsRef.current.has(ch.id)) return false;
+          return true;
+        })
+        // Focused channel first, then nearest neighbours
+        .sort(
+          (a, b) =>
+            Math.abs(channels.indexOf(a) - focusedChannelIndex) -
+            Math.abs(channels.indexOf(b) - focusedChannelIndex)
+        );
 
-      for (const ch of batch) {
-        if (cancelled) break;
-        fetchedChannelIdsRef.current.add(ch.id);
-        const streamId = ch.stream_id || (ch.id.match(/\d+$/) ? ch.id.match(/\d+$/)![0] : null);
-        if (!streamId) continue;
-
-        try {
-          const programs = await EPGService.fetchXtreamFullEpg({
-            serverUrl: serverCreds.serverUrl,
-            username: serverCreds.username,
-            password: serverCreds.password,
-            streamId,
-            channelId: ch.id,
-          });
-          if (!cancelled && programs.length > 0) {
-            setChannelEpgMap((prev) => ({
-              ...prev,
-              [ch.id]: programs,
-            }));
+      const queue = [...batch];
+      const worker = async () => {
+        while (queue.length > 0 && !cancelled) {
+          const ch = queue.shift()!;
+          const streamId = ch.stream_id || (ch.id.match(/\d+$/) ? ch.id.match(/\d+$/)![0] : null);
+          if (!streamId) continue;
+          fetchedChannelIdsRef.current.add(ch.id);
+          let done = false;
+          try {
+            // 1. IndexedDB cache first (instant). Fresh enough if it still covers the next 3 hours.
+            const cached = await EPGService.getProgramsForChannel(ch.id);
+            const horizonIso = new Date(Date.now() + 3 * 3600 * 1000).toISOString();
+            if (cached.length > 0 && cached.some((p) => p.end > horizonIso)) {
+              pending[ch.id] = cached;
+              done = true;
+              scheduleFlush();
+              continue;
+            }
+            if (cached.length > 0) {
+              pending[ch.id] = cached; // show stale data immediately, refresh below
+              scheduleFlush();
+            }
+            if (cancelled) break;
+            // 2. Network refresh
+            const programs = await EPGService.fetchXtreamFullEpg({
+              serverUrl: serverCreds.serverUrl,
+              username: serverCreds.username,
+              password: serverCreds.password,
+              streamId,
+              channelId: ch.id,
+            });
+            if (programs.length > 0) {
+              pending[ch.id] = programs;
+              scheduleFlush();
+            }
+            done = true;
+          } catch {
+            done = false;
+          } finally {
+            // A cancelled or failed fetch must be retried later, never skipped forever
+            if (!done) fetchedChannelIdsRef.current.delete(ch.id);
           }
-        } catch {}
-      }
-    }, 180);
+        }
+      };
+
+      // 4 parallel connections
+      await Promise.all([worker(), worker(), worker(), worker()]);
+      flush();
+    }, 120);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      if (flushTimer !== null) clearTimeout(flushTimer);
     };
   }, [isLiveTimelineMode, focusedChannelIndex, channels, serverCreds]);
 
@@ -1056,7 +1111,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
       {/* 1. CATEGORIES / BOUQUETS COLUMN (Visible when in categories or channels; collapses on DPAD_RIGHT into epg_grid!) */}
       {!isCategoriesCollapsed && (
         <div
-          className={`relative w-56 xl:w-64 border-r border-white/10 flex flex-col flex-shrink-0 transition-all duration-150 ${
+          className={`relative w-56 xl:w-64 border-r border-white/10 flex flex-col flex-shrink-0 transition-transform duration-150 ${
             activePane === 'categories' || activePane === 'category_header' ? 'bg-tv-surface/95' : 'bg-tv-surface/50'
           }`}
         >
@@ -1177,9 +1232,9 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             <div
               className={`absolute ${
                 categoryNotice === 'bottom' ? 'bottom-3' : 'top-14'
-              } left-2 right-2 z-30 pointer-events-none transition-all duration-200 animate-in fade-in`}
+              } left-2 right-2 z-30 pointer-events-none transition-transform duration-200 animate-in fade-in`}
             >
-              <div className="flex items-center justify-center space-x-1.5 px-2.5 py-1.5 rounded-full bg-slate-900/95 border border-sky-500/40 shadow-2xl backdrop-blur-md text-[10px] font-medium text-sky-200 text-center">
+              <div className="flex items-center justify-center space-x-1.5 px-2.5 py-1.5 rounded-full bg-slate-900/95 border border-sky-500/40 shadow-2xl text-[10px] font-medium text-sky-200 text-center">
                 <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse flex-shrink-0" />
                 <span className="truncate">
                   {categoryNotice === 'bottom'
@@ -1502,9 +1557,9 @@ export const TVGuide: React.FC<TVGuideProps> = ({
           <div
             className={`absolute ${
               channelNotice === 'bottom' ? 'bottom-10' : 'top-24'
-            } left-4 right-4 z-30 pointer-events-none transition-all duration-200 animate-in fade-in`}
+            } left-4 right-4 z-30 pointer-events-none transition-transform duration-200 animate-in fade-in`}
           >
-            <div className="flex items-center justify-center space-x-1.5 px-3 py-1.5 rounded-full bg-slate-900/95 border border-sky-500/40 shadow-2xl backdrop-blur-md text-[11px] font-medium text-sky-200 text-center">
+            <div className="flex items-center justify-center space-x-1.5 px-3 py-1.5 rounded-full bg-slate-900/95 border border-sky-500/40 shadow-2xl text-[11px] font-medium text-sky-200 text-center">
               <span className="w-1.5 h-1.5 rounded-full bg-sky-400 animate-pulse flex-shrink-0" />
               <span className="truncate">
                 {channelNotice === 'bottom'

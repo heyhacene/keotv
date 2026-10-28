@@ -251,7 +251,7 @@ export const CatchupModal: React.FC<CatchupModalProps> = ({
   if (!isOpen || !channel) return null;
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 md:p-8 animate-in fade-in duration-150 select-none">
+    <div className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-4 md:p-8 animate-in fade-in duration-150 select-none">
       <div className="w-full max-w-4xl h-[85vh] bg-[#0c121e] border border-tv-border rounded-2xl flex flex-col shadow-2xl overflow-hidden">
         {/* Header */}
         <div className="px-6 py-4 bg-tv-card/90 border-b border-tv-border flex items-center justify-between flex-shrink-0">

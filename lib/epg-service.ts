@@ -86,10 +86,11 @@ export class EPGService {
    */
   static async getProgramsForChannel(channelId: string): Promise<EpgProgram[]> {
     try {
+      // Compound index [channel_id+start] returns rows already sorted: no in-memory sort needed
       return await db.epg_programs
-        .where('channel_id')
-        .equals(channelId)
-        .sortBy('start');
+        .where('[channel_id+start]')
+        .between([channelId, ''], [channelId, '\uffff'])
+        .toArray();
     } catch {
       return [];
     }

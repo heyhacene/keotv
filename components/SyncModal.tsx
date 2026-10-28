@@ -385,7 +385,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(portalUrl)}&margin=6&color=38-189-248&bgcolor=8-12-20`;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 animate-in fade-in duration-150">
       <div
         ref={modalContainerRef}
         className="w-full max-w-lg bg-tv-surface border border-tv-border rounded-3xl shadow-2xl overflow-hidden text-slate-100 flex flex-col focus:outline-none"

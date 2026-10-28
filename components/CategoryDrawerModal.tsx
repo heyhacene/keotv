@@ -43,7 +43,7 @@ export const CategoryDrawerModal: React.FC<CategoryDrawerModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-sm p-0 sm:p-4 animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/80 p-0 sm:p-4 animate-in fade-in duration-150">
       <div className="w-full sm:max-w-md bg-tv-surface border sm:border-tv-border rounded-t-3xl sm:rounded-2xl shadow-2xl overflow-hidden text-slate-100 max-h-[85vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-tv-border bg-tv-card/60 flex-shrink-0">
@@ -118,7 +118,7 @@ export const CategoryDrawerModal: React.FC<CategoryDrawerModalProps> = ({
                   onSelectCategory(cat, idx);
                   onClose();
                 }}
-                className={`w-full flex items-center justify-between p-3.5 rounded-xl text-left transition-all ${
+                className={`w-full flex items-center justify-between p-3.5 rounded-xl text-left transition-transform ${
                   isSelected
                     ? 'bg-tv-focus text-white font-bold shadow-lg scale-[1.01]'
                     : 'bg-tv-card/70 hover:bg-tv-cardHover text-slate-200 border border-tv-border/50'

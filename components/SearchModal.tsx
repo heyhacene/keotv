@@ -395,7 +395,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-2 sm:p-6 animate-in fade-in duration-100">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-2 sm:p-6 animate-in fade-in duration-100">
       <div className="w-full max-w-5xl bg-tv-surface border border-tv-border rounded-3xl shadow-2xl flex flex-col h-[90vh] overflow-hidden text-slate-100">
         {/* Search Header */}
         <div className="p-4 sm:p-6 border-b border-tv-border bg-tv-card/60 flex items-center space-x-3 flex-shrink-0">

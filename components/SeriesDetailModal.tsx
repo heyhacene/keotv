@@ -333,7 +333,7 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
   const scrollToFocusedElement = (elementId: string) => {
     setTimeout(() => {
       const el = document.getElementById(elementId);
-      el?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      el?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
     }, 40);
   };
 
@@ -1012,7 +1012,7 @@ export const SeriesDetailModal: React.FC<SeriesDetailModalProps> = ({
                 <div
                   key={season.season}
                   id={`series-season-${sIdx}`}
-                  className={`rounded-2xl border bg-tv-card/60 backdrop-blur-sm overflow-hidden shadow-lg transition ${
+                  className={`rounded-2xl border bg-tv-card/60 overflow-hidden shadow-lg transition ${
                     isSeasonFocused
                       ? 'border-tv-accent ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg scale-[1.01]'
                       : 'border-tv-border'

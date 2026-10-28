@@ -259,7 +259,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
         if (focusedSection === 'director' || focusedSection === 'actors') {
           setFocusedSection('play');
           playButtonRef.current?.focus();
-          scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+          scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
           return;
         }
         onClose();
@@ -306,12 +306,12 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
             setFocusedSection('director');
             const target = document.getElementById('movie-detail-director');
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'center' });
           } else if (details?.actors && details.actors.length > 0) {
             setFocusedSection('actors');
             const target = document.getElementById(`actor-chip-${focusedActorIndex}`) || document.getElementById('actor-chip-0');
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'center' });
           }
           return;
         }
@@ -355,12 +355,12 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
             setFocusedSection('director');
             const target = document.getElementById('movie-detail-director');
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'center' });
           } else if (details?.actors && details.actors.length > 0) {
             setFocusedSection('actors');
             const target = document.getElementById(`actor-chip-${focusedActorIndex}`) || document.getElementById('actor-chip-0');
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'center' });
           }
           return;
         }
@@ -398,12 +398,12 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
             setFocusedSection('director');
             const target = document.getElementById('movie-detail-director');
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'center' });
           } else if (details?.actors && details.actors.length > 0) {
             setFocusedSection('actors');
             const target = document.getElementById(`actor-chip-${focusedActorIndex}`) || document.getElementById('actor-chip-0');
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'center' });
           }
           return;
         }
@@ -428,7 +428,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
             setFocusedSection('actors');
             const target = document.getElementById(`actor-chip-${focusedActorIndex}`) || document.getElementById('actor-chip-0');
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'center' });
           } else if (personPlaylistFilms.length > 0) {
             setFocusedSection('films');
             setFocusedFilmIndex(0);
@@ -454,11 +454,11 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
             setFocusedSection('director');
             const target = document.getElementById('movie-detail-director');
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'center' });
           } else {
             setFocusedSection('play');
             playButtonRef.current?.focus();
-            scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+            scrollContainerRef.current?.scrollTo({ top: 0, behavior: 'auto' });
           }
           return;
         }
@@ -469,7 +469,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
             const next = Math.max(0, prev - 1);
             const target = document.getElementById(`actor-chip-${next}`);
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
             return next;
           });
           return;
@@ -481,7 +481,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
             const next = Math.min(actorCount - 1, prev + 1);
             const target = document.getElementById(`actor-chip-${next}`);
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
             return next;
           });
           return;
@@ -494,7 +494,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
             setFocusedFilmIndex(0);
             const target = document.getElementById('actor-film-0');
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'center' });
           }
           return;
         }
@@ -520,13 +520,13 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
               ? document.getElementById('movie-detail-director')
               : document.getElementById(`actor-chip-${focusedActorIndex}`);
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'center' });
           } else {
             setFocusedFilmIndex((prev) => {
               const next = Math.max(0, prev - 4);
               const target = document.getElementById(`actor-film-${next}`);
               target?.focus();
-              target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              target?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
               return next;
             });
           }
@@ -539,7 +539,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
             const next = Math.min(filmCount - 1, prev + 4);
             const target = document.getElementById(`actor-film-${next}`);
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
             return next;
           });
           return;
@@ -551,7 +551,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
             const next = Math.max(0, prev - 1);
             const target = document.getElementById(`actor-film-${next}`);
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
             return next;
           });
           return;
@@ -563,7 +563,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
             const next = Math.min(filmCount - 1, prev + 1);
             const target = document.getElementById(`actor-film-${next}`);
             target?.focus();
-            target?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            target?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
             return next;
           });
           return;
@@ -619,7 +619,7 @@ export const MovieDetailModal: React.FC<MovieDetailModalProps> = ({
       )}
 
       {/* Top Header */}
-      <div className="flex items-center space-x-3 px-4 py-3 bg-tv-surface/90 backdrop-blur-md border-b border-tv-border flex-shrink-0 z-20">
+      <div className="flex items-center space-x-3 px-4 py-3 bg-tv-surface/90 border-b border-tv-border flex-shrink-0 z-20">
         <button
           id="movie-detail-back"
           onClick={onClose}

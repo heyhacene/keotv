@@ -433,7 +433,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       }}
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
-      className={`relative overflow-hidden bg-black transition-all duration-300 ${
+      className={`relative overflow-hidden bg-black transition-transform duration-300 ${
         isFullscreen
           ? 'fixed inset-0 z-50 w-screen h-screen'
           : 'w-full h-full rounded-xl border border-tv-border shadow-2xl'
@@ -482,7 +482,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
 
       {/* Controls Overlay (when not fullscreen and in Web mode) */}
       {!isFullscreen && !nativeMode && (
-        <div className="absolute top-2 right-2 flex items-center space-x-1.5 bg-black/70 backdrop-blur-md rounded-lg p-1.5 border border-white/10 z-10">
+        <div className="absolute top-2 right-2 flex items-center space-x-1.5 bg-black/70 rounded-lg p-1.5 border border-white/10 z-10">
           {/* Stop / Resume Button */}
           <button
             onClick={toggleStopPlay}
@@ -650,7 +650,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
           {/* Centered Zap Feedback */}
           {zapNotice && (
             <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-40">
-              <div className="bg-black/90 backdrop-blur-md border border-tv-accent/50 rounded-2xl px-6 py-3 shadow-2xl flex flex-col items-center">
+              <div className="bg-black/90 border border-tv-accent/50 rounded-2xl px-6 py-3 shadow-2xl flex flex-col items-center">
                 <span className="text-tv-accent text-sm font-bold tracking-wider">{zapNotice}</span>
                 <span className="text-white text-base font-bold mt-0.5">{channel?.name}</span>
               </div>

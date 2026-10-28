@@ -85,7 +85,7 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
                   onSelectSection(item.id);
                 }
               }}
-              className={`w-full py-1.5 md:py-2 rounded-xl flex flex-col items-center justify-center transition-all duration-150 ${
+              className={`w-full py-1.5 md:py-2 rounded-xl flex flex-col items-center justify-center transition-transform duration-150 ${
                 isFocused
                   ? 'bg-tv-focus text-white ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg shadow-tv-focus scale-105 font-bold'
                   : isActive
@@ -107,7 +107,7 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
         <button
           id="menu-item-5"
           onClick={onOpenSettingsModal}
-          className={`w-full py-1.5 md:py-2 rounded-xl flex flex-col items-center justify-center transition-all duration-150 ${
+          className={`w-full py-1.5 md:py-2 rounded-xl flex flex-col items-center justify-center transition-transform duration-150 ${
             activePane === 'menu' && focusedMenuIndex === 5
               ? 'bg-tv-focus text-white ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg shadow-tv-focus scale-105 font-bold'
               : 'text-slate-400 hover:text-tv-accent hover:bg-tv-card/50'
@@ -122,7 +122,7 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
         <button
           id="menu-item-6"
           onClick={onOpenSyncModal}
-          className={`w-full py-1.5 md:py-2 rounded-xl flex flex-col items-center justify-center transition-all duration-150 ${
+          className={`w-full py-1.5 md:py-2 rounded-xl flex flex-col items-center justify-center transition-transform duration-150 ${
             activePane === 'menu' && focusedMenuIndex === 6
               ? 'bg-tv-focus text-white ring-2 ring-emerald-400 ring-offset-2 ring-offset-tv-bg shadow-tv-focus scale-105 font-bold'
               : 'text-slate-400 hover:text-emerald-400 hover:bg-tv-card/50'

@@ -67,12 +67,12 @@ export const UpdatePopupModal: React.FC<UpdatePopupModalProps> = ({ updateInfo, 
   if (!updateInfo || !updateInfo.hasUpdate) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+    <div className="fixed inset-0 z-[100] bg-black/85 flex items-center justify-center p-4 animate-fade-in">
       <div className="relative w-full max-w-lg bg-tv-card border-2 border-tv-accent rounded-3xl shadow-2xl shadow-sky-500/20 overflow-hidden text-white flex flex-col">
         {/* Glow header banner */}
         <div className="bg-gradient-to-r from-sky-600 via-sky-500 to-indigo-600 p-5 flex items-center justify-between">
           <div className="flex items-center space-x-2.5">
-            <div className="w-10 h-10 rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center shadow-inner">
+            <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center shadow-inner">
               <Sparkles className="w-5 h-5 text-amber-300 animate-pulse" />
             </div>
             <div>

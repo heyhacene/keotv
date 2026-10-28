@@ -141,7 +141,7 @@ export const ParentalPinModal: React.FC<ParentalPinModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-in fade-in duration-150">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 animate-in fade-in duration-150">
       <div className="w-full max-w-sm bg-tv-surface border border-tv-border rounded-3xl p-6 shadow-2xl flex flex-col items-center text-center">
         {/* Header Icon */}
         <div className="w-16 h-16 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center mb-3">
@@ -162,7 +162,7 @@ export const ParentalPinModal: React.FC<ParentalPinModalProps> = ({
           {[0, 1, 2, 3].map((i) => (
             <div
               key={i}
-              className={`w-4 h-4 rounded-full border-2 transition-all ${
+              className={`w-4 h-4 rounded-full border-2 transition-transform ${
                 i < pin.length
                   ? hasError
                     ? 'bg-rose-500 border-rose-500'

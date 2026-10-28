@@ -82,6 +82,15 @@ public class PlayerActivity extends AppCompatActivity {
     public static final String KEY_POSITIONS_JSON = "positions_json";
 
     private ExoPlayer player;
+
+    // Zap prefetch: a hidden second ExoPlayer pre-buffers the adjacent channel so zapping is a surface swap
+    private ExoPlayer prefetchPlayer;
+    private int prefetchTargetIdx = -1;
+    private long prefetchPreparedAtMs = 0L;
+    private int lastZapDirection = 1;
+    private Player.Listener playerListener;
+    private static final long PREFETCH_MAX_AGE_MS = 20000L;
+    private final Runnable prefetchRunnable = () -> startPrefetch();
     private PlayerView playerView;
     private LinearLayout osdContainer;
     private TextView badgeView;
@@ -728,7 +737,7 @@ public class PlayerActivity extends AppCompatActivity {
             badgeView.setText("▶ REPRISE À " + formatTimeMs(startPosMs));
         }
 
-        player.addListener(new Player.Listener() {
+        playerListener = new Player.Listener() {
             @Override
             public void onMediaItemTransition(MediaItem mediaItem, int reason) {
                 introSkippedForCurrent = false;
@@ -789,10 +798,12 @@ public class PlayerActivity extends AppCompatActivity {
             public void onPlayerError(PlaybackException error) {
                 handlePlayerError(error);
             }
-        });
+        };
+        player.addListener(playerListener);
 
         player.prepare();
         player.setPlayWhenReady(true);
+        scheduleZapPrefetch(1500);
         applyLanguagePreferences();
         updateTitle();
         showOsd();
@@ -1437,27 +1448,14 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void zapNextChannel() {
-        if (player == null) return;
-        int total = player.getMediaItemCount();
-        if (total <= 1) {
-            String chName = (titleView != null && !TextUtils.isEmpty(titleView.getText()))
-                    ? titleView.getText().toString() : "";
-            showZapFeedback("Chaîne unique", chName.isEmpty() ? "Aucune autre chaîne" : chName);
-            showOsd();
-            return;
-        }
-        int currentIdx = player.getCurrentMediaItemIndex();
-        int nextIdx = (currentIdx + 1) % total;
-        player.seekToDefaultPosition(nextIdx);
-        player.prepare();
-        player.play();
-        updateTitle();
-        showOsd();
-        String channelName = (nextIdx < pendingTitles.size()) ? pendingTitles.get(nextIdx) : "";
-        showZapFeedback("▲ Chaîne suivante", channelName);
+        zapChannel(1);
     }
 
     private void zapPreviousChannel() {
+        zapChannel(-1);
+    }
+
+    private void zapChannel(int direction) {
         if (player == null) return;
         int total = player.getMediaItemCount();
         if (total <= 1) {
@@ -1467,16 +1465,133 @@ public class PlayerActivity extends AppCompatActivity {
             showOsd();
             return;
         }
+        lastZapDirection = direction;
         int currentIdx = player.getCurrentMediaItemIndex();
-        int prevIdx = (currentIdx - 1 + total) % total;
-        player.seekToDefaultPosition(prevIdx);
-        player.prepare();
-        player.play();
+        int targetIdx = (currentIdx + direction + total) % total;
+
+        boolean swapped = trySwapToPrefetched(targetIdx);
+        if (!swapped) {
+            player.seekToDefaultPosition(targetIdx);
+            player.prepare();
+            player.play();
+        }
         updateTitle();
         showOsd();
-        String channelName = (prevIdx < pendingTitles.size()) ? pendingTitles.get(prevIdx) : "";
-        showZapFeedback("▼ Chaîne précédente", channelName);
+        String channelName = (targetIdx < pendingTitles.size()) ? pendingTitles.get(targetIdx) : "";
+        showZapFeedback(direction > 0 ? "▲ Chaîne suivante" : "▼ Chaîne précédente", channelName);
+
+        // Pre-buffer the next likely channel (same direction) once the new one is on screen
+        scheduleZapPrefetch(swapped ? 400 : 1200);
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Zap prefetch (live only): hidden second ExoPlayer pre-buffers the adjacent channel
+    // ---------------------------------------------------------------------------------------------
+    private void scheduleZapPrefetch(long delayMs) {
+        if (!isLive || isReplayCascade) return;
+        mainHandler.removeCallbacks(prefetchRunnable);
+        mainHandler.postDelayed(prefetchRunnable, delayMs);
+    }
+
+    private void releasePrefetchPlayer() {
+        mainHandler.removeCallbacks(prefetchRunnable);
+        if (prefetchPlayer != null) {
+            try { prefetchPlayer.release(); } catch (Exception ignored) {}
+            prefetchPlayer = null;
+        }
+        prefetchTargetIdx = -1;
+    }
+
+    private void startPrefetch() {
+        if (player == null || !isLive || isReplayCascade || isFinishing()) return;
+        int total = player.getMediaItemCount();
+        if (total <= 1) return;
+        int targetIdx = (player.getCurrentMediaItemIndex() + lastZapDirection + total) % total;
+        if (prefetchPlayer != null && prefetchTargetIdx == targetIdx) return; // already warm
+
+        releasePrefetchPlayer();
+        try {
+            DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
+                    .setUserAgent(pendingUserAgent)
+                    .setAllowCrossProtocolRedirects(true)
+                    .setConnectTimeoutMs(6000)
+                    .setReadTimeoutMs(8000);
+            // Small buffer: we only want the connection open + first segments, not a deep buffer
+            DefaultLoadControl lc = new DefaultLoadControl.Builder()
+                    .setBufferDurationsMs(1500, 4000, 500, 1000)
+                    .build();
+            final ExoPlayer pre = new ExoPlayer.Builder(this)
+                    .setLoadControl(lc)
+                    .setMediaSourceFactory(new DefaultMediaSourceFactory(httpFactory)
+                            .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(1)))
+                    .build();
+
+            List<MediaItem> items = new ArrayList<>();
+            for (int i = 0; i < pendingUrls.size(); i++) {
+                String title = i < pendingTitles.size() ? pendingTitles.get(i) : "";
+                items.add(buildItem(pendingUrls.get(i), title));
+            }
+            pre.setMediaItems(items, targetIdx, C.TIME_UNSET);
+            pre.setVolume(0f);
+            pre.addListener(new Player.Listener() {
+                @Override
+                public void onPlaybackStateChanged(int state) {
+                    if (state == Player.STATE_READY && pre == prefetchPlayer) {
+                        prefetchPreparedAtMs = android.os.SystemClock.elapsedRealtime();
+                    }
+                }
+
+                @Override
+                public void onPlayerError(PlaybackException error) {
+                    // Broken stream: drop it silently, the normal zap path will handle (and report) it
+                    if (pre == prefetchPlayer) {
+                        releasePrefetchPlayer();
+                    }
+                }
+            });
+            pre.setPlayWhenReady(false); // buffer only, never plays audio
+            pre.prepare();
+            prefetchPlayer = pre;
+            prefetchTargetIdx = targetIdx;
+            prefetchPreparedAtMs = 0L;
+        } catch (Exception e) {
+            releasePrefetchPlayer();
+        }
+    }
+
+    /** Swaps the visible player for the already-buffered prefetch player. Returns false if not usable. */
+    private boolean trySwapToPrefetched(int targetIdx) {
+        if (prefetchPlayer == null || prefetchTargetIdx != targetIdx || playerListener == null) return false;
+        if (prefetchPlayer.getPlaybackState() != Player.STATE_READY) return false;
+        long age = android.os.SystemClock.elapsedRealtime() - prefetchPreparedAtMs;
+        if (prefetchPreparedAtMs == 0L || age > PREFETCH_MAX_AGE_MS) return false; // stale live data
+
+        final ExoPlayer old = player;
+        final ExoPlayer next = prefetchPlayer;
+        prefetchPlayer = null;
+        prefetchTargetIdx = -1;
+        mainHandler.removeCallbacks(prefetchRunnable);
+
+        try {
+            old.removeListener(playerListener);
+            old.setPlayWhenReady(false);
+            next.addListener(playerListener);
+            next.setVolume(1f);
+            player = next;
+            playerView.setPlayer(next);
+            next.setPlayWhenReady(true);
+            if (errorView != null) errorView.setVisibility(View.GONE);
+            applyLanguagePreferences();
+            // Release the previous player off the critical path
+            mainHandler.postDelayed(() -> {
+                try { old.release(); } catch (Exception ignored) {}
+            }, 300);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
 
     private void togglePlayPause() {
         if (player == null) return;
@@ -1650,6 +1765,7 @@ public class PlayerActivity extends AppCompatActivity {
         super.onStop();
         mainHandler.removeCallbacks(progressRunnable);
         stopCountdown();
+        releasePrefetchPlayer();
         if (player != null) {
             player.pause();
         }
@@ -1663,6 +1779,7 @@ public class PlayerActivity extends AppCompatActivity {
         stopCountdown();
         osdHandler.removeCallbacks(hideOsdRunnable);
         zapHandler.removeCallbacks(hideZapRunnable);
+        releasePrefetchPlayer();
         if (player != null) {
             player.release();
             player = null;

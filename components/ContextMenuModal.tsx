@@ -248,7 +248,7 @@ export const ContextMenuModal: React.FC<ContextMenuModalProps> = ({
   if (!isOpen || (!item && !category)) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-100">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 animate-in fade-in duration-100">
       <div className="w-full max-w-sm bg-tv-surface border border-tv-border rounded-3xl p-5 shadow-2xl flex flex-col">
         {/* Header Preview */}
         <div className="flex items-center space-x-3.5 pb-4 mb-3 border-b border-tv-border/60">
