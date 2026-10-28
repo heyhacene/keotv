@@ -32,11 +32,13 @@ import {
   loadAllLiveCategories,
   loadAllVodCategories,
   fetchAllSeriesCatalog,
+  fetchRecentlyAddedVod,
   SeriesEpisode,
   isSeparatorChannel,
   isAdultCategoryName,
   shouldExcludeChannelByPrefix,
 } from '@/lib/iptv-service';
+import { buildForYouVod, getTopGenreNames } from '@/lib/recommendations';
 import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
 import { EPGService } from '@/lib/epg-service';
 import { CatchupService } from '@/lib/catchup-service';
@@ -265,6 +267,7 @@ export default function KeoTVHome() {
 
   // Channel classification, prefix exclusions, and favorite section toggles
   const [showFavoritesCategory, setShowFavoritesCategory] = useState<boolean>(true);
+  const [singleStreamMode, setSingleStreamMode] = useState<boolean>(false);
   const [excludedPrefixes, setExcludedPrefixes] = useState<string[]>([]);
   const [hiddenChannelIds, setHiddenChannelIds] = useState<Set<string>>(new Set());
   const [watchedPositions, setWatchedPositions] = useState<Array<{ id: string; title: string; url: string; poster?: string; position: number; duration: number; stream_type: 'vod' | 'series' }>>([]);
@@ -311,6 +314,7 @@ export default function KeoTVHome() {
     getSetting('parental_enabled', false).then((en) => setParentalEnabled(Boolean(en)));
     getSetting('parental_hide_adult', false).then((hd) => setParentalHideAdult(Boolean(hd)));
     getSetting('show_favorites_category', true).then((show) => setShowFavoritesCategory(show ?? true));
+    getSetting('single_stream_mode', false).then((sm) => setSingleStreamMode(Boolean(sm)));
     getSetting<string[]>('excluded_prefixes', []).then((prefixes) => setExcludedPrefixes(prefixes || []));
     getSetting<string[]>('hidden_channel_ids', []).then((ids) => setHiddenChannelIds(new Set(ids || [])));
 
@@ -399,6 +403,34 @@ export default function KeoTVHome() {
     [favCounts.total]
   );
 
+  // Dedicated VOD Category: "Récemment ajoutés" (strictly sorted by provider addition date)
+  const vodRecentCategory: Category = useMemo(
+    () => ({
+      id: 'vod_recent_added',
+      name: '🕐 Récemment ajoutés',
+      type: 'vod',
+      count: 0,
+      icon: 'Clock',
+      is_hidden: false,
+      custom_order: -95,
+    }),
+    []
+  );
+
+  // Dedicated VOD Category: "Pour vous" (intelligent local recommendation based on playback history)
+  const vodForYouCategory: Category = useMemo(
+    () => ({
+      id: 'vod_for_you',
+      name: '✨ Pour vous',
+      type: 'vod',
+      count: 0,
+      icon: 'Sparkles',
+      is_hidden: false,
+      custom_order: -98,
+    }),
+    []
+  );
+
   const categoryLoadTokenRef = useRef<number>(0);
 
   // Channel loader for the selected category from IndexedDB with multi-tier lookup & on-demand fetch
@@ -428,6 +460,52 @@ export default function KeoTVHome() {
           rawList = await db.channels
             .filter((c) => Boolean(c.is_favorite) && (c.stream_type === 'live' || !c.stream_type))
             .toArray();
+        } else if (cat.id === 'vod_for_you') {
+          // "Pour vous": local affinity recommendation based on playback history & preferred genres
+          const recs = await buildForYouVod(150);
+          if (recs.length > 0) {
+            rawList = recs;
+          } else {
+            // Fallback to recently added if no playback history exists yet
+            const currentPlaylists = await db.playlists.toArray();
+            let activePl = currentPlaylists.find(
+              (p) => p.type === 'xtream' && p.server_url && p.username && p.password
+            );
+            if (!activePl) {
+              const savedConfig = await getSetting<any>('last_xtream_config', null);
+              if (savedConfig?.server_url && savedConfig?.username && savedConfig?.password) {
+                activePl = savedConfig;
+              }
+            }
+            if (activePl?.server_url) {
+              rawList = await fetchRecentlyAddedVod({
+                serverUrl: activePl.server_url,
+                username: activePl.username,
+                password: activePl.password,
+                limit: 150,
+              });
+            }
+          }
+        } else if (cat.id === 'vod_recent_added') {
+          // "Récemment ajoutés": strictly sorted by date the provider added the stream (Xtream `added`)
+          const currentPlaylists = await db.playlists.toArray();
+          let activePl = currentPlaylists.find(
+            (p) => p.type === 'xtream' && p.server_url && p.username && p.password
+          );
+          if (!activePl) {
+            const savedConfig = await getSetting<any>('last_xtream_config', null);
+            if (savedConfig?.server_url && savedConfig?.username && savedConfig?.password) {
+              activePl = savedConfig;
+            }
+          }
+          if (activePl?.server_url) {
+            rawList = await fetchRecentlyAddedVod({
+              serverUrl: activePl.server_url,
+              username: activePl.username,
+              password: activePl.password,
+              limit: 250,
+            });
+          }
         } else {
           // Tier 1: exact group_id indexed match (e.g. grp_live_123, grp_vod_456, grp_series_789)
           rawList = await db.channels.where('group_id').equals(cat.id).toArray();
@@ -1155,13 +1233,18 @@ export default function KeoTVHome() {
       sectionCats.sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0));
     }
 
-    // Prepend universe-specific favorites category at the top of the category list (if enabled)
+    // Prepend universe-specific favorites and smart categories
+    if (activeSection === 'vod') {
+      const vodSpecials = [vodForYouCategory, vodRecentCategory];
+      if (showFavoritesCategory) {
+        return [favVodCategory, ...vodSpecials, ...sectionCats];
+      }
+      return [...vodSpecials, ...sectionCats];
+    }
+
     if (showFavoritesCategory) {
       if (activeSection === 'live') {
         return [favLiveCategory, ...sectionCats];
-      }
-      if (activeSection === 'vod') {
-        return [favVodCategory, ...sectionCats];
       }
       if (activeSection === 'series') {
         return [favSeriesCategory, ...sectionCats];
@@ -1181,6 +1264,8 @@ export default function KeoTVHome() {
     favVodCategory,
     favLiveCategory,
     favAllCategory,
+    vodRecentCategory,
+    vodForYouCategory,
   ]);
 
   // Section switcher (Direct, Films, Séries, Favoris)
@@ -2731,6 +2816,7 @@ export default function KeoTVHome() {
             onTogglePlayStop={() => setIsStopped(!isStopped)}
             onNextChannel={handleNextChannel}
             onPreviousChannel={handlePreviousChannel}
+            singleStreamMode={singleStreamMode}
             isModalCovering={
               isSplashVisible ||
               isSettingsModalOpen ||
@@ -3353,6 +3439,7 @@ export default function KeoTVHome() {
                 onTogglePlayStop={() => setIsStopped(!isStopped)}
                 onNextChannel={handleNextChannel}
                 onPreviousChannel={handlePreviousChannel}
+                singleStreamMode={singleStreamMode}
                 isModalCovering={
                   isSplashVisible ||
                   isSettingsModalOpen ||
@@ -3512,6 +3599,7 @@ export default function KeoTVHome() {
               activeSection={activeSection}
               serverCreds={activeXtreamCreds}
               boundaryHit={boundaryHit}
+              singleStreamMode={singleStreamMode}
               isModalCovering={
                 isSplashVisible ||
                 isSettingsModalOpen ||
@@ -3636,6 +3724,11 @@ export default function KeoTVHome() {
         onOpenCategoryManager={() => setIsCategoryManagerOpen(true)}
         parentalCategories={categories}
         onToggleAdultCategory={handleToggleAdultCategory}
+        singleStreamMode={singleStreamMode}
+        onToggleSingleStreamMode={(enabled) => {
+          setSingleStreamMode(enabled);
+          setSetting('single_stream_mode', enabled);
+        }}
       />
 
       <CategoryDrawerModal

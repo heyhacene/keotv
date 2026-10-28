@@ -71,6 +71,7 @@ interface TVGuideProps {
   serverCreds?: { serverUrl: string; username: string; password: string } | null;
   boundaryHit?: { pane: string; boundary: 'top' | 'bottom'; time: number } | null;
   isModalCovering?: boolean;
+  singleStreamMode?: boolean;
 }
 
 // Helper for category icons
@@ -678,6 +679,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   serverCreds,
   boundaryHit,
   isModalCovering = false,
+  singleStreamMode = false,
 }) => {
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
@@ -1274,6 +1276,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 isStopped={isStopped}
                 onTogglePlayStop={onTogglePlayStop}
                 isModalCovering={isModalCovering}
+                singleStreamMode={singleStreamMode}
               />
             </div>
 

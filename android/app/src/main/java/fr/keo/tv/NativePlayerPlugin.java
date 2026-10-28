@@ -313,6 +313,11 @@ public class NativePlayerPlugin extends Plugin {
         Double startPosOpt = call.getDouble("startPositionMs", 0.0);
         PlayerActivity.pendingStartPositionMs = startPosOpt != null ? Math.round(startPosOpt) : 0L;
         PlayerActivity.pendingForceRestart = Boolean.TRUE.equals(call.getBoolean("forceRestart", false));
+        PlayerActivity.pendingSingleStreamMode = Boolean.TRUE.equals(call.getBoolean("singleStreamMode", false));
+        PlayerActivity.pendingCurrentProgramTitle = call.getString("currentProgramTitle", null);
+        PlayerActivity.pendingCurrentProgramDesc = call.getString("currentProgramDesc", null);
+        PlayerActivity.pendingCurrentProgramTime = call.getString("currentProgramTime", null);
+        PlayerActivity.pendingNextProgramTitle = call.getString("nextProgramTitle", null);
 
         Intent intent = new Intent(getContext(), PlayerActivity.class);
         getActivity().startActivity(intent);

@@ -11,6 +11,11 @@ export interface NativePlayerPlayOptions {
   preferredSubtitle?: string;
   startPositionMs?: number;
   forceRestart?: boolean;
+  singleStreamMode?: boolean;
+  currentProgramTitle?: string;
+  currentProgramDesc?: string;
+  currentProgramTime?: string;
+  nextProgramTitle?: string;
 }
 
 export interface NativePlayerPreviewOptions {

@@ -18,6 +18,7 @@ interface LiveVideoPlayerProps {
   onNextChannel?: () => void;
   onPreviousChannel?: () => void;
   isModalCovering?: boolean;
+  singleStreamMode?: boolean;
 }
 
 export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
@@ -32,6 +33,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   onNextChannel,
   onPreviousChannel,
   isModalCovering = false,
+  singleStreamMode = false,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -109,12 +111,26 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       index = foundIdx >= 0 ? foundIdx : 0;
     }
 
+    let curTime = '';
+    if (currentEpg?.start && currentEpg?.end) {
+      try {
+        const s = new Date(currentEpg.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const e = new Date(currentEpg.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        curTime = `${s} - ${e}`;
+      } catch {}
+    }
+
     NativePlayer.play({
       urls,
       titles,
       index,
       userAgent: NATIVE_PLAYER_USER_AGENT,
       isLive: channel.stream_type === 'live',
+      singleStreamMode,
+      currentProgramTitle: currentEpg?.title,
+      currentProgramDesc: currentEpg?.description,
+      currentProgramTime: curTime,
+      nextProgramTitle: nextEpg?.title,
     }).catch((err: any) => alert(`Lecture impossible : ${err?.message || err}`));
   };
 

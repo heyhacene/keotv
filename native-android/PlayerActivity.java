@@ -77,11 +77,24 @@ public class PlayerActivity extends AppCompatActivity {
     public static String pendingPreferredSubtitle = null;
     public static long pendingStartPositionMs = 0L;
     public static boolean pendingForceRestart = false;
+    public static boolean pendingSingleStreamMode = false;
+    public static String pendingCurrentProgramTitle = null;
+    public static String pendingCurrentProgramDesc = null;
+    public static String pendingCurrentProgramTime = null;
+    public static String pendingNextProgramTitle = null;
 
     public static final String PREFS_POSITIONS = "keotv_playback_positions";
     public static final String KEY_POSITIONS_JSON = "positions_json";
 
     private ExoPlayer player;
+    private boolean singleStreamMode = false;
+
+    // Rich EPG info overlay views
+    private LinearLayout epgOverlayCard;
+    private TextView epgNowTitle;
+    private TextView epgNowTime;
+    private TextView epgNowDesc;
+    private TextView epgNextTitle;
 
     // Zap prefetch: a hidden second ExoPlayer pre-buffers the adjacent channel so zapping is a surface swap
     private ExoPlayer prefetchPlayer;
@@ -168,6 +181,15 @@ public class PlayerActivity extends AppCompatActivity {
                         .setDuration(300)
                         .withEndAction(() -> {
                             if (bottomControlsHsv != null) bottomControlsHsv.setVisibility(View.GONE);
+                        });
+            }
+            if (epgOverlayCard != null) {
+                epgOverlayCard.animate()
+                        .alpha(0f)
+                        .translationY(-dp(8))
+                        .setDuration(250)
+                        .withEndAction(() -> {
+                            if (epgOverlayCard != null) epgOverlayCard.setVisibility(View.GONE);
                         });
             }
         }
@@ -261,6 +283,7 @@ public class PlayerActivity extends AppCompatActivity {
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         hideSystemUi();
         isLive = pendingIsLive;
+        singleStreamMode = pendingSingleStreamMode;
 
         // Auto orientation: Landscape on TV, Sensor-based on Mobile/Tablet
         UiModeManager uiModeManager = (UiModeManager) getSystemService(UI_MODE_SERVICE);
@@ -341,6 +364,74 @@ public class PlayerActivity extends AppCompatActivity {
 
         root.addView(osdContainer, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP));
+
+        // Rich EPG info overlay card (semi-transparent, shows current & next program on TV/Mobile without interrupting stream)
+        epgOverlayCard = new LinearLayout(this);
+        epgOverlayCard.setOrientation(LinearLayout.VERTICAL);
+        epgOverlayCard.setPadding(dp(22), dp(16), dp(22), dp(16));
+        GradientDrawable epgCardBg = new GradientDrawable();
+        epgCardBg.setColor(Color.parseColor("#E60B1220")); // sleek semi-transparent deep slate
+        epgCardBg.setCornerRadius(dp(16));
+        epgCardBg.setStroke(dp(1), Color.parseColor("#3338BDF8"));
+        epgOverlayCard.setBackground(epgCardBg);
+        epgOverlayCard.setVisibility(View.GONE);
+
+        // Header: Now Playing badge + Time
+        LinearLayout epgHeaderRow = new LinearLayout(this);
+        epgHeaderRow.setOrientation(LinearLayout.HORIZONTAL);
+        epgHeaderRow.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView epgNowBadge = new TextView(this);
+        epgNowBadge.setText("EN CE MOMENT");
+        epgNowBadge.setTextColor(Color.parseColor("#38BDF8"));
+        epgNowBadge.setTextSize(10f);
+        epgNowBadge.setTypeface(Typeface.DEFAULT_BOLD);
+        epgNowBadge.setPadding(dp(8), dp(3), dp(8), dp(3));
+        GradientDrawable nowBg = new GradientDrawable();
+        nowBg.setColor(Color.parseColor("#2638BDF8"));
+        nowBg.setCornerRadius(dp(6));
+        epgNowBadge.setBackground(nowBg);
+        epgHeaderRow.addView(epgNowBadge);
+
+        epgNowTime = new TextView(this);
+        epgNowTime.setTextColor(Color.parseColor("#94A3B8"));
+        epgNowTime.setTextSize(11f);
+        epgNowTime.setTypeface(Typeface.MONOSPACE);
+        epgNowTime.setPadding(dp(10), 0, 0, 0);
+        epgHeaderRow.addView(epgNowTime);
+        epgOverlayCard.addView(epgHeaderRow);
+
+        // Current program title
+        epgNowTitle = new TextView(this);
+        epgNowTitle.setTextColor(Color.WHITE);
+        epgNowTitle.setTextSize(15f);
+        epgNowTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        epgNowTitle.setPadding(0, dp(6), 0, dp(4));
+        epgNowTitle.setMaxLines(2);
+        epgNowTitle.setEllipsize(TextUtils.TruncateAt.END);
+        epgOverlayCard.addView(epgNowTitle);
+
+        // Current program description
+        epgNowDesc = new TextView(this);
+        epgNowDesc.setTextColor(Color.parseColor("#CBD5E1"));
+        epgNowDesc.setTextSize(12f);
+        epgNowDesc.setMaxLines(3);
+        epgNowDesc.setEllipsize(TextUtils.TruncateAt.END);
+        epgNowDesc.setPadding(0, 0, 0, dp(8));
+        epgOverlayCard.addView(epgNowDesc);
+
+        // Next program summary row
+        epgNextTitle = new TextView(this);
+        epgNextTitle.setTextColor(Color.parseColor("#94A3B8"));
+        epgNextTitle.setTextSize(11f);
+        epgNextTitle.setMaxLines(1);
+        epgNextTitle.setEllipsize(TextUtils.TruncateAt.END);
+        epgOverlayCard.addView(epgNextTitle);
+
+        FrameLayout.LayoutParams epgCardLp = new FrameLayout.LayoutParams(
+                dp(480), ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
+        epgCardLp.setMargins(dp(24), dp(84), dp(24), 0);
+        root.addView(epgOverlayCard, epgCardLp);
 
         // Skip intro button (Strictly Series episodes only, bottom right, auto-hides after 7s)
         skipIntroBtn = new TextView(this);
@@ -1116,7 +1207,33 @@ public class PlayerActivity extends AppCompatActivity {
             bottomControlsHsv.animate().cancel();
             bottomControlsHsv.setAlpha(1f);
         }
-        osdHandler.postDelayed(hideOsdRunnable, 3800);
+
+        // Show rich semi-transparent EPG overlay if info is available (Live TV mode)
+        if (isLive && epgOverlayCard != null && pendingCurrentProgramTitle != null && !pendingCurrentProgramTitle.isEmpty()) {
+            if (epgNowTitle != null) epgNowTitle.setText(pendingCurrentProgramTitle);
+            if (epgNowTime != null) {
+                epgNowTime.setText(pendingCurrentProgramTime != null ? pendingCurrentProgramTime : "");
+                epgNowTime.setVisibility(pendingCurrentProgramTime != null && !pendingCurrentProgramTime.isEmpty() ? View.VISIBLE : View.GONE);
+            }
+            if (epgNowDesc != null) {
+                epgNowDesc.setText(pendingCurrentProgramDesc != null ? pendingCurrentProgramDesc : "");
+                epgNowDesc.setVisibility(pendingCurrentProgramDesc != null && !pendingCurrentProgramDesc.isEmpty() ? View.VISIBLE : View.GONE);
+            }
+            if (epgNextTitle != null) {
+                if (pendingNextProgramTitle != null && !pendingNextProgramTitle.isEmpty()) {
+                    epgNextTitle.setText("⏭  À suivre : " + pendingNextProgramTitle);
+                    epgNextTitle.setVisibility(View.VISIBLE);
+                } else {
+                    epgNextTitle.setVisibility(View.GONE);
+                }
+            }
+            epgOverlayCard.setVisibility(View.VISIBLE);
+            epgOverlayCard.animate().cancel();
+            epgOverlayCard.setAlpha(1f);
+            epgOverlayCard.setTranslationY(0f);
+        }
+
+        osdHandler.postDelayed(hideOsdRunnable, 4200);
     }
 
     private void hideOsdImmediately() {
@@ -1130,6 +1247,11 @@ public class PlayerActivity extends AppCompatActivity {
             bottomControlsHsv.animate().cancel();
             bottomControlsHsv.setAlpha(0f);
             bottomControlsHsv.setVisibility(View.GONE);
+        }
+        if (epgOverlayCard != null) {
+            epgOverlayCard.animate().cancel();
+            epgOverlayCard.setAlpha(0f);
+            epgOverlayCard.setVisibility(View.GONE);
         }
     }
 
@@ -1344,24 +1466,12 @@ public class PlayerActivity extends AppCompatActivity {
             // 4. Dedicated Channel Up / Channel Down keys (always zap in Live TV)
             // Or DPAD_UP / DPAD_DOWN when controls are HIDDEN!
             if (isLive && (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_CHANNEL_UP || key == KeyEvent.KEYCODE_PAGE_UP)) {
-                if (player.hasPreviousMediaItem()) {
-                    player.seekToPreviousMediaItem();
-                } else if (player.getMediaItemCount() > 0) {
-                    player.seekToDefaultPosition(player.getMediaItemCount() - 1);
-                }
-                updateTitle();
-                showOsd();
+                zapPreviousChannel();
                 return true;
             }
 
             if (isLive && (key == KeyEvent.KEYCODE_DPAD_DOWN || key == KeyEvent.KEYCODE_CHANNEL_DOWN || key == KeyEvent.KEYCODE_PAGE_DOWN)) {
-                if (player.hasNextMediaItem()) {
-                    player.seekToNextMediaItem();
-                } else if (player.getMediaItemCount() > 0) {
-                    player.seekToDefaultPosition(0);
-                }
-                updateTitle();
-                showOsd();
+                zapNextChannel();
                 return true;
             }
 
@@ -1488,7 +1598,7 @@ public class PlayerActivity extends AppCompatActivity {
     // Zap prefetch (live only): hidden second ExoPlayer pre-buffers the adjacent channel
     // ---------------------------------------------------------------------------------------------
     private void scheduleZapPrefetch(long delayMs) {
-        if (!isLive || isReplayCascade) return;
+        if (!isLive || isReplayCascade || singleStreamMode) return;
         mainHandler.removeCallbacks(prefetchRunnable);
         mainHandler.postDelayed(prefetchRunnable, delayMs);
     }
@@ -1503,7 +1613,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void startPrefetch() {
-        if (player == null || !isLive || isReplayCascade || isFinishing()) return;
+        if (player == null || !isLive || isReplayCascade || isFinishing() || singleStreamMode) return;
         int total = player.getMediaItemCount();
         if (total <= 1) return;
         int targetIdx = (player.getCurrentMediaItemIndex() + lastZapDirection + total) % total;

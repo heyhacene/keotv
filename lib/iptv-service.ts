@@ -1032,6 +1032,7 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
       stream_id: streamId,
       has_archive: hasArchive,
       archive_days: archiveDays,
+      added: Number(item.added) > 0 ? Number(item.added) : undefined,
     });
   }
 
@@ -1276,6 +1277,89 @@ export async function getAllVodChannels(
       is_hidden: false,
       custom_order: Number(m.num) || i + 1,
       resolution: detectResolution(mName),
+      added: Number(m.added) > 0 ? Number(m.added) : undefined,
+    };
+  });
+}
+
+/**
+ * "Récemment ajoutés": VOD titles sorted STRICTLY by the date the provider added the file to its catalog
+ * (Xtream `added`, unix seconds), newest first. This is deliberately different from the movie release year,
+ * so older films that were just integrated by the provider are not missed.
+ */
+export async function fetchRecentlyAddedVod(params: {
+  serverUrl: string;
+  username: string;
+  password: string;
+  limit?: number;
+}): Promise<Channel[]> {
+  const limit = params.limit ?? 300;
+  let server = params.serverUrl.trim().replace(/\/+$/, '');
+  if (!server.startsWith('http://') && !server.startsWith('https://')) {
+    server = 'http://' + server;
+  }
+  const cleanUser = decodeURIComponent(params.username.trim());
+  const cleanPass = decodeURIComponent(params.password.trim());
+  const encUser = encodeURIComponent(cleanUser);
+  const encPass = encodeURIComponent(cleanPass);
+  const credKey = `${server}_${cleanUser}`;
+  const now = Date.now();
+
+  let vodList: any[] | null =
+    xtreamVodCache && xtreamVodCache.credKey === credKey && now - xtreamVodCache.timestamp < 600000
+      ? xtreamVodCache.data
+      : null;
+
+  if (!vodList) {
+    try {
+      const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_vod_streams`;
+      const res = await fetchHttp(url, 'json');
+      vodList = toArray(res);
+      xtreamVodCache = { credKey, data: vodList, timestamp: now };
+    } catch {
+      return [];
+    }
+  }
+
+  const withDate = vodList
+    .filter((m: any) => Number(m?.added) > 0)
+    .sort((a: any, b: any) => Number(b.added) - Number(a.added))
+    .slice(0, limit);
+
+  let catNames = new Map<string, string>();
+  try {
+    const cats = await db.categories.where('type').equals('vod').toArray();
+    catNames = new Map(cats.map((c) => [c.id, c.name]));
+  } catch {}
+
+  const favIds = new Set<string>();
+  try {
+    const favs = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
+    favs.forEach((c) => favIds.add(c.id));
+  } catch {}
+
+  return withDate.map((m: any, i: number) => {
+    const streamId = m.stream_id || m.id || i + 1;
+    const ext = m.container_extension || 'mp4';
+    const mName = String(m.name || `Film ${i + 1}`).trim();
+    const groupId = `grp_vod_${m.category_id || 'all'}`;
+    const id = `ch_xtream_vod_${streamId}`;
+    return {
+      id,
+      num: i + 1, // keeps the "newest first" order when channelSort is 'playlist'
+      name: mName,
+      logo: m.stream_icon || m.cover || '',
+      stream_url: `${server}/movie/${encUser}/${encPass}/${streamId}.${ext}`,
+      stream_type: 'vod' as const,
+      group_id: groupId,
+      group_name: catNames.get(groupId) || 'Films VOD',
+      epg_id: String(streamId),
+      is_favorite: favIds.has(id),
+      is_hidden: false,
+      custom_order: i + 1,
+      resolution: detectResolution(mName),
+      stream_id: streamId,
+      added: Number(m.added),
     };
   });
 }

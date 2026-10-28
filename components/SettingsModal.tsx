@@ -57,6 +57,8 @@ interface SettingsModalProps {
   onToggleParentalHideAdult?: (hide: boolean) => void;
   showFavoritesCategory?: boolean;
   onToggleShowFavoritesCategory?: (show: boolean) => void;
+  singleStreamMode?: boolean;
+  onToggleSingleStreamMode?: (enabled: boolean) => void;
   excludedPrefixes?: string[];
   onUpdateExcludedPrefixes?: (prefixes: string[]) => void;
 }
@@ -103,6 +105,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleParentalHideAdult,
   showFavoritesCategory = true,
   onToggleShowFavoritesCategory,
+  singleStreamMode = false,
+  onToggleSingleStreamMode,
   excludedPrefixes = [],
   onUpdateExcludedPrefixes,
 }) => {
@@ -1391,6 +1395,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </button>
                     ))}
                   </div>
+                </div>
+
+                {/* Réglage 5: Protection Multi-flux IPTV (Anti-restriction) */}
+                <div className="p-4 bg-tv-card/80 rounded-xl border border-tv-border flex items-center justify-between">
+                  <div className="pr-4">
+                    <div className="flex items-center space-x-2">
+                      <span className="text-xs font-bold text-white block">Mode Flux Unique (Anti-restriction IPTV)</span>
+                      {singleStreamMode && (
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-1.5 py-0.5 rounded font-bold">
+                          ACTIF
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-[11px] text-slate-400 block mt-1 leading-relaxed">
+                      Recommandé si votre fournisseur IPTV n&apos;autorise qu&apos;<strong>une seule connexion simultanée</strong>. 
+                      Désactive le préchargement en tâche de fond (zap prefetch) et le Picture-in-Picture pour garantir que le serveur 
+                      ne détecte jamais deux flux ouverts à la fois, évitant ainsi tout blocage ou coupure de votre compte.
+                    </span>
+                  </div>
+                  {onToggleSingleStreamMode && (
+                    <button
+                      type="button"
+                      onClick={() => onToggleSingleStreamMode(!singleStreamMode)}
+                      className={`w-12 h-6 flex items-center rounded-full p-1 transition-colors flex-shrink-0 ${
+                        singleStreamMode ? 'bg-tv-accent justify-end' : 'bg-slate-700 justify-start'
+                      }`}
+                    >
+                      <div className="bg-white w-4 h-4 rounded-full shadow-md" />
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
