@@ -22,6 +22,7 @@ import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
 
 import com.getcapacitor.JSArray;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
@@ -61,7 +62,12 @@ public class NativePlayerPlugin extends Plugin {
         previewView.setBackgroundColor(Color.BLACK);
         previewView.setFocusable(false);
         previewView.setFocusableInTouchMode(false);
-        previewView.setClickable(false);
+        previewView.setClickable(true);
+        previewView.setOnClickListener(v -> {
+            JSObject ret = new JSObject();
+            ret.put("url", currentPreviewUrl != null ? currentPreviewUrl : "");
+            notifyListeners("previewClicked", ret);
+        });
 
         final int radiusPx = dpToPx(activity, 12);
         previewView.setOutlineProvider(new ViewOutlineProvider() {

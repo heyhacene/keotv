@@ -216,6 +216,7 @@ export default function KeoTVHome() {
 
   const [currentEpg, setCurrentEpg] = useState<EpgProgram | null>(null);
   const [nextEpg, setNextEpg] = useState<EpgProgram | null>(null);
+  const [channelEpgMap, setChannelEpgMap] = useState<Record<string, EpgProgram[]>>({});
 
   const [activeSection, setActiveSection] = useState<'live' | 'vod' | 'series' | 'fav'>('live');
   const [syncCode, setSyncCode] = useState<string>('');
@@ -1113,9 +1114,14 @@ export default function KeoTVHome() {
         const firstCh = (await db.channels.orderBy('num').first()) || null;
         if (firstCh) {
           setActiveChannel(firstCh);
-          const epg = getMockEpgForChannel(firstCh.id);
-          setCurrentEpg(epg.current);
-          setNextEpg(epg.next);
+          try {
+            const progs = await EPGService.getProgramsForChannel(firstCh.id);
+            const nowIso = new Date().toISOString();
+            const curr = progs.find((p) => p.start <= nowIso && p.end > nowIso) || progs[0] || null;
+            const nxt = progs.find((p) => p.start >= (curr ? curr.end : nowIso)) || (progs.length > 1 ? progs[1] : null);
+            setCurrentEpg(curr);
+            setNextEpg(nxt);
+          } catch {}
         }
 
         // Load or create Sync Code
@@ -1380,6 +1386,83 @@ export default function KeoTVHome() {
     });
   }, [channels, hiddenChannelIds, excludedPrefixes]);
 
+  // Bulk Dexie EPG preload for filteredChannels + background Short EPG fetch
+  useEffect(() => {
+    if (activeSection !== 'live' && activeSection !== 'fav') return;
+    if (!filteredChannels || filteredChannels.length === 0) return;
+    let active = true;
+
+    const loadEpg = async () => {
+      try {
+        const channelIds = filteredChannels.map((c) => c.id).filter(Boolean);
+        if (channelIds.length === 0) return;
+
+        // 1. Bulk Dexie query (instant)
+        const stored = await db.epg_programs.where('channel_id').anyOf(channelIds).toArray();
+        if (!active) return;
+
+        const grouped: Record<string, EpgProgram[]> = {};
+        for (const p of stored) {
+          if (!grouped[p.channel_id]) grouped[p.channel_id] = [];
+          grouped[p.channel_id].push(p);
+        }
+        for (const cid in grouped) {
+          grouped[cid].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+        }
+
+        setChannelEpgMap((prev) => ({ ...prev, ...grouped }));
+
+        // 2. Background short EPG fetch for channels without cached data (first 30 channels)
+        const pl = (await db.playlists.toArray()).find((p) => p.type === 'xtream' && p.username && p.password);
+        let serverUrl = pl?.server_url || '';
+        let username = pl?.username || '';
+        let password = pl?.password || '';
+
+        if (!serverUrl) {
+          const saved = await getSetting<any>('last_xtream_config', null);
+          if (saved?.server_url && saved?.username && saved?.password) {
+            serverUrl = saved.server_url;
+            username = saved.username;
+            password = saved.password;
+          }
+        }
+
+        if (serverUrl && username && password) {
+          const nowIso = new Date().toISOString();
+          const toFetch = filteredChannels.slice(0, 30).filter((ch) => {
+            const cached = grouped[ch.id] || [];
+            return cached.length === 0 || !cached.some((p) => p.end > nowIso);
+          });
+
+          for (const ch of toFetch) {
+            if (!active) break;
+            const streamId = ch.stream_id || (ch.id.match(/\d+$/) ? ch.id.match(/\d+$/)![0] : null);
+            if (!streamId) continue;
+            try {
+              const progs = await EPGService.fetchXtreamShortEpg({
+                serverUrl,
+                username,
+                password,
+                streamId,
+                channelId: ch.id,
+              });
+              if (active && progs.length > 0) {
+                setChannelEpgMap((prev) => ({ ...prev, [ch.id]: progs }));
+              }
+            } catch {}
+          }
+        }
+      } catch (err) {
+        console.warn('Error bulk loading EPG:', err);
+      }
+    };
+
+    loadEpg();
+    return () => {
+      active = false;
+    };
+  }, [filteredChannels, activeSection]);
+
   // Update EPG info whenever focused channel changes (debounced by 80ms for ultra-fluid DPAD navigation)
   useEffect(() => {
     const focusedChannel = filteredChannels[focusedChannelIndex];
@@ -1404,13 +1487,16 @@ export default function KeoTVHome() {
     }
 
     const timer = setTimeout(() => {
-      const epg = getMockEpgForChannel(focusedChannel.id);
-      setCurrentEpg(epg.current);
-      setNextEpg(epg.next);
+      const progs = channelEpgMap[focusedChannel.id] || [];
+      const nowIso = new Date().toISOString();
+      const curr = progs.find((p) => p.start <= nowIso && p.end > nowIso) || progs[0] || null;
+      const nxt = progs.find((p) => p.start >= (curr ? curr.end : nowIso)) || (progs.length > 1 ? progs[1] : null);
+      setCurrentEpg(curr);
+      setNextEpg(nxt);
     }, 80);
 
     return () => clearTimeout(timer);
-  }, [focusedChannelIndex, filteredChannels, activeSection]);
+  }, [focusedChannelIndex, filteredChannels, activeSection, channelEpgMap]);
 
   // Play an episode chosen from the series detail page
   const handlePlaySeriesEpisode = useCallback(
@@ -1514,10 +1600,13 @@ export default function KeoTVHome() {
       setIsStopped(false);
       setActiveChannel(targetChannel);
 
-      // 1. Initial immediate EPG display (Mock fallback or existing Dexie)
-      const mockEpg = getMockEpgForChannel(targetChannel.id);
-      setCurrentEpg(mockEpg.current);
-      setNextEpg(mockEpg.next);
+      // 1. Initial immediate EPG display (Dexie cache first)
+      const cachedProgs = channelEpgMap[targetChannel.id] || [];
+      const nowIso = new Date().toISOString();
+      const currProg = cachedProgs.find((p) => p.start <= nowIso && p.end > nowIso) || cachedProgs[0] || null;
+      const nextProg = cachedProgs.find((p) => p.start >= (currProg ? currProg.end : nowIso)) || (cachedProgs.length > 1 ? cachedProgs[1] : null);
+      setCurrentEpg(currProg);
+      setNextEpg(nextProg);
 
       // 2. Fetch real live EPG and Catchup from Xtream if available
       (async () => {
@@ -1553,6 +1642,7 @@ export default function KeoTVHome() {
               const next = realPrograms.find((p) => p.start >= (curr ? curr.end : now)) || (realPrograms.length > 1 ? realPrograms[1] : null);
               setCurrentEpg(curr || null);
               setNextEpg(next || null);
+              setChannelEpgMap((prev) => ({ ...prev, [targetChannel.id]: realPrograms }));
             }
           }
         } catch (epgErr) {
@@ -1619,12 +1709,12 @@ export default function KeoTVHome() {
         return;
       }
 
-      // ---- Native Android player (Live TV: TiviMate 2-step preview + fullscreen) ----
-      // - First press on a new channel: switches activeChannel so it plays immediately in the top-left 16:9 mini preview window!
-      // - Second press on the already-active channel (or when forceFullscreen is true): opens full-screen PlayerActivity!
+      // ---- Native Android player (Live TV) ----
+      // - On TV Mode (remote D-Pad): First press switches activeChannel to preview in top-left window, second press (or forceFullscreen) opens full-screen PlayerActivity!
+      // - On Mobile or when forceFullscreen: opens full-screen PlayerActivity directly!
       const isAlreadyActiveChannel = activeChannel?.id === targetChannel.id;
       if (isNativePlayerAvailable()) {
-        if (!forceFullscreen && !isAlreadyActiveChannel) {
+        if (!forceFullscreen && !isAlreadyActiveChannel && isTvMode) {
           return;
         }
         try {
@@ -1639,6 +1729,35 @@ export default function KeoTVHome() {
               curTime = `${s} - ${e}`;
             } catch {}
           }
+
+          const epgTitles: string[] = [];
+          const epgDescs: string[] = [];
+          const epgTimes: string[] = [];
+          const epgNextTitles: string[] = [];
+          const nowIso = new Date().toISOString();
+
+          for (const ch of playlist) {
+            const progs = channelEpgMap[ch.id];
+            let cur = progs?.find((p) => p.start <= nowIso && p.end > nowIso);
+            let nxt = progs?.find((p) => p.start >= (cur ? cur.end : nowIso));
+            if (ch.id === targetChannel.id && !cur && currentEpg) {
+              cur = currentEpg;
+              nxt = nextEpg || undefined;
+            }
+            let timeStr = '';
+            if (cur?.start && cur?.end) {
+              try {
+                const s = new Date(cur.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const e = new Date(cur.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                timeStr = `${s} - ${e}`;
+              } catch {}
+            }
+            epgTitles.push(cur?.title || '');
+            epgDescs.push(cur?.description || '');
+            epgTimes.push(timeStr);
+            epgNextTitles.push(nxt?.title || '');
+          }
+
           await NativePlayer.play({
             urls: playlist.map((c) => c.stream_url),
             titles: playlist.map((c) => c.name),
@@ -1650,6 +1769,10 @@ export default function KeoTVHome() {
             currentProgramDesc: currentEpg?.description,
             currentProgramTime: curTime,
             nextProgramTitle: nextEpg?.title,
+            epgTitles,
+            epgDescs,
+            epgTimes,
+            epgNextTitles,
             osdTimeoutMs,
           });
         } catch (err: any) {
@@ -1664,7 +1787,7 @@ export default function KeoTVHome() {
         setIsFullscreen(true);
       }
     },
-    [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession, adultCategoryIds, singleStreamMode, currentEpg, nextEpg, osdTimeoutMs]
+    [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession, adultCategoryIds, singleStreamMode, currentEpg, nextEpg, osdTimeoutMs, channelEpgMap, isTvMode]
   );
 
   // Play a specific past Catchup / Replay program via Timeshift (with multi-format fallback cascade!)
@@ -2838,8 +2961,15 @@ export default function KeoTVHome() {
             playlist={filteredChannels}
             currentEpg={currentEpg}
             nextEpg={nextEpg}
+            channelEpgMap={channelEpgMap}
             isFullscreen={isFullscreen}
-            onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
+            onToggleFullscreen={() => {
+              if (isNativePlayerAvailable() && activeChannel) {
+                handleSelectChannel(activeChannel, true);
+              } else {
+                setIsFullscreen(!isFullscreen);
+              }
+            }}
             isStopped={isStopped}
             onTogglePlayStop={() => setIsStopped(!isStopped)}
             onNextChannel={handleNextChannel}
@@ -2886,6 +3016,19 @@ export default function KeoTVHome() {
           </div>
 
           <div className="flex items-center space-x-1.5 flex-shrink-0">
+            <button
+              onClick={() => {
+                if (isNativePlayerAvailable() && activeChannel) {
+                  handleSelectChannel(activeChannel, true);
+                } else {
+                  setIsFullscreen(true);
+                }
+              }}
+              className="p-1.5 rounded-lg border bg-tv-focus hover:bg-sky-500 text-white border-tv-accent transition"
+              title="Plein écran"
+            >
+              <Maximize className="w-4 h-4" />
+            </button>
             <button
               onClick={() => setIsStopped(!isStopped)}
               className={`p-1.5 rounded-lg border transition ${
@@ -3043,8 +3186,13 @@ export default function KeoTVHome() {
           ) : (
             filteredChannels.map((ch, idx) => {
               const isActive = activeChannel?.id === ch.id;
-              const chEpg = getMockEpgForChannel(ch.id);
               const isVodOrSeries = ch.stream_type === 'vod' || ch.stream_type === 'series' || activeSection === 'vod' || activeSection === 'series';
+              const chProgs = channelEpgMap[ch.id] || [];
+              const nowIso = new Date().toISOString();
+              const curProg = chProgs.find((p) => p.start <= nowIso && p.end > nowIso) || chProgs[0];
+              const epgTitle = isVodOrSeries
+                ? (ch.stream_type === 'series' ? 'Série complète VOD' : 'Film disponible en lecture instantanée')
+                : (curProg?.title || (isActive ? currentEpg?.title : undefined) || 'Programme en direct');
 
               return (
                 <div
@@ -3093,9 +3241,7 @@ export default function KeoTVHome() {
                         )}
                       </div>
                       <p className="text-xs text-slate-400 truncate mt-0.5">
-                        {isVodOrSeries
-                          ? (ch.stream_type === 'series' ? 'Série complète VOD' : 'Film disponible en lecture instantanée')
-                          : chEpg.current.title}
+                        {epgTitle}
                       </p>
                     </div>
                   </div>
@@ -3360,12 +3506,17 @@ export default function KeoTVHome() {
               ) : (
                 filteredChannels.map((ch, idx) => {
                   const isActive = activeChannel?.id === ch.id;
-                  const chEpg = getMockEpgForChannel(ch.id);
                   const isVodOrSeries =
                     ch.stream_type === 'vod' ||
                     ch.stream_type === 'series' ||
                     activeSection === 'vod' ||
                     activeSection === 'series';
+                  const chProgs = channelEpgMap[ch.id] || [];
+                  const nowIso = new Date().toISOString();
+                  const curProg = chProgs.find((p) => p.start <= nowIso && p.end > nowIso) || chProgs[0];
+                  const epgTitle = isVodOrSeries
+                    ? ch.group_name || 'VOD'
+                    : (curProg?.title || (isActive ? currentEpg?.title : undefined) || 'Programme en direct');
 
                   return (
                     <div
@@ -3424,9 +3575,7 @@ export default function KeoTVHome() {
                             )}
                           </div>
                           <p className="text-[10px] text-slate-400 truncate mt-0.5">
-                            {isVodOrSeries
-                              ? ch.group_name || 'VOD'
-                              : chEpg.current.title}
+                            {epgTitle}
                           </p>
                         </div>
                       </div>
@@ -3462,8 +3611,15 @@ export default function KeoTVHome() {
                 playlist={filteredChannels}
                 currentEpg={currentEpg}
                 nextEpg={nextEpg}
+                channelEpgMap={channelEpgMap}
                 isFullscreen={isFullscreen}
-                onToggleFullscreen={() => setIsFullscreen(!isFullscreen)}
+                onToggleFullscreen={() => {
+                  if (isNativePlayerAvailable() && activeChannel) {
+                    handleSelectChannel(activeChannel, true);
+                  } else {
+                    setIsFullscreen(!isFullscreen);
+                  }
+                }}
                 isStopped={isStopped}
                 onTogglePlayStop={() => setIsStopped(!isStopped)}
                 onNextChannel={handleNextChannel}
@@ -3543,7 +3699,13 @@ export default function KeoTVHome() {
               {/* Action Buttons Toolbar */}
               <div className="flex items-center space-x-1.5 pt-2 border-t border-tv-border/40 mt-2 flex-shrink-0">
                 <button
-                  onClick={() => setIsFullscreen(true)}
+                  onClick={() => {
+                    if (isNativePlayerAvailable() && activeChannel) {
+                      handleSelectChannel(activeChannel, true);
+                    } else {
+                      setIsFullscreen(true);
+                    }
+                  }}
                   className="flex-1 py-1.5 px-2 rounded-lg bg-tv-focus hover:bg-sky-500 text-white font-bold text-xs flex items-center justify-center space-x-1.5 shadow-md transition"
                   title="Plein écran"
                 >

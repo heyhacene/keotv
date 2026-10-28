@@ -164,6 +164,20 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
     }).catch((err: any) => alert(`Lecture impossible : ${err?.message || err}`));
   };
 
+  // Listen for taps on the native ExoPlayer preview view to open full-screen PlayerActivity
+  useEffect(() => {
+    if (!nativeMode) return;
+    let subPromise: any = null;
+    try {
+      subPromise = (NativePlayer as any).addListener('previewClicked', () => {
+        openNativePlayer();
+      });
+    } catch {}
+    return () => {
+      subPromise?.then?.((s: any) => s?.remove?.());
+    };
+  }, [nativeMode, channel, playlist, currentEpg, nextEpg, channelEpgMap, singleStreamMode, osdTimeoutMs]);
+
   // Embedded Native ExoPlayer Mini Preview Window (TiviMate top-left 16:9 box on Android TV)
   useEffect(() => {
     if (!nativeMode) return;
@@ -527,9 +541,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
         </div>
       )}
 
-      {/* Controls Overlay (when not fullscreen and in Web mode) */}
-      {!isFullscreen && !nativeMode && (
-        <div className="absolute top-2 right-2 flex items-center space-x-1.5 bg-black/70 rounded-lg p-1.5 border border-white/10 z-10">
+      {/* Controls Overlay (when not fullscreen) */}
+      {!isFullscreen && (
+        <div className="absolute top-2 right-2 flex items-center space-x-1.5 bg-black/70 rounded-lg p-1.5 border border-white/10 z-20">
           {/* Stop / Resume Button */}
           <button
             onClick={toggleStopPlay}
@@ -582,7 +596,14 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
 
           {/* Fullscreen Button */}
           <button
-            onClick={onToggleFullscreen}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (nativeMode) {
+                openNativePlayer(e);
+              } else {
+                onToggleFullscreen();
+              }
+            }}
             className="p-1.5 text-slate-200 hover:text-white hover:bg-white/10 rounded transition"
             title="Plein écran (Entrée)"
           >

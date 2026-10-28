@@ -1324,15 +1324,15 @@ public class PlayerActivity extends AppCompatActivity {
         String chName = (idx < pendingTitles.size()) ? pendingTitles.get(idx) : "En direct";
 
         // Display immediate placeholder while fetching over network
-        applyEpgToViews(new EpgItem(chName, "", "Chargement du programme...", ""));
+        applyEpgToViews(new EpgItem(chName, "", "Programme en direct", ""));
 
         String streamUrl = pendingUrls.get(idx);
         if (TextUtils.isEmpty(streamUrl)) return;
 
         epgFetchExecutor.execute(() -> {
             try {
-                // Parse Xtream live stream URL format: http(s)://server:port/live/username/password/streamId.(ext)
-                Pattern p = Pattern.compile("^(https?://[^/]+)/live/([^/]+)/([^/]+)/(\\d+)");
+                // Parse Xtream live stream URL format: http(s)://server:port/[live/]username/password/streamId[.ext]
+                Pattern p = Pattern.compile("^(https?://[^/]+)(?:/live)?/([^/]+)/([^/]+)/(\\d+)(?:\\.[a-zA-Z0-9]+)?");
                 Matcher m = p.matcher(streamUrl);
                 if (!m.find()) return;
 
@@ -1802,6 +1802,9 @@ public class PlayerActivity extends AppCompatActivity {
         }
         updateTitle();
         showOsd();
+        if (isLive && epgOverlayCard != null) {
+            updateEpgOverlayForIndex(targetIdx);
+        }
         String channelName = (targetIdx < pendingTitles.size()) ? pendingTitles.get(targetIdx) : "";
         showZapFeedback(direction > 0 ? "▲ Chaîne suivante" : "▼ Chaîne précédente", channelName);
 
