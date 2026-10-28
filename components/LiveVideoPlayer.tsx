@@ -19,6 +19,8 @@ interface LiveVideoPlayerProps {
   onPreviousChannel?: () => void;
   isModalCovering?: boolean;
   singleStreamMode?: boolean;
+  channelEpgMap?: Record<string, EpgProgram[]>;
+  osdTimeoutMs?: number;
 }
 
 export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
@@ -34,6 +36,8 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   onPreviousChannel,
   isModalCovering = false,
   singleStreamMode = false,
+  channelEpgMap,
+  osdTimeoutMs = 5000,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -111,13 +115,34 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       index = foundIdx >= 0 ? foundIdx : 0;
     }
 
-    let curTime = '';
-    if (currentEpg?.start && currentEpg?.end) {
-      try {
-        const s = new Date(currentEpg.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        const e = new Date(currentEpg.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        curTime = `${s} - ${e}`;
-      } catch {}
+    const epgTitles: string[] = [];
+    const epgDescs: string[] = [];
+    const epgTimes: string[] = [];
+    const epgNextTitles: string[] = [];
+    const nowIso = new Date().toISOString();
+
+    if (playlist && playlist.length > 0) {
+      for (const ch of playlist) {
+        const progs = channelEpgMap ? channelEpgMap[ch.id] : undefined;
+        let cur = progs?.find((p) => p.start <= nowIso && p.end > nowIso);
+        let nxt = progs?.find((p) => p.start >= (cur ? cur.end : nowIso));
+        if (ch.id === channel.id && !cur && currentEpg) {
+          cur = currentEpg;
+          nxt = nextEpg || undefined;
+        }
+        let timeStr = '';
+        if (cur?.start && cur?.end) {
+          try {
+            const s = new Date(cur.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const e = new Date(cur.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            timeStr = `${s} - ${e}`;
+          } catch {}
+        }
+        epgTitles.push(cur?.title || '');
+        epgDescs.push(cur?.description || '');
+        epgTimes.push(timeStr);
+        epgNextTitles.push(nxt?.title || '');
+      }
     }
 
     NativePlayer.play({
@@ -131,6 +156,11 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       currentProgramDesc: currentEpg?.description,
       currentProgramTime: curTime,
       nextProgramTitle: nextEpg?.title,
+      epgTitles,
+      epgDescs,
+      epgTimes,
+      epgNextTitles,
+      osdTimeoutMs,
     }).catch((err: any) => alert(`Lecture impossible : ${err?.message || err}`));
   };
 
@@ -331,11 +361,12 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   const triggerOsd = () => {
     setShowOsd(true);
     if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
+    if (osdTimeoutMs === 0) return; // Permanent / manual mode: stays visible until Back or OK
     osdTimerRef.current = setTimeout(() => {
       if (isFullscreen) {
         setShowOsd(false);
       }
-    }, 4500);
+    }, osdTimeoutMs > 0 ? osdTimeoutMs : 5000);
   };
 
   // Capture DPAD & Back keys in fullscreen web player when OSD controls are visible:

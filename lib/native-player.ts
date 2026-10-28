@@ -16,6 +16,11 @@ export interface NativePlayerPlayOptions {
   currentProgramDesc?: string;
   currentProgramTime?: string;
   nextProgramTitle?: string;
+  epgTitles?: string[];
+  epgDescs?: string[];
+  epgTimes?: string[];
+  epgNextTitles?: string[];
+  osdTimeoutMs?: number;
 }
 
 export interface NativePlayerPreviewOptions {

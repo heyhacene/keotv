@@ -74,6 +74,7 @@ export interface UserSettings {
   parental_hide_adult?: boolean;
   show_favorites_category?: boolean;
   single_stream_mode?: boolean; // Anti-restriction IPTV (désactive le prefetch et le multi-flux pour abonnements à 1 seule connexion)
+  osd_duration?: '2s' | '3s' | '5s' | '7s' | '10s' | 'manual'; // Durée d'affichage du bandeau d'info (overlay)
   excluded_prefixes?: string[];
   hidden_channel_ids?: string[];
 }

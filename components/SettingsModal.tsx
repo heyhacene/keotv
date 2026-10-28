@@ -59,6 +59,8 @@ interface SettingsModalProps {
   onToggleShowFavoritesCategory?: (show: boolean) => void;
   singleStreamMode?: boolean;
   onToggleSingleStreamMode?: (enabled: boolean) => void;
+  osdDuration?: '2s' | '3s' | '5s' | '7s' | '10s' | 'manual';
+  onOsdDurationChange?: (duration: '2s' | '3s' | '5s' | '7s' | '10s' | 'manual') => void;
   excludedPrefixes?: string[];
   onUpdateExcludedPrefixes?: (prefixes: string[]) => void;
 }
@@ -107,6 +109,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleShowFavoritesCategory,
   singleStreamMode = false,
   onToggleSingleStreamMode,
+  osdDuration: osdDurationProp,
+  onOsdDurationChange,
   excludedPrefixes = [],
   onUpdateExcludedPrefixes,
 }) => {
@@ -152,25 +156,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // TV Remote & Zapping configurable settings
   const [zappingMode, setZappingMode] = useState<'direct' | 'banner'>('direct');
-  const [osdDuration, setOsdDuration] = useState<'2s' | '3.5s' | '5s' | 'manual'>('3.5s');
+  const [osdDuration, setOsdDuration] = useState<'2s' | '3s' | '5s' | '7s' | '10s' | 'manual'>(osdDurationProp || '5s');
   const [okAction, setOkAction] = useState<'fullscreen' | 'preview'>('fullscreen');
   const [bufferSize, setBufferSize] = useState<'300ms' | '1000ms' | '2500ms'>('300ms');
 
   // Load saved preferences on mount
   useEffect(() => {
+    if (osdDurationProp) {
+      setOsdDuration(osdDurationProp);
+    }
     try {
       const saved = localStorage.getItem('keotv_controls_settings');
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed.zappingMode) setZappingMode(parsed.zappingMode);
-        if (parsed.osdDuration) setOsdDuration(parsed.osdDuration);
+        if (parsed.osdDuration && !osdDurationProp) setOsdDuration(parsed.osdDuration);
         if (parsed.okAction) setOkAction(parsed.okAction);
         if (parsed.bufferSize) setBufferSize(parsed.bufferSize);
       }
     } catch {
       // ignore
     }
-  }, []);
+  }, [osdDurationProp]);
 
   const saveControlSetting = (key: string, val: string) => {
     try {
@@ -1285,33 +1292,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div className="p-3.5 bg-tv-card/60 rounded-xl border border-tv-border space-y-2">
                   <div className="flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-white block">Disparition automatique du bandeau (OSD)</span>
+                      <span className="text-xs font-bold text-white block">Durée d&apos;affichage de l&apos;Overlay (Bandeau d&apos;informations)</span>
                       <span className="text-[11px] text-slate-400 block">
-                        Délai avant que le nom de la chaîne ne s&apos;efface de l&apos;écran
+                        Délai avant que les infos de chaîne et du programme ne s&apos;effacent de l&apos;écran
                       </span>
                     </div>
                   </div>
-                  <div className="grid grid-cols-4 gap-1.5 pt-1">
+                  <div className="grid grid-cols-5 gap-1.5 pt-1">
                     {[
-                      { id: '2s', label: '2 secondes' },
-                      { id: '3.5s', label: '3.5s (Défaut)' },
-                      { id: '5s', label: '5 secondes' },
-                      { id: 'manual', label: 'Touche OK' },
+                      { id: '3s', label: '3 secondes', desc: 'Rapide' },
+                      { id: '5s', label: '5s (Défaut)', desc: 'Standard' },
+                      { id: '7s', label: '7 secondes', desc: 'Confort' },
+                      { id: '10s', label: '10 secondes', desc: 'Détaillé' },
+                      { id: 'manual', label: 'Permanent', desc: 'Touche OK' },
                     ].map((item) => (
                       <button
                         key={item.id}
                         type="button"
                         onClick={() => {
-                          setOsdDuration(item.id as any);
-                          saveControlSetting('osdDuration', item.id);
+                          const val = item.id as any;
+                          setOsdDuration(val);
+                          saveControlSetting('osdDuration', val);
+                          onOsdDurationChange?.(val);
                         }}
-                        className={`py-2 px-2 rounded-lg text-xs font-semibold border transition text-center focus:outline-none focus:ring-2 focus:ring-tv-accent ${
+                        className={`py-2 px-1.5 rounded-lg text-xs font-semibold border transition text-center focus:outline-none focus:ring-2 focus:ring-tv-accent ${
                           osdDuration === item.id
                             ? 'bg-tv-focus text-white border-tv-accent shadow-sm'
                             : 'bg-black/30 border-white/5 text-slate-300 hover:bg-white/5'
                         }`}
                       >
-                        {item.label}
+                        <div className="font-bold">{item.label}</div>
+                        <div className="text-[10px] opacity-75">{item.desc}</div>
                       </button>
                     ))}
                   </div>

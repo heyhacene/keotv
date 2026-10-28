@@ -52,7 +52,23 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * Full screen native player (ExoPlayer / Media3) optimized for Android TV remote controls.
@@ -82,6 +98,11 @@ public class PlayerActivity extends AppCompatActivity {
     public static String pendingCurrentProgramDesc = null;
     public static String pendingCurrentProgramTime = null;
     public static String pendingNextProgramTitle = null;
+    public static List<String> pendingEpgTitles = new ArrayList<>();
+    public static List<String> pendingEpgDescs = new ArrayList<>();
+    public static List<String> pendingEpgTimes = new ArrayList<>();
+    public static List<String> pendingEpgNextTitles = new ArrayList<>();
+    public static int pendingOsdTimeoutMs = 5000;
 
     public static final String PREFS_POSITIONS = "keotv_playback_positions";
     public static final String KEY_POSITIONS_JSON = "positions_json";
@@ -95,6 +116,22 @@ public class PlayerActivity extends AppCompatActivity {
     private TextView epgNowTime;
     private TextView epgNowDesc;
     private TextView epgNextTitle;
+
+    public static class EpgItem {
+        public final String title;
+        public final String time;
+        public final String desc;
+        public final String next;
+        public EpgItem(String title, String time, String desc, String next) {
+            this.title = title;
+            this.time = time;
+            this.desc = desc;
+            this.next = next;
+        }
+    }
+
+    private final Map<Integer, EpgItem> dynamicEpgCache = new ConcurrentHashMap<>();
+    private final ExecutorService epgFetchExecutor = Executors.newSingleThreadExecutor();
 
     // Zap prefetch: a hidden second ExoPlayer pre-buffers the adjacent channel so zapping is a surface swap
     private ExoPlayer prefetchPlayer;
@@ -1208,32 +1245,210 @@ public class PlayerActivity extends AppCompatActivity {
             bottomControlsHsv.setAlpha(1f);
         }
 
-        // Show rich semi-transparent EPG overlay if info is available (Live TV mode)
-        if (isLive && epgOverlayCard != null && pendingCurrentProgramTitle != null && !pendingCurrentProgramTitle.isEmpty()) {
-            if (epgNowTitle != null) epgNowTitle.setText(pendingCurrentProgramTitle);
-            if (epgNowTime != null) {
-                epgNowTime.setText(pendingCurrentProgramTime != null ? pendingCurrentProgramTime : "");
-                epgNowTime.setVisibility(pendingCurrentProgramTime != null && !pendingCurrentProgramTime.isEmpty() ? View.VISIBLE : View.GONE);
-            }
-            if (epgNowDesc != null) {
-                epgNowDesc.setText(pendingCurrentProgramDesc != null ? pendingCurrentProgramDesc : "");
-                epgNowDesc.setVisibility(pendingCurrentProgramDesc != null && !pendingCurrentProgramDesc.isEmpty() ? View.VISIBLE : View.GONE);
-            }
-            if (epgNextTitle != null) {
-                if (pendingNextProgramTitle != null && !pendingNextProgramTitle.isEmpty()) {
-                    epgNextTitle.setText("⏭  À suivre : " + pendingNextProgramTitle);
-                    epgNextTitle.setVisibility(View.VISIBLE);
-                } else {
-                    epgNextTitle.setVisibility(View.GONE);
-                }
-            }
-            epgOverlayCard.setVisibility(View.VISIBLE);
-            epgOverlayCard.animate().cancel();
-            epgOverlayCard.setAlpha(1f);
-            epgOverlayCard.setTranslationY(0f);
+        // Show rich semi-transparent EPG overlay for the currently active channel (Live TV mode)
+        if (isLive && epgOverlayCard != null) {
+            int currentIdx = (player != null) ? player.getCurrentMediaItemIndex() : pendingIndex;
+            updateEpgOverlayForIndex(currentIdx);
         }
 
-        osdHandler.postDelayed(hideOsdRunnable, 4200);
+        if (pendingOsdTimeoutMs > 0) {
+            osdHandler.postDelayed(hideOsdRunnable, pendingOsdTimeoutMs);
+        }
+    }
+
+    private void updateEpgOverlayForIndex(int idx) {
+        if (!isLive || epgOverlayCard == null) return;
+
+        // 1. Check in-memory session cache
+        if (dynamicEpgCache.containsKey(idx)) {
+            applyEpgToViews(dynamicEpgCache.get(idx));
+            return;
+        }
+
+        // 2. Check pending EPG lists passed from Web
+        String title = (idx >= 0 && idx < pendingEpgTitles.size()) ? pendingEpgTitles.get(idx) : "";
+        String desc = (idx >= 0 && idx < pendingEpgDescs.size()) ? pendingEpgDescs.get(idx) : "";
+        String time = (idx >= 0 && idx < pendingEpgTimes.size()) ? pendingEpgTimes.get(idx) : "";
+        String next = (idx >= 0 && idx < pendingEpgNextTitles.size()) ? pendingEpgNextTitles.get(idx) : "";
+
+        // If this is the initial index and pendingCurrentProgramTitle was passed, fallback to it
+        if (idx == pendingIndex && TextUtils.isEmpty(title) && !TextUtils.isEmpty(pendingCurrentProgramTitle)) {
+            title = pendingCurrentProgramTitle;
+            desc = pendingCurrentProgramDesc != null ? pendingCurrentProgramDesc : "";
+            time = pendingCurrentProgramTime != null ? pendingCurrentProgramTime : "";
+            next = pendingNextProgramTitle != null ? pendingNextProgramTitle : "";
+        }
+
+        if (!TextUtils.isEmpty(title)) {
+            EpgItem item = new EpgItem(title, time, desc, next);
+            dynamicEpgCache.put(idx, item);
+            applyEpgToViews(item);
+            return;
+        }
+
+        // 3. Fallback: fetch EPG directly from Xtream API in a background thread
+        fetchEpgForIndexAsync(idx);
+    }
+
+    private void applyEpgToViews(EpgItem item) {
+        if (epgOverlayCard == null) return;
+        if (item == null || TextUtils.isEmpty(item.title)) {
+            epgOverlayCard.setVisibility(View.GONE);
+            return;
+        }
+        if (epgNowTitle != null) epgNowTitle.setText(item.title);
+        if (epgNowTime != null) {
+            epgNowTime.setText(item.time != null ? item.time : "");
+            epgNowTime.setVisibility(!TextUtils.isEmpty(item.time) ? View.VISIBLE : View.GONE);
+        }
+        if (epgNowDesc != null) {
+            epgNowDesc.setText(item.desc != null ? item.desc : "");
+            epgNowDesc.setVisibility(!TextUtils.isEmpty(item.desc) ? View.VISIBLE : View.GONE);
+        }
+        if (epgNextTitle != null) {
+            if (!TextUtils.isEmpty(item.next)) {
+                epgNextTitle.setText("⏭  À suivre : " + item.next);
+                epgNextTitle.setVisibility(View.VISIBLE);
+            } else {
+                epgNextTitle.setVisibility(View.GONE);
+            }
+        }
+        epgOverlayCard.setVisibility(View.VISIBLE);
+        epgOverlayCard.animate().cancel();
+        epgOverlayCard.setAlpha(1f);
+        epgOverlayCard.setTranslationY(0f);
+    }
+
+    private void fetchEpgForIndexAsync(int idx) {
+        if (idx < 0 || idx >= pendingUrls.size()) return;
+        String chName = (idx < pendingTitles.size()) ? pendingTitles.get(idx) : "En direct";
+
+        // Display immediate placeholder while fetching over network
+        applyEpgToViews(new EpgItem(chName, "", "Chargement du programme...", ""));
+
+        String streamUrl = pendingUrls.get(idx);
+        if (TextUtils.isEmpty(streamUrl)) return;
+
+        epgFetchExecutor.execute(() -> {
+            try {
+                // Parse Xtream live stream URL format: http(s)://server:port/live/username/password/streamId.(ext)
+                Pattern p = Pattern.compile("^(https?://[^/]+)/live/([^/]+)/([^/]+)/(\\d+)");
+                Matcher m = p.matcher(streamUrl);
+                if (!m.find()) return;
+
+                String base = m.group(1);
+                String user = m.group(2);
+                String pass = m.group(3);
+                String streamId = m.group(4);
+
+                String apiUrl = base + "/player_api.php?username=" + URLEncoder.encode(user, "UTF-8")
+                        + "&password=" + URLEncoder.encode(pass, "UTF-8")
+                        + "&action=get_short_epg&stream_id=" + streamId + "&limit=4";
+
+                URL url = new URL(apiUrl);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setConnectTimeout(3000);
+                conn.setReadTimeout(3000);
+                conn.setRequestProperty("User-Agent", pendingUserAgent != null ? pendingUserAgent : "IPTVSmartersPro/3.1.5 (Linux; Android 12)");
+
+                if (conn.getResponseCode() == 200) {
+                    BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+                    StringBuilder sb = new StringBuilder();
+                    String line;
+                    while ((line = reader.readLine()) != null) sb.append(line);
+                    reader.close();
+
+                    JSONObject json = new JSONObject(sb.toString());
+                    JSONArray listings = json.optJSONArray("epg_listings");
+                    if (listings != null && listings.length() > 0) {
+                        EpgItem parsed = parseEpgJson(listings);
+                        if (parsed != null) {
+                            dynamicEpgCache.put(idx, parsed);
+                            runOnUiThread(() -> {
+                                if (player != null && player.getCurrentMediaItemIndex() == idx) {
+                                    applyEpgToViews(parsed);
+                                }
+                            });
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        });
+    }
+
+    private String decodeBase64IfNeeded(String raw) {
+        if (raw == null || raw.isEmpty()) return "";
+        String trimmed = raw.trim();
+        if (trimmed.length() >= 4 && trimmed.length() % 4 == 0 && trimmed.matches("^[A-Za-z0-9+/=]+$")) {
+            try {
+                byte[] decoded = android.util.Base64.decode(trimmed, android.util.Base64.DEFAULT);
+                return new String(decoded, "UTF-8");
+            } catch (Exception ignored) {}
+        }
+        return trimmed;
+    }
+
+    private EpgItem parseEpgJson(JSONArray listings) {
+        try {
+            if (listings == null || listings.length() == 0) return null;
+            long nowSec = System.currentTimeMillis() / 1000;
+            JSONObject currentObj = null;
+            JSONObject nextObj = null;
+
+            for (int i = 0; i < listings.length(); i++) {
+                JSONObject item = listings.optJSONObject(i);
+                if (item == null) continue;
+                long start = parseTimestamp(item.optString("start_timestamp"), item.optString("start"));
+                long stop = parseTimestamp(item.optString("stop_timestamp"), item.optString("stop", item.optString("end")));
+                if (stop > nowSec && start <= nowSec) {
+                    currentObj = item;
+                    if (i + 1 < listings.length()) {
+                        nextObj = listings.optJSONObject(i + 1);
+                    }
+                    break;
+                }
+            }
+            if (currentObj == null) {
+                currentObj = listings.optJSONObject(0);
+                if (listings.length() > 1) nextObj = listings.optJSONObject(1);
+            }
+            if (currentObj == null) return null;
+
+            String title = decodeBase64IfNeeded(currentObj.optString("title"));
+            String desc = decodeBase64IfNeeded(currentObj.optString("description"));
+            long startSec = parseTimestamp(currentObj.optString("start_timestamp"), currentObj.optString("start"));
+            long stopSec = parseTimestamp(currentObj.optString("stop_timestamp"), currentObj.optString("stop", currentObj.optString("end")));
+
+            SimpleDateFormat sdf = new SimpleDateFormat("HH:mm", Locale.getDefault());
+            String timeStr = "";
+            if (startSec > 0 && stopSec > 0) {
+                timeStr = sdf.format(new Date(startSec * 1000)) + " - " + sdf.format(new Date(stopSec * 1000));
+            }
+
+            String nextTitle = "";
+            if (nextObj != null) {
+                nextTitle = decodeBase64IfNeeded(nextObj.optString("title"));
+            }
+
+            return new EpgItem(title.isEmpty() ? "Programme en cours" : title, timeStr, desc, nextTitle);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private long parseTimestamp(String rawTs, String dateStr) {
+        try {
+            if (!TextUtils.isEmpty(rawTs)) {
+                long val = Long.parseLong(rawTs.trim());
+                return val > 10000000000L ? (val / 1000) : val;
+            }
+            if (!TextUtils.isEmpty(dateStr)) {
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+                Date d = sdf.parse(dateStr.trim());
+                if (d != null) return d.getTime() / 1000;
+            }
+        } catch (Exception ignored) {}
+        return 0L;
     }
 
     private void hideOsdImmediately() {
@@ -1890,6 +2105,9 @@ public class PlayerActivity extends AppCompatActivity {
         osdHandler.removeCallbacks(hideOsdRunnable);
         zapHandler.removeCallbacks(hideZapRunnable);
         releasePrefetchPlayer();
+        try {
+            epgFetchExecutor.shutdownNow();
+        } catch (Exception ignored) {}
         if (player != null) {
             player.release();
             player = null;

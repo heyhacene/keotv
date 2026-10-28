@@ -268,9 +268,22 @@ export default function KeoTVHome() {
   // Channel classification, prefix exclusions, and favorite section toggles
   const [showFavoritesCategory, setShowFavoritesCategory] = useState<boolean>(true);
   const [singleStreamMode, setSingleStreamMode] = useState<boolean>(false);
+  const [osdDuration, setOsdDuration] = useState<'2s' | '3s' | '5s' | '7s' | '10s' | 'manual'>('5s');
   const [excludedPrefixes, setExcludedPrefixes] = useState<string[]>([]);
   const [hiddenChannelIds, setHiddenChannelIds] = useState<Set<string>>(new Set());
   const [watchedPositions, setWatchedPositions] = useState<Array<{ id: string; title: string; url: string; poster?: string; position: number; duration: number; stream_type: 'vod' | 'series' }>>([]);
+
+  const osdTimeoutMs = useMemo(() => {
+    switch (osdDuration) {
+      case '2s': return 2000;
+      case '3s': return 3000;
+      case '5s': return 5000;
+      case '7s': return 7000;
+      case '10s': return 10000;
+      case 'manual': return 0;
+      default: return 5000;
+    }
+  }, [osdDuration]);
 
   // List boundary hit state for carousel blockage feedback
   const [boundaryHit, setBoundaryHit] = useState<{
@@ -315,6 +328,7 @@ export default function KeoTVHome() {
     getSetting('parental_hide_adult', false).then((hd) => setParentalHideAdult(Boolean(hd)));
     getSetting('show_favorites_category', true).then((show) => setShowFavoritesCategory(show ?? true));
     getSetting('single_stream_mode', false).then((sm) => setSingleStreamMode(Boolean(sm)));
+    getSetting('osd_duration', '5s').then((d) => setOsdDuration((d as any) || '5s'));
     getSetting<string[]>('excluded_prefixes', []).then((prefixes) => setExcludedPrefixes(prefixes || []));
     getSetting<string[]>('hidden_channel_ids', []).then((ids) => setHiddenChannelIds(new Set(ids || [])));
 
@@ -1617,12 +1631,26 @@ export default function KeoTVHome() {
           const isTargetInPlaylist = filteredChannels.some((c) => c.id === targetChannel.id);
           const playlist = isTargetInPlaylist ? filteredChannels : [targetChannel];
           const startIndex = isTargetInPlaylist ? filteredChannels.findIndex((c) => c.id === targetChannel.id) : 0;
+          let curTime = '';
+          if (currentEpg?.start && currentEpg?.end) {
+            try {
+              const s = new Date(currentEpg.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              const e = new Date(currentEpg.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+              curTime = `${s} - ${e}`;
+            } catch {}
+          }
           await NativePlayer.play({
             urls: playlist.map((c) => c.stream_url),
             titles: playlist.map((c) => c.name),
             index: startIndex,
             userAgent: NATIVE_PLAYER_USER_AGENT,
             isLive: true,
+            singleStreamMode,
+            currentProgramTitle: currentEpg?.title,
+            currentProgramDesc: currentEpg?.description,
+            currentProgramTime: curTime,
+            nextProgramTitle: nextEpg?.title,
+            osdTimeoutMs,
           });
         } catch (err: any) {
           console.error('Native player error:', err);
@@ -1636,7 +1664,7 @@ export default function KeoTVHome() {
         setIsFullscreen(true);
       }
     },
-    [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession, adultCategoryIds]
+    [filteredChannels, activeChannel, activeSection, parentalEnabled, unlockedAdultSession, adultCategoryIds, singleStreamMode, currentEpg, nextEpg, osdTimeoutMs]
   );
 
   // Play a specific past Catchup / Replay program via Timeshift (with multi-format fallback cascade!)
@@ -2817,6 +2845,7 @@ export default function KeoTVHome() {
             onNextChannel={handleNextChannel}
             onPreviousChannel={handlePreviousChannel}
             singleStreamMode={singleStreamMode}
+            osdTimeoutMs={osdTimeoutMs}
             isModalCovering={
               isSplashVisible ||
               isSettingsModalOpen ||
@@ -3440,6 +3469,7 @@ export default function KeoTVHome() {
                 onNextChannel={handleNextChannel}
                 onPreviousChannel={handlePreviousChannel}
                 singleStreamMode={singleStreamMode}
+                osdTimeoutMs={osdTimeoutMs}
                 isModalCovering={
                   isSplashVisible ||
                   isSettingsModalOpen ||
@@ -3600,6 +3630,7 @@ export default function KeoTVHome() {
               serverCreds={activeXtreamCreds}
               boundaryHit={boundaryHit}
               singleStreamMode={singleStreamMode}
+              osdTimeoutMs={osdTimeoutMs}
               isModalCovering={
                 isSplashVisible ||
                 isSettingsModalOpen ||
@@ -3728,6 +3759,11 @@ export default function KeoTVHome() {
         onToggleSingleStreamMode={(enabled) => {
           setSingleStreamMode(enabled);
           setSetting('single_stream_mode', enabled);
+        }}
+        osdDuration={osdDuration}
+        onOsdDurationChange={(dur) => {
+          setOsdDuration(dur);
+          setSetting('osd_duration', dur);
         }}
       />
 

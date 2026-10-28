@@ -319,6 +319,43 @@ public class NativePlayerPlugin extends Plugin {
         PlayerActivity.pendingCurrentProgramTime = call.getString("currentProgramTime", null);
         PlayerActivity.pendingNextProgramTitle = call.getString("nextProgramTitle", null);
 
+        JSArray epgTitles = call.getArray("epgTitles");
+        JSArray epgDescs = call.getArray("epgDescs");
+        JSArray epgTimes = call.getArray("epgTimes");
+        JSArray epgNextTitles = call.getArray("epgNextTitles");
+
+        ArrayList<String> epgTitleList = new ArrayList<>();
+        ArrayList<String> epgDescList = new ArrayList<>();
+        ArrayList<String> epgTimeList = new ArrayList<>();
+        ArrayList<String> epgNextTitleList = new ArrayList<>();
+
+        if (epgTitles != null) {
+            for (int i = 0; i < epgTitles.length(); i++) {
+                try { epgTitleList.add(epgTitles.getString(i)); } catch (Exception ignored) { epgTitleList.add(""); }
+            }
+        }
+        if (epgDescs != null) {
+            for (int i = 0; i < epgDescs.length(); i++) {
+                try { epgDescList.add(epgDescs.getString(i)); } catch (Exception ignored) { epgDescList.add(""); }
+            }
+        }
+        if (epgTimes != null) {
+            for (int i = 0; i < epgTimes.length(); i++) {
+                try { epgTimeList.add(epgTimes.getString(i)); } catch (Exception ignored) { epgTimeList.add(""); }
+            }
+        }
+        if (epgNextTitles != null) {
+            for (int i = 0; i < epgNextTitles.length(); i++) {
+                try { epgNextTitleList.add(epgNextTitles.getString(i)); } catch (Exception ignored) { epgNextTitleList.add(""); }
+            }
+        }
+
+        PlayerActivity.pendingEpgTitles = epgTitleList;
+        PlayerActivity.pendingEpgDescs = epgDescList;
+        PlayerActivity.pendingEpgTimes = epgTimeList;
+        PlayerActivity.pendingEpgNextTitles = epgNextTitleList;
+        PlayerActivity.pendingOsdTimeoutMs = call.getInt("osdTimeoutMs", 5000);
+
         Intent intent = new Intent(getContext(), PlayerActivity.class);
         getActivity().startActivity(intent);
         call.resolve();

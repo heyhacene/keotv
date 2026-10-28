@@ -30,6 +30,7 @@ import {
   fetchSeriesInfo,
 } from '@/lib/iptv-service';
 import { EPGService } from '@/lib/epg-service';
+import { db } from '@/lib/db';
 import { getMockTimelineForChannel, getSyntheticSlotForOffset } from '@/lib/mock-data';
 
 interface TVGuideProps {
@@ -72,6 +73,7 @@ interface TVGuideProps {
   boundaryHit?: { pane: string; boundary: 'top' | 'bottom'; time: number } | null;
   isModalCovering?: boolean;
   singleStreamMode?: boolean;
+  osdTimeoutMs?: number;
 }
 
 // Helper for category icons
@@ -680,6 +682,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   boundaryHit,
   isModalCovering = false,
   singleStreamMode = false,
+  osdTimeoutMs = 5000,
 }) => {
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
@@ -700,6 +703,47 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   // Per-channel EPG cache populated dynamically for visible channels
   const [channelEpgMap, setChannelEpgMap] = useState<Record<string, EpgProgram[]>>({});
   const fetchedChannelIdsRef = useRef<Set<string>>(new Set());
+
+  // 1. Bulk Dexie Preload: instantly load all stored EPG programs for all channels in the current category
+  useEffect(() => {
+    if (activeSection !== 'live' && activeSection !== 'fav') return;
+    if (!channels || channels.length === 0) return;
+    let active = true;
+
+    const loadStoredEpg = async () => {
+      try {
+        const channelIds = channels
+          .filter((c) => c && !c.is_separator && !isSeparatorChannel(c))
+          .map((c) => c.id);
+        if (channelIds.length === 0) return;
+
+        const stored = await db.epg_programs
+          .where('channel_id')
+          .anyOf(channelIds)
+          .toArray();
+
+        if (!active || stored.length === 0) return;
+
+        const grouped: Record<string, EpgProgram[]> = {};
+        for (const p of stored) {
+          if (!grouped[p.channel_id]) grouped[p.channel_id] = [];
+          grouped[p.channel_id].push(p);
+        }
+        for (const cid in grouped) {
+          grouped[cid].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+        }
+
+        setChannelEpgMap((prev) => ({ ...prev, ...grouped }));
+      } catch (e) {
+        console.warn('Failed bulk loading EPG from Dexie', e);
+      }
+    };
+
+    loadStoredEpg();
+    return () => {
+      active = false;
+    };
+  }, [channels, activeSection]);
 
   useEffect(() => {
     if (!boundaryHit) return;
@@ -965,8 +1009,8 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               scheduleFlush();
             }
             if (cancelled) break;
-            // 2. Network refresh
-            const programs = await EPGService.fetchXtreamFullEpg({
+            // 2. Fast network refresh via short EPG (small payload, instant parse)
+            const programs = await EPGService.fetchXtreamShortEpg({
               serverUrl: serverCreds.serverUrl,
               username: serverCreds.username,
               password: serverCreds.password,
@@ -1277,6 +1321,8 @@ export const TVGuide: React.FC<TVGuideProps> = ({
                 onTogglePlayStop={onTogglePlayStop}
                 isModalCovering={isModalCovering}
                 singleStreamMode={singleStreamMode}
+                channelEpgMap={channelEpgMap}
+                osdTimeoutMs={osdTimeoutMs}
               />
             </div>
 
