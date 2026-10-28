@@ -844,6 +844,7 @@ export default function KeoTVHome() {
             username: targetPl.username || '',
             password: targetPl.password || '',
             name: targetPl.name,
+            playlistId: targetPl.id,
             onProgress: (p) => setSyncStatusBanner(p),
           });
         } else {
@@ -852,14 +853,12 @@ export default function KeoTVHome() {
             name: targetPl.name,
             onProgress: (p) => setSyncStatusBanner(p),
           });
+          result.playlist.id = targetPl.id;
         }
 
         setSyncStatusBanner(`Enregistrement de ${result.channels.length} chaînes...`);
 
-        await db.playlists.clear();
-        await db.categories.clear();
-        await db.channels.clear();
-
+        // Safe upsert without deleting existing VOD or series in Dexie!
         await db.playlists.put(result.playlist);
         await db.categories.bulkPut(result.categories);
 

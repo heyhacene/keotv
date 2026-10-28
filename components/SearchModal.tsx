@@ -298,9 +298,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({
             setFocusArea('filters');
           } else {
             const nextRow = focusedKeyRow - 1;
-            setFocusedKeyRow(nextRow);
             const maxCol = nextRow === 6 ? 2 : KEYBOARD_GRID[nextRow].length - 1;
-            setFocusedKeyCol((c) => Math.min(c, maxCol));
+            const targetCol = Math.min(focusedKeyCol, maxCol);
+            setFocusedKeyRow(nextRow);
+            setFocusedKeyCol(targetCol);
+            document.getElementById(`tv-key-${nextRow}-${targetCol}`)?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
           }
           return;
         }
@@ -308,16 +310,20 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           e.preventDefault();
           if (focusedKeyRow < 6) {
             const nextRow = focusedKeyRow + 1;
-            setFocusedKeyRow(nextRow);
             const maxCol = nextRow === 6 ? 2 : KEYBOARD_GRID[nextRow].length - 1;
-            setFocusedKeyCol((c) => Math.min(c, maxCol));
+            const targetCol = Math.min(focusedKeyCol, maxCol);
+            setFocusedKeyRow(nextRow);
+            setFocusedKeyCol(targetCol);
+            document.getElementById(`tv-key-${nextRow}-${targetCol}`)?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
           }
           return;
         }
         if (isLeft) {
           e.preventDefault();
           if (focusedKeyCol > 0) {
-            setFocusedKeyCol((c) => c - 1);
+            const targetCol = focusedKeyCol - 1;
+            setFocusedKeyCol(targetCol);
+            document.getElementById(`tv-key-${focusedKeyRow}-${targetCol}`)?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
           }
           return;
         }
@@ -325,7 +331,9 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           e.preventDefault();
           const maxCol = focusedKeyRow === 6 ? 2 : KEYBOARD_GRID[focusedKeyRow].length - 1;
           if (focusedKeyCol < maxCol) {
-            setFocusedKeyCol((c) => c + 1);
+            const targetCol = focusedKeyCol + 1;
+            setFocusedKeyCol(targetCol);
+            document.getElementById(`tv-key-${focusedKeyRow}-${targetCol}`)?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
           } else if (filteredResults.length > 0) {
             setFocusArea('results');
             setFocusedResultIndex(0);
@@ -512,17 +520,15 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           })}
         </div>
 
-        {/* Main Body: TV Keypad (Left) + Search Results (Right) */}
-        <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
           {/* TV Virtual Keyboard Column */}
-          <div className="w-full md:w-80 p-3 sm:p-4 border-b md:border-b-0 md:border-r border-tv-border bg-black/50 flex flex-col space-y-2 flex-shrink-0 overflow-y-auto">
-            <div className="flex items-center justify-between text-xs text-slate-400 px-1">
-              <span className="font-semibold text-white">Clavier Télécommande</span>
-              <span className="text-[11px] text-sky-400 font-mono">Flèches & OK</span>
+          <div className="w-full md:w-80 p-2.5 sm:p-3 border-b md:border-b-0 md:border-r border-tv-border bg-black/60 flex flex-col space-y-1.5 flex-shrink-0">
+            <div className="flex items-center justify-between text-xs text-slate-400 px-1 mb-0.5">
+              <span className="font-bold text-white text-xs">Clavier Télécommande</span>
+              <span className="text-[11px] text-sky-400 font-mono font-semibold">Flèches & OK</span>
             </div>
 
             {/* Alphabet & Number Grid (6 columns) */}
-            <div className="grid grid-cols-6 gap-1.5">
+            <div className="grid grid-cols-6 gap-1">
               {KEYBOARD_GRID.map((row, rIdx) =>
                 row.map((char, cIdx) => {
                   const isKeyFocused =
@@ -531,12 +537,13 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                     focusedKeyCol === cIdx;
                   return (
                     <button
+                      id={`tv-key-${rIdx}-${cIdx}`}
                       key={char}
                       type="button"
                       onClick={() => handleKeyPress(char)}
-                      className={`h-11 sm:h-12 rounded-xl text-sm sm:text-base font-bold flex items-center justify-center transition border ${
+                      className={`h-8 sm:h-9 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center transition border ${
                         isKeyFocused
-                          ? 'bg-sky-400 text-black border-white shadow-lg ring-2 ring-white scale-105 z-10'
+                          ? 'bg-sky-400 text-black border-white shadow-xl ring-2 ring-white scale-105 z-10 font-extrabold'
                           : 'bg-white/5 text-slate-200 border-white/10 hover:bg-white/15'
                       }`}
                     >
@@ -547,48 +554,50 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               )}
             </div>
 
-            {/* Special Action Keys: Space, Backspace, Clear */}
-            <div className="grid grid-cols-3 gap-1.5 pt-1">
+            {/* Action Keys (Row 6): Space, Backspace, Clear - Always visible & prominent! */}
+            <div className="grid grid-cols-3 gap-1 pt-1">
               <button
+                id="tv-key-6-0"
                 type="button"
                 onClick={() => handleKeyPress('ESPACE')}
-                className={`h-11 rounded-xl text-xs font-bold flex items-center justify-center transition border ${
+                className={`h-9 sm:h-10 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 transition border ${
                   focusArea === 'keyboard' && focusedKeyRow === 6 && focusedKeyCol === 0
-                    ? 'bg-sky-400 text-black border-white shadow-lg ring-2 ring-white scale-105 z-10'
-                    : 'bg-white/10 text-slate-200 border-white/10 hover:bg-white/15'
+                    ? 'bg-sky-400 text-black border-white shadow-xl ring-2 ring-white scale-105 z-10'
+                    : 'bg-sky-500/15 text-sky-300 border-sky-500/30 hover:bg-sky-500/25'
                 }`}
               >
-                Espace
+                <span>␣ Espace</span>
               </button>
               <button
+                id="tv-key-6-1"
                 type="button"
                 onClick={() => handleKeyPress('EFFACER')}
-                className={`h-11 rounded-xl text-xs font-bold flex items-center justify-center transition border ${
+                className={`h-9 sm:h-10 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 transition border ${
                   focusArea === 'keyboard' && focusedKeyRow === 6 && focusedKeyCol === 1
-                    ? 'bg-sky-400 text-black border-white shadow-lg ring-2 ring-white scale-105 z-10'
-                    : 'bg-white/10 text-slate-200 border-white/10 hover:bg-white/15'
+                    ? 'bg-amber-400 text-black border-white shadow-xl ring-2 ring-white scale-105 z-10'
+                    : 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
                 }`}
               >
-                ⌫ Effacer
+                <span>⌫ Effacer</span>
               </button>
               <button
+                id="tv-key-6-2"
                 type="button"
                 onClick={() => handleKeyPress('VIDER')}
-                className={`h-11 rounded-xl text-xs font-bold flex items-center justify-center transition border ${
+                className={`h-9 sm:h-10 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 transition border ${
                   focusArea === 'keyboard' && focusedKeyRow === 6 && focusedKeyCol === 2
-                    ? 'bg-rose-500 text-white border-white shadow-lg ring-2 ring-white scale-105 z-10'
-                    : 'bg-rose-500/20 text-rose-300 border-rose-500/30 hover:bg-rose-500/30'
+                    ? 'bg-rose-500 text-white border-white shadow-xl ring-2 ring-white scale-105 z-10'
+                    : 'bg-rose-500/15 text-rose-300 border-rose-500/30 hover:bg-rose-500/25'
                 }`}
               >
-                ✕ Vider
+                <span>✕ Vider</span>
               </button>
             </div>
 
-            <p className="text-[11px] text-slate-400 px-1 pt-1 leading-snug">
-              ▶ <strong>Droite</strong> pour aller aux résultats.<br />
-              ◀ <strong>Gauche</strong> pour revenir au clavier.<br />
-              Clavier physique également utilisable directement.
-            </p>
+            <div className="flex items-center justify-between text-[10px] text-slate-400 px-1 pt-0.5">
+              <span>▶ Droite : Résultats</span>
+              <span>◀ Gauche : Clavier</span>
+            </div>
           </div>
 
           {/* Results Area */}

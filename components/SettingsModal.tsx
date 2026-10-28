@@ -176,6 +176,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Query actual channel and stream count in Dexie when modal is open
   useEffect(() => {
     if (isOpen) {
+      db.playlists.toArray().then((pls) => {
+        if (pls.length > 0) setLocalPlaylists(pls);
+      }).catch(() => {});
       db.channels.count().then((cnt) => setTotalLoadedStreams(cnt)).catch(() => {});
       Promise.all([
         db.channels.where('stream_type').equals('live').count(),
@@ -185,7 +188,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setStreamCountsByType({ live, vod, series });
       }).catch(() => {});
     }
-  }, [isOpen, localPlaylists]);
+  }, [isOpen, playlists]);
 
   // Load saved preferences on mount
   useEffect(() => {

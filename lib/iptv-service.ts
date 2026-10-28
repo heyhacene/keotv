@@ -1595,6 +1595,7 @@ export interface XtreamSyncParams {
   username: string;
   password: string;
   name?: string;
+  playlistId?: string;
   onProgress?: (step: string) => void;
 }
 
@@ -1781,7 +1782,7 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     expDateStr = 'Illimité';
   }
 
-  const playlistId = 'pl_xtream_' + Date.now();
+  const playlistId = params.playlistId || 'pl_xtream_' + Date.now();
   const playlist: PlaylistConfig = {
     id: playlistId,
     name: playlistName,
