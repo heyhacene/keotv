@@ -633,42 +633,49 @@ export default function KeoTVHome() {
     const token = ++bgLoadTokenRef.current;
 
     try {
-      // 1. LIVE CHANNELS FIRST (High priority: load all missing live bouquets)
+      // 1. LIVE CHANNELS (High priority: 1 single bulk HTTP request like TiviMate)
+      const localLiveCount = await db.channels.where('stream_type').equals('live').count();
       const liveCats = cats.filter((c) => c.type === 'live' && c.id !== 'fav' && !c.id.startsWith('fav_'));
       const loadedGroupKeys = (await db.channels.where('stream_type').equals('live').uniqueKeys('group_id')) as string[];
       const loadedGroupSet = new Set<string>(loadedGroupKeys.map(String));
-      const missingLiveCats = liveCats.filter((c) => !loadedGroupSet.has(c.id));
+      const hasMissingLiveCats = liveCats.some((c) => !loadedGroupSet.has(c.id));
 
-      if (missingLiveCats.length > 0 && pl.server_url && pl.username && pl.password) {
+      if ((localLiveCount === 0 || hasMissingLiveCats) && pl.server_url && pl.username && pl.password) {
         if (bgLoadTokenRef.current === token) {
-          setBgLoadStatus(`Synchronisation : ${missingLiveCats.length} bouquets TV en cours...`);
+          setBgLoadStatus('Synchronisation rapide du direct TV...');
         }
-        await loadAllLiveCategories({
-          serverUrl: pl.server_url,
-          username: pl.username,
-          password: pl.password,
-          categories: missingLiveCats,
-          shouldAbort: () => bgLoadTokenRef.current !== token,
-          onCategoryLoaded: async (cat, streams) => {
-            if (streams.length === 0) return;
+        try {
+          const allLive = await fetchAllLiveStreamsBulk({
+            serverUrl: pl.server_url,
+            username: pl.username,
+            password: pl.password,
+            categories: cats,
+          });
+
+          if (allLive.length > 0 && bgLoadTokenRef.current === token) {
             const favIds = await getFavoriteChannelIds();
-            const mergedStreams = streams.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
-            try {
-              await db.channels.bulkPut(mergedStreams);
-            } catch {
-              for (const s of mergedStreams) {
-                try { await db.channels.put(s); } catch {}
-              }
+            const CHUNK = 500;
+            for (let i = 0; i < allLive.length; i += CHUNK) {
+              if (bgLoadTokenRef.current !== token) return;
+              const chunk = allLive.slice(i, i + CHUNK).map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
+              await db.channels.bulkPut(chunk);
+              await new Promise((r) => setTimeout(r, 15));
             }
-            await db.categories.update(cat.id, { count: streams.length });
-            setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, count: streams.length } : c)));
-          },
-          onProgress: (done, total) => {
-            if (bgLoadTokenRef.current === token) {
-              setBgLoadStatus(`Synchronisation TV : ${done}/${total} bouquets`);
+
+            const countsByGroup = new Map<string, number>();
+            for (const s of allLive) {
+              countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
-          },
-        });
+            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
+              await db.categories.update(gid, { count: cnt });
+            }
+            setCategories((prev) =>
+              prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
+            );
+          }
+        } catch (bulkLiveErr) {
+          console.warn('Bulk live stream background fetch notice:', bulkLiveErr);
+        }
       }
 
       // 2. VOD MOVIES (Medium priority: load all movies if not yet stored in Dexie)

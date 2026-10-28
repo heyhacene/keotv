@@ -43,8 +43,8 @@ export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'js
           'Connection': 'keep-alive',
         },
         responseType: 'text',
-        connectTimeout: 20000,
-        readTimeout: 60000,
+        connectTimeout: 30000,
+        readTimeout: 90000,
       });
 
       if (response.status >= 400) {
@@ -1335,6 +1335,7 @@ export async function fetchAllLiveStreamsBulk(params: {
   serverUrl: string;
   username: string;
   password: string;
+  categories?: Category[];
 }): Promise<Channel[]> {
   let server = params.serverUrl.trim().replace(/\/+$/, '');
   if (!server.startsWith('http://') && !server.startsWith('https://')) {
@@ -1362,10 +1363,16 @@ export async function fetchAllLiveStreamsBulk(params: {
   }
 
   let catNames = new Map<string, string>();
-  try {
-    const cats = await db.categories.where('type').equals('live').toArray();
-    catNames = new Map(cats.map((c) => [c.id, c.name]));
-  } catch {}
+  if (params.categories && params.categories.length > 0) {
+    for (const c of params.categories) {
+      catNames.set(c.id, c.name);
+    }
+  } else {
+    try {
+      const cats = await db.categories.where('type').equals('live').toArray();
+      catNames = new Map(cats.map((c) => [c.id, c.name]));
+    } catch {}
+  }
 
   const favIds = new Set<string>();
   try {
@@ -1732,36 +1739,13 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
       serverUrl: server,
       username: cleanUsername,
       password: cleanPassword,
+      categories,
     });
   } catch (bulkErr) {
     console.warn('Bulk live stream fetch failed during sync, fallback to first category:', bulkErr);
   }
 
-  // Fallback if bulk fetch failed: load all live categories progressively
-  if (channels.length === 0) {
-    onProgress?.('Étape 3/3 : Téléchargement progressif des bouquets TV en direct...');
-    try {
-      await loadAllLiveCategories({
-        serverUrl: server,
-        username: cleanUsername,
-        password: cleanPassword,
-        categories,
-        onCategoryLoaded: (cat, streams) => {
-          if (streams.length > 0) {
-            channels.push(...streams);
-            cat.count = streams.length;
-          }
-        },
-        onProgress: (done, total) => {
-          onProgress?.(`Téléchargement des bouquets TV : ${done}/${total} (${channels.length} chaînes)...`);
-        },
-      });
-    } catch (progErr) {
-      console.warn('Progressive live categories fallback notice:', progErr);
-    }
-  }
-
-  // Emergency single category fallback if progressive loading also failed
+  // Emergency single category fallback if bulk fetch failed (fast, instant fallback to first bouquet)
   if (channels.length === 0 && firstLiveCategory) {
     const rawCatId = firstLiveCategory.id.replace(/^grp_live_/, '');
     try {
