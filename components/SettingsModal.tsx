@@ -160,6 +160,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
 
   const [totalLoadedStreams, setTotalLoadedStreams] = useState<number>(0);
+  const [streamCountsByType, setStreamCountsByType] = useState<{ live: number; vod: number; series: number }>({
+    live: 0,
+    vod: 0,
+    series: 0,
+  });
 
   // TV Remote & Zapping configurable settings
   const [zappingMode, setZappingMode] = useState<'direct' | 'banner'>('direct');
@@ -172,6 +177,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (isOpen) {
       db.channels.count().then((cnt) => setTotalLoadedStreams(cnt)).catch(() => {});
+      Promise.all([
+        db.channels.where('stream_type').equals('live').count(),
+        db.channels.where('stream_type').equals('vod').count(),
+        db.channels.where('stream_type').equals('series').count(),
+      ]).then(([live, vod, series]) => {
+        setStreamCountsByType({ live, vod, series });
+      }).catch(() => {});
     }
   }, [isOpen, localPlaylists]);
 
@@ -746,13 +758,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             {pl.type}
                           </span>
                         </div>
-                        <p className="text-xs text-slate-400 truncate mt-0.5">
-                          {totalLoadedStreams > 0
-                            ? `${totalLoadedStreams} chaînes & flux chargés`
-                            : pl.channel_count > 0
-                            ? `${pl.channel_count} chaînes chargées`
-                            : 'Flux disponibles'} •{' '}
-                          {pl.server_url || 'Serveur configuré'}
+                        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                          <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-sky-500/10 text-sky-300 border border-sky-500/20">
+                            📺 {streamCountsByType.live || pl.live_count || pl.channel_count || 0} chaînes TV
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-amber-500/10 text-amber-300 border border-amber-500/20">
+                            🎬 {streamCountsByType.vod || pl.vod_count || 0} films
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-purple-500/10 text-purple-300 border border-purple-500/20">
+                            🍿 {streamCountsByType.series || pl.series_count || 0} séries
+                          </span>
+                          {pl.exp_date && (
+                            <span className="px-2 py-0.5 rounded-md text-[11px] font-semibold bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">
+                              📅 Validité : {pl.exp_date}
+                            </span>
+                          )}
+                          {pl.max_connections && (
+                            <span className="px-2 py-0.5 rounded-md text-[11px] font-mono bg-slate-800 text-slate-300 border border-white/5">
+                              🔗 {pl.max_connections} écran{Number(pl.max_connections) > 1 ? 's' : ''} max
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[11px] text-slate-500 truncate mt-1">
+                          {pl.server_url || 'Serveur configuré'} {pl.username ? `• Compte : ${pl.username}` : ''}
                         </p>
                       </div>
 

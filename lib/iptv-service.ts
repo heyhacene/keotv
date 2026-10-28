@@ -1718,12 +1718,23 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
   pushCategories(rawVodCategories, 'vod', 'Films', 10000);
   pushCategories(rawSeriesCategories, 'series', 'Séries', 20000);
 
-  // 4. Pre-fetch the channels for the FIRST live category immediately so playback starts instantly
-  onProgress?.('Étape 3/3 : Préparation du flux en direct...');
-  const channels: Channel[] = [];
+  // 4. Pre-fetch ALL live channels immediately in bulk so all bouquets are pre-loaded
+  onProgress?.('Étape 3/3 : Téléchargement de toutes les chaînes TV en direct...');
+  let channels: Channel[] = [];
   const firstLiveCategory = categories.find((c) => c.type === 'live' && c.id !== 'fav');
 
-  if (firstLiveCategory) {
+  try {
+    channels = await fetchAllLiveStreamsBulk({
+      serverUrl: server,
+      username: cleanUsername,
+      password: cleanPassword,
+    });
+  } catch (bulkErr) {
+    console.warn('Bulk live stream fetch failed during sync, fallback to first category:', bulkErr);
+  }
+
+  // Fallback to first category only if bulk fetch failed
+  if (channels.length === 0 && firstLiveCategory) {
     const rawCatId = firstLiveCategory.id.replace(/^grp_live_/, '');
     try {
       const firstStreams = await fetchCategoryStreamsOnDemand({
@@ -1743,6 +1754,33 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     }
   }
 
+  // Update counts on live categories from downloaded channels
+  const countsByGroup = new Map<string, number>();
+  for (const ch of channels) {
+    countsByGroup.set(ch.group_id, (countsByGroup.get(ch.group_id) || 0) + 1);
+  }
+  for (const c of categories) {
+    if (countsByGroup.has(c.id)) {
+      c.count = countsByGroup.get(c.id)!;
+    }
+  }
+
+  // Parse subscription expiration date
+  const expDateRaw = userInfo?.exp_date;
+  let expDateStr: string | undefined = undefined;
+  if (expDateRaw && expDateRaw !== 'null' && expDateRaw !== '0') {
+    const num = Number(expDateRaw);
+    if (!isNaN(num) && num > 0) {
+      expDateStr = new Date(num * 1000).toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+    }
+  } else if (expDateRaw === null || expDateRaw === 'null') {
+    expDateStr = 'Illimité';
+  }
+
   const playlistId = 'pl_xtream_' + Date.now();
   const playlist: PlaylistConfig = {
     id: playlistId,
@@ -1753,10 +1791,52 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     password: cleanPassword,
     status: 'active',
     channel_count: channels.length,
+    live_count: channels.length,
+    exp_date: expDateStr,
+    max_connections: userInfo?.max_connections ? String(userInfo.max_connections) : undefined,
+    account_status: userInfo?.status ? String(userInfo.status) : undefined,
     last_sync_at: new Date().toISOString(),
   };
 
   return { playlist, categories, channels };
+}
+
+export async function refreshXtreamAccountInfo(pl: PlaylistConfig): Promise<Partial<PlaylistConfig> | null> {
+  if (pl.type !== 'xtream' || !pl.server_url || !pl.username || !pl.password) return null;
+  try {
+    let server = pl.server_url.trim().replace(/\/+$/, '');
+    if (!server.startsWith('http://') && !server.startsWith('https://')) server = 'http://' + server;
+    const username = encodeURIComponent(decodeURIComponent(pl.username.trim()));
+    const password = encodeURIComponent(decodeURIComponent(pl.password.trim()));
+    const url = `${server}/player_api.php?username=${username}&password=${password}`;
+    const authData = await fetchHttp(url, 'json');
+    const userInfo = typeof authData === 'object' ? authData?.user_info : null;
+    if (!userInfo) return null;
+    const expDateRaw = userInfo.exp_date;
+    let expDateStr: string | undefined = undefined;
+    if (expDateRaw && expDateRaw !== 'null' && expDateRaw !== '0') {
+      const num = Number(expDateRaw);
+      if (!isNaN(num) && num > 0) {
+        expDateStr = new Date(num * 1000).toLocaleDateString('fr-FR', {
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric',
+        });
+      }
+    } else if (expDateRaw === null || expDateRaw === 'null') {
+      expDateStr = 'Illimité';
+    }
+    const updates: Partial<PlaylistConfig> = {
+      exp_date: expDateStr,
+      max_connections: userInfo.max_connections ? String(userInfo.max_connections) : undefined,
+      account_status: userInfo.status ? String(userInfo.status) : undefined,
+    };
+    await db.playlists.update(pl.id, updates);
+    return updates;
+  } catch (err) {
+    console.warn('refreshXtreamAccountInfo error:', err);
+    return null;
+  }
 }
 
 

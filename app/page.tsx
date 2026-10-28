@@ -35,6 +35,7 @@ import {
   fetchAllLiveStreamsBulk,
   fetchAllVodStreamsBulk,
   fetchRecentlyAddedVod,
+  refreshXtreamAccountInfo,
   SeriesEpisode,
   isSeparatorChannel,
   isAdultCategoryName,
@@ -803,8 +804,18 @@ export default function KeoTVHome() {
       await updateFavoriteCounts();
 
       if (bgLoadTokenRef.current === token) {
-        const totalChannels = await db.channels.count();
-        await db.playlists.update(pl.id, { channel_count: totalChannels });
+        const [totalChannels, totalLive, totalVod, totalSeries] = await Promise.all([
+          db.channels.count(),
+          db.channels.where('stream_type').equals('live').count(),
+          db.channels.where('stream_type').equals('vod').count(),
+          db.channels.where('stream_type').equals('series').count(),
+        ]);
+        await db.playlists.update(pl.id, {
+          channel_count: totalChannels,
+          live_count: totalLive,
+          vod_count: totalVod,
+          series_count: totalSeries,
+        });
         setPlaylists(await db.playlists.toArray());
       }
     } catch (err) {
@@ -1223,11 +1234,21 @@ export default function KeoTVHome() {
 
         if (resyncTarget) {
           handleResyncPlaylist(resyncTarget);
-        } else if (chCount === 0) {
-          // Only start initial background loader if database is empty
-          const xtreamPl = (await db.playlists.toArray()).find((p) => p.type === 'xtream');
+        } else {
+          // Check background loading of all bouquets and refresh account info
+          const xtreamPl = (await db.playlists.toArray()).find(
+            (p) => p.type === 'xtream' && p.server_url && p.username && p.password
+          );
           if (xtreamPl) {
-            startBackgroundLiveLoad(xtreamPl, loadedCats);
+            refreshXtreamAccountInfo(xtreamPl).catch(() => {});
+            const liveInDb = await db.channels.where('stream_type').equals('live').count();
+            const vodInDb = await db.channels.where('stream_type').equals('vod').count();
+            const seriesInDb = await db.channels.where('stream_type').equals('series').count();
+            if (liveInDb < 500 || vodInDb === 0 || seriesInDb === 0) {
+              setTimeout(() => {
+                startBackgroundLiveLoad(xtreamPl, loadedCats);
+              }, 1200);
+            }
           }
         } else if (savedAutoRefresh > 0) {
           // Check if auto-refresh is due

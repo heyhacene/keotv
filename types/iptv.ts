@@ -57,6 +57,12 @@ export interface PlaylistConfig {
   m3u_url?: string;
   status: 'active' | 'syncing' | 'error' | 'idle';
   channel_count: number;
+  live_count?: number;
+  vod_count?: number;
+  series_count?: number;
+  exp_date?: string;
+  max_connections?: string;
+  account_status?: string;
   last_sync_at?: string;
 }
 
