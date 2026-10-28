@@ -1,10 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Search, X, Film, Clapperboard, Tv, Loader2, Star } from 'lucide-react';
+import { Search, X, Film, Clapperboard, Tv, Loader2, Star, Mic } from 'lucide-react';
 import { Channel } from '@/types/iptv';
 import { db } from '@/lib/db';
-import { searchXtreamCatalog } from '@/lib/iptv-service';
 import { ContextMenuModal } from './ContextMenuModal';
 
 interface SearchModalProps {
@@ -15,17 +14,20 @@ interface SearchModalProps {
   onSelectSeries: (channel: Channel) => void;
   onToggleFavorite?: (channel: Channel, explicitNewState?: boolean) => void;
   serverCreds?: { serverUrl: string; username: string; password: string } | null;
+  isTvMode?: boolean;
 }
 
 type SearchFilterType = 'all' | 'vod' | 'series' | 'live';
 
+// On-screen TV Keypad Grid (Rows 0-5: Letters & Numbers, Row 6: Special Characters, Row 7: Actions)
 const KEYBOARD_GRID = [
   ['A', 'B', 'C', 'D', 'E', 'F'],
   ['G', 'H', 'I', 'J', 'K', 'L'],
   ['M', 'N', 'O', 'P', 'Q', 'R'],
   ['S', 'T', 'U', 'V', 'W', 'X'],
-  ['Y', 'Z', '1', '2', '3', '4'],
-  ['5', '6', '7', '8', '9', '0'],
+  ['Y', 'Z', '0', '1', '2', '3'],
+  ['4', '5', '6', '7', '8', '9'],
+  ["'", "-", ".", "&", "/", "!"], // Special characters & symbols
 ];
 
 export const SearchModal: React.FC<SearchModalProps> = ({
@@ -35,13 +37,12 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   onSelectMovie,
   onSelectSeries,
   onToggleFavorite,
-  serverCreds,
+  isTvMode,
 }) => {
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<SearchFilterType>('all');
   const [results, setResults] = useState<Channel[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [isRemoteSearching, setIsRemoteSearching] = useState(false);
   const [contextMenuItem, setContextMenuItem] = useState<Channel | null>(null);
 
   // TV Remote navigation states
@@ -50,6 +51,22 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   const [focusedKeyCol, setFocusedKeyCol] = useState<number>(0);
   const [focusedFilterIndex, setFocusedFilterIndex] = useState<number>(0);
   const [focusedResultIndex, setFocusedResultIndex] = useState<number>(0);
+
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Detect TV vs Mobile
+  const [isTvDevice, setIsTvDevice] = useState<boolean>(Boolean(isTvMode));
+  useEffect(() => {
+    if (isTvMode !== undefined) {
+      setIsTvDevice(isTvMode);
+    } else if (typeof window !== 'undefined') {
+      const ua = navigator.userAgent || '';
+      const isMobileDevice = /Android|iPhone|iPad|iPod|KeoTV-Mobile/i.test(ua);
+      const isTvUa = /KeoTV-AndroidTV|Android TV|GoogleTV|Large Screen|AFT|BRAVIA|MiBox|SHIELD/i.test(ua);
+      const hasTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+      setIsTvDevice(isTvUa || (!hasTouch && !isMobileDevice));
+    }
+  }, [isTvMode]);
 
   const FILTERS: { id: SearchFilterType; label: string; icon: any }[] = [
     { id: 'all', label: 'Tous', icon: Search },
@@ -61,93 +78,75 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   // Reset states cleanly on open/close
   useEffect(() => {
     if (isOpen) {
-      setFocusArea('keyboard');
+      setFocusArea(isTvDevice ? 'keyboard' : 'results');
       setFocusedKeyRow(0);
       setFocusedKeyCol(0);
       setFocusedFilterIndex(0);
       setFocusedResultIndex(0);
+      if (!isTvDevice) {
+        setTimeout(() => inputRef.current?.focus(), 80);
+      }
     } else {
       setQuery('');
       setResults([]);
       setContextMenuItem(null);
     }
-  }, [isOpen]);
+  }, [isOpen, isTvDevice]);
 
-  // Fast, crash-proof local search (<15ms, streaming cursor, no giant RAM allocation)
+  // Fast, crash-proof, debounced local search (<10ms, multi-word, accent-insensitive)
   useEffect(() => {
     if (!isOpen) return;
-    const trimmed = query.trim().toLowerCase();
+    const trimmed = query.trim();
     if (!trimmed || trimmed.length < 2) {
       setResults([]);
       setIsSearching(false);
-      setIsRemoteSearching(false);
       return;
     }
 
-    let isCurrent = true;
-    setIsSearching(true);
+    const timer = setTimeout(async () => {
+      setIsSearching(true);
+      try {
+        const normWords = trimmed
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase()
+          .split(/\s+/)
+          .filter(Boolean);
 
-    db.channels
-      .filter((c) => (c.name || '').toLowerCase().includes(trimmed))
-      .limit(60)
-      .toArray()
-      .then((matched) => {
-        if (!isCurrent) return;
+        let collection;
+        if (activeFilter === 'vod') {
+          collection = db.channels.where('stream_type').equals('vod');
+        } else if (activeFilter === 'series') {
+          collection = db.channels.where('stream_type').equals('series');
+        } else if (activeFilter === 'live') {
+          collection = db.channels.where('stream_type').equals('live');
+        } else {
+          collection = db.channels.toCollection();
+        }
+
+        const matched = await collection
+          .filter((c) => {
+            if (!c.name) return false;
+            const normName = c.name
+              .normalize('NFD')
+              .replace(/[\u0300-\u036f]/g, '')
+              .toLowerCase();
+            return normWords.every((word) => normName.includes(word));
+          })
+          .limit(80)
+          .toArray();
+
         setResults(matched);
         setFocusedResultIndex(0);
-        setIsSearching(false);
-      })
-      .catch((err) => {
-        if (!isCurrent) return;
-        console.warn('Local search query error:', err);
-        setIsSearching(false);
-      });
-
-    // Background Remote Catalog Search (Debounced 500ms, non-blocking)
-    if (!serverCreds?.serverUrl || !serverCreds.username || !serverCreds.password) {
-      return () => {
-        isCurrent = false;
-      };
-    }
-
-    const remoteTimer = setTimeout(async () => {
-      if (!isCurrent) return;
-      setIsRemoteSearching(true);
-      try {
-        const remoteMatches = await searchXtreamCatalog({
-          serverUrl: serverCreds.serverUrl,
-          username: serverCreds.username,
-          password: serverCreds.password,
-          query: trimmed,
-        });
-
-        if (isCurrent && remoteMatches.length > 0) {
-          setResults((prev) => {
-            const seen = new Set(prev.map((p) => p.id));
-            const newItems: Channel[] = [];
-            for (const rm of remoteMatches) {
-              if (!seen.has(rm.id)) {
-                seen.add(rm.id);
-                newItems.push(rm);
-                if (newItems.length >= 30) break;
-              }
-            }
-            if (newItems.length === 0) return prev;
-            return [...prev, ...newItems];
-          });
-        }
       } catch (err) {
-        console.warn('Remote search error:', err);
+        console.warn('Local search query error:', err);
       } finally {
-        if (isCurrent) setIsRemoteSearching(false);
+        setIsSearching(false);
       }
-    }, 500);
+    }, 250);
 
-    return () => {
-      isCurrent = false;
-      clearTimeout(remoteTimer);
-    };
-  }, [query, isOpen, serverCreds]);
+    return () => clearTimeout(timer);
+  }, [query, isOpen, activeFilter]);
 
   // Filtered results according to active tab
   const filteredResults = useMemo(() => {
@@ -215,12 +214,20 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     }
   }, []);
 
-  // TV Remote & Physical Keyboard navigation handler
+  // TV Remote navigation handler
   useEffect(() => {
     if (!isOpen || contextMenuItem) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 1. Direct hardware keyboard input (USB / Bluetooth / Keyboard remote)
+      // If a native text input is currently focused by the user (e.g. mobile or TV IME), let it handle typing
+      if (document.activeElement?.tagName === 'INPUT') {
+        if (e.key === 'Escape') {
+          onClose();
+        }
+        return;
+      }
+
+      // 1. Direct hardware keyboard input (USB / Bluetooth / Keyboard remote on TV)
       if (e.key && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
         setQuery((prev) => prev + e.key);
         return;
@@ -282,15 +289,20 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         }
         if (isDown) {
           e.preventDefault();
-          setFocusArea('keyboard');
-          setFocusedKeyRow(0);
-          setFocusedKeyCol(0);
+          if (isTvDevice) {
+            setFocusArea('keyboard');
+            setFocusedKeyRow(0);
+            setFocusedKeyCol(0);
+          } else {
+            setFocusArea('results');
+            setFocusedResultIndex(0);
+          }
           return;
         }
         return;
       }
 
-      // 3. In Virtual TV Keypad
+      // 3. In Virtual TV Keypad (Rows 0-6: keys, Row 7: action buttons)
       if (focusArea === 'keyboard') {
         if (isUp) {
           e.preventDefault();
@@ -298,7 +310,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
             setFocusArea('filters');
           } else {
             const nextRow = focusedKeyRow - 1;
-            const maxCol = nextRow === 6 ? 2 : KEYBOARD_GRID[nextRow].length - 1;
+            const maxCol = nextRow === 7 ? 2 : KEYBOARD_GRID[nextRow].length - 1;
             const targetCol = Math.min(focusedKeyCol, maxCol);
             setFocusedKeyRow(nextRow);
             setFocusedKeyCol(targetCol);
@@ -308,9 +320,9 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         }
         if (isDown) {
           e.preventDefault();
-          if (focusedKeyRow < 6) {
+          if (focusedKeyRow < 7) {
             const nextRow = focusedKeyRow + 1;
-            const maxCol = nextRow === 6 ? 2 : KEYBOARD_GRID[nextRow].length - 1;
+            const maxCol = nextRow === 7 ? 2 : KEYBOARD_GRID[nextRow].length - 1;
             const targetCol = Math.min(focusedKeyCol, maxCol);
             setFocusedKeyRow(nextRow);
             setFocusedKeyCol(targetCol);
@@ -329,7 +341,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         }
         if (isRight) {
           e.preventDefault();
-          const maxCol = focusedKeyRow === 6 ? 2 : KEYBOARD_GRID[focusedKeyRow].length - 1;
+          const maxCol = focusedKeyRow === 7 ? 2 : KEYBOARD_GRID[focusedKeyRow].length - 1;
           if (focusedKeyCol < maxCol) {
             const targetCol = focusedKeyCol + 1;
             setFocusedKeyCol(targetCol);
@@ -345,7 +357,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         }
         if (isEnter) {
           e.preventDefault();
-          if (focusedKeyRow === 6) {
+          if (focusedKeyRow === 7) {
             if (focusedKeyCol === 0) handleKeyPress('ESPACE');
             else if (focusedKeyCol === 1) handleKeyPress('EFFACER');
             else if (focusedKeyCol === 2) handleKeyPress('VIDER');
@@ -360,7 +372,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
       // 4. In Results Grid
       if (focusArea === 'results') {
-        const cols = 3;
+        const cols = isTvDevice ? 3 : 2;
         if (isUp) {
           e.preventDefault();
           if (focusedResultIndex - cols >= 0) {
@@ -383,7 +395,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         }
         if (isLeft) {
           e.preventDefault();
-          if (focusedResultIndex % cols === 0) {
+          if (isTvDevice && focusedResultIndex % cols === 0) {
             setFocusArea('keyboard');
           } else if (focusedResultIndex > 0) {
             const next = focusedResultIndex - 1;
@@ -424,6 +436,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     filteredResults,
     FILTERS,
     contextMenuItem,
+    isTvDevice,
     onClose,
     handleSelectItem,
     handleKeyPress,
@@ -433,33 +446,51 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 p-2 sm:p-5 animate-in fade-in duration-100">
-      <div className="w-full max-w-5xl bg-tv-surface border border-tv-border rounded-3xl shadow-2xl flex flex-col h-[90vh] overflow-hidden text-slate-100">
-        {/* TV Search Bar (Display-only box: NO native input so Android OS IME NEVER opens!) */}
+      <div className="w-full max-w-5xl bg-tv-surface border border-tv-border rounded-3xl shadow-2xl flex flex-col h-[92vh] overflow-hidden text-slate-100">
+        
+        {/* Search Header Bar */}
         <div className="p-3 sm:p-4 border-b border-tv-border bg-tv-card/80 flex items-center space-x-3 flex-shrink-0">
-          <div className="relative flex-1 bg-black/60 border-2 border-tv-border rounded-2xl px-4 py-3 flex items-center justify-between shadow-inner">
-            <div className="flex items-center space-x-3 overflow-hidden min-h-[28px]">
+          <div className="relative flex-1 bg-black/60 border-2 border-tv-border rounded-2xl px-4 py-2.5 flex items-center justify-between shadow-inner focus-within:border-sky-400 transition">
+            <div className="flex items-center space-x-3 flex-1 overflow-hidden min-h-[32px]">
               <Search className="w-5 h-5 text-sky-400 flex-shrink-0" />
-              {query ? (
-                <span className="text-white font-bold text-base sm:text-lg tracking-wide truncate">
-                  {query}
-                  <span className="inline-block w-0.5 h-5 ml-1 bg-sky-400 animate-pulse align-middle" />
-                </span>
-              ) : (
-                <span className="text-slate-500 text-sm font-medium">Rechercher une chaîne, un film, une série...</span>
-              )}
+              
+              {/* Native Input on Mobile (Touch) / Optional System Input on TV */}
+              <input
+                ref={inputRef}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Rechercher une chaîne, un film, une série..."
+                className="w-full bg-transparent text-white font-bold text-base sm:text-lg tracking-wide placeholder-slate-500 focus:outline-none"
+                autoComplete="off"
+                autoCorrect="off"
+                spellCheck="false"
+              />
             </div>
 
-            <div className="flex items-center space-x-2">
-              {isRemoteSearching && (
-                <div className="flex items-center space-x-1.5 text-xs text-sky-400 font-medium">
-                  <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
-                </div>
+            <div className="flex items-center space-x-2 flex-shrink-0">
+              {isSearching && (
+                <Loader2 className="w-4 h-4 animate-spin text-sky-400" />
+              )}
+              {isTvDevice && (
+                <button
+                  type="button"
+                  onClick={() => inputRef.current?.focus()}
+                  className="p-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/5 transition flex items-center space-x-1 text-xs font-semibold"
+                  title="Ouvrir le clavier vocal ou système"
+                >
+                  <Mic className="w-4 h-4 text-sky-400" />
+                  <span className="hidden sm:inline text-[11px]">Vocal / IME</span>
+                </button>
               )}
               {query && (
                 <button
                   type="button"
-                  onClick={() => setQuery('')}
-                  className="p-1 rounded-lg text-slate-400 hover:text-white transition"
+                  onClick={() => {
+                    setQuery('');
+                    inputRef.current?.focus();
+                  }}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition"
                   title="Effacer"
                 >
                   <X className="w-5 h-5" />
@@ -471,7 +502,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           <button
             type="button"
             onClick={onClose}
-            className="p-3 rounded-2xl text-slate-400 hover:text-white hover:bg-white/10 transition border border-white/5"
+            className="p-3 rounded-2xl text-slate-400 hover:text-white hover:bg-white/10 transition border border-white/5 flex-shrink-0"
             title="Fermer"
           >
             <X className="w-6 h-6" />
@@ -520,87 +551,90 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           })}
         </div>
 
-        {/* Main Body: TV Keypad (Left) + Search Results (Right) */}
+        {/* Main Body: TV Keypad (Only on TV) + Search Results */}
         <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
-          {/* TV Virtual Keyboard Column */}
-          <div className="w-full md:w-80 p-2.5 sm:p-3 border-b md:border-b-0 md:border-r border-tv-border bg-black/60 flex flex-col space-y-1.5 flex-shrink-0">
-            <div className="flex items-center justify-between text-xs text-slate-400 px-1 mb-0.5">
-              <span className="font-bold text-white text-xs">Clavier Télécommande</span>
-              <span className="text-[11px] text-sky-400 font-mono font-semibold">Flèches & OK</span>
-            </div>
+          
+          {/* TV Virtual Keyboard Column (Displayed only in TV Mode) */}
+          {isTvDevice && (
+            <div className="w-full md:w-80 p-2.5 sm:p-3 border-b md:border-b-0 md:border-r border-tv-border bg-black/60 flex flex-col space-y-1 flex-shrink-0">
+              <div className="flex items-center justify-between text-xs text-slate-400 px-1 mb-0.5">
+                <span className="font-bold text-white text-xs">Clavier Télécommande</span>
+                <span className="text-[11px] text-sky-400 font-mono font-semibold">Flèches & OK</span>
+              </div>
 
-            {/* Alphabet & Number Grid (6 columns) */}
-            <div className="grid grid-cols-6 gap-1">
-              {KEYBOARD_GRID.map((row, rIdx) =>
-                row.map((char, cIdx) => {
-                  const isKeyFocused =
-                    focusArea === 'keyboard' &&
-                    focusedKeyRow === rIdx &&
-                    focusedKeyCol === cIdx;
-                  return (
-                    <button
-                      id={`tv-key-${rIdx}-${cIdx}`}
-                      key={char}
-                      type="button"
-                      onClick={() => handleKeyPress(char)}
-                      className={`h-8 sm:h-9 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center transition border ${
-                        isKeyFocused
-                          ? 'bg-sky-400 text-black border-white shadow-xl ring-2 ring-white scale-105 z-10 font-extrabold'
-                          : 'bg-white/5 text-slate-200 border-white/10 hover:bg-white/15'
-                      }`}
-                    >
-                      {char}
-                    </button>
-                  );
-                })
-              )}
-            </div>
+              {/* Alphabet, Numbers & Special Characters (7 rows) */}
+              <div className="grid grid-cols-6 gap-1">
+                {KEYBOARD_GRID.map((row, rIdx) =>
+                  row.map((char, cIdx) => {
+                    const isKeyFocused =
+                      focusArea === 'keyboard' &&
+                      focusedKeyRow === rIdx &&
+                      focusedKeyCol === cIdx;
+                    return (
+                      <button
+                        id={`tv-key-${rIdx}-${cIdx}`}
+                        key={`${rIdx}-${char}`}
+                        type="button"
+                        onClick={() => handleKeyPress(char)}
+                        className={`h-7 sm:h-8 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center transition border ${
+                          isKeyFocused
+                            ? 'bg-sky-400 text-black border-white shadow-xl ring-2 ring-white scale-105 z-10 font-extrabold'
+                            : 'bg-white/5 text-slate-200 border-white/10 hover:bg-white/15'
+                        }`}
+                      >
+                        {char}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
 
-            {/* Action Keys (Row 6): Space, Backspace, Clear - Always visible & prominent! */}
-            <div className="grid grid-cols-3 gap-1 pt-1">
-              <button
-                id="tv-key-6-0"
-                type="button"
-                onClick={() => handleKeyPress('ESPACE')}
-                className={`h-9 sm:h-10 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 transition border ${
-                  focusArea === 'keyboard' && focusedKeyRow === 6 && focusedKeyCol === 0
-                    ? 'bg-sky-400 text-black border-white shadow-xl ring-2 ring-white scale-105 z-10'
-                    : 'bg-sky-500/15 text-sky-300 border-sky-500/30 hover:bg-sky-500/25'
-                }`}
-              >
-                <span>␣ Espace</span>
-              </button>
-              <button
-                id="tv-key-6-1"
-                type="button"
-                onClick={() => handleKeyPress('EFFACER')}
-                className={`h-9 sm:h-10 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 transition border ${
-                  focusArea === 'keyboard' && focusedKeyRow === 6 && focusedKeyCol === 1
-                    ? 'bg-amber-400 text-black border-white shadow-xl ring-2 ring-white scale-105 z-10'
-                    : 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
-                }`}
-              >
-                <span>⌫ Effacer</span>
-              </button>
-              <button
-                id="tv-key-6-2"
-                type="button"
-                onClick={() => handleKeyPress('VIDER')}
-                className={`h-9 sm:h-10 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 transition border ${
-                  focusArea === 'keyboard' && focusedKeyRow === 6 && focusedKeyCol === 2
-                    ? 'bg-rose-500 text-white border-white shadow-xl ring-2 ring-white scale-105 z-10'
-                    : 'bg-rose-500/15 text-rose-300 border-rose-500/30 hover:bg-rose-500/25'
-                }`}
-              >
-                <span>✕ Vider</span>
-              </button>
-            </div>
+              {/* Action Keys (Row 7): Space, Backspace, Clear - Full width, high contrast */}
+              <div className="grid grid-cols-3 gap-1 pt-1">
+                <button
+                  id="tv-key-7-0"
+                  type="button"
+                  onClick={() => handleKeyPress('ESPACE')}
+                  className={`h-8 sm:h-9 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 transition border ${
+                    focusArea === 'keyboard' && focusedKeyRow === 7 && focusedKeyCol === 0
+                      ? 'bg-sky-400 text-black border-white shadow-xl ring-2 ring-white scale-105 z-10'
+                      : 'bg-sky-500/15 text-sky-300 border-sky-500/30 hover:bg-sky-500/25'
+                  }`}
+                >
+                  <span>␣ Espace</span>
+                </button>
+                <button
+                  id="tv-key-7-1"
+                  type="button"
+                  onClick={() => handleKeyPress('EFFACER')}
+                  className={`h-8 sm:h-9 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 transition border ${
+                    focusArea === 'keyboard' && focusedKeyRow === 7 && focusedKeyCol === 1
+                      ? 'bg-amber-400 text-black border-white shadow-xl ring-2 ring-white scale-105 z-10'
+                      : 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
+                  }`}
+                >
+                  <span>⌫ Effacer</span>
+                </button>
+                <button
+                  id="tv-key-7-2"
+                  type="button"
+                  onClick={() => handleKeyPress('VIDER')}
+                  className={`h-8 sm:h-9 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 transition border ${
+                    focusArea === 'keyboard' && focusedKeyRow === 7 && focusedKeyCol === 2
+                      ? 'bg-rose-500 text-white border-white shadow-xl ring-2 ring-white scale-105 z-10'
+                      : 'bg-rose-500/15 text-rose-300 border-rose-500/30 hover:bg-rose-500/25'
+                  }`}
+                >
+                  <span>✕ Vider</span>
+                </button>
+              </div>
 
-            <div className="flex items-center justify-between text-[10px] text-slate-400 px-1 pt-0.5">
-              <span>▶ Droite : Résultats</span>
-              <span>◀ Gauche : Clavier</span>
+              <div className="flex items-center justify-between text-[10px] text-slate-400 px-1 pt-0.5">
+                <span>▶ Droite : Résultats</span>
+                <span>◀ Gauche : Clavier</span>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Results Area */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-5">
@@ -610,9 +644,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                 <div className="w-16 h-16 rounded-2xl bg-tv-card border border-tv-border flex items-center justify-center text-sky-400 shadow-lg">
                   <Search className="w-8 h-8" />
                 </div>
-                <h4 className="text-base font-bold text-white">Recherche Télécommande</h4>
+                <h4 className="text-base font-bold text-white">Recherche Rapide KeoTV</h4>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Cliquez sur les lettres pour rechercher instantanément dans vos chaînes TV, films et séries.
+                  {isTvDevice
+                    ? 'Utilisez le clavier virtuel ou vocal pour rechercher instantanément dans vos chaînes TV, films et séries.'
+                    : 'Tapez au moins 2 lettres pour filtrer instantanément parmi vos chaînes TV, films et séries.'}
                 </p>
               </div>
             )}
@@ -620,10 +656,10 @@ export const SearchModal: React.FC<SearchModalProps> = ({
             {/* Empty or Searching State */}
             {query.length >= 2 && filteredResults.length === 0 && (
               <div className="py-20 flex flex-col items-center justify-center text-center space-y-3 max-w-sm mx-auto">
-                {isSearching || isRemoteSearching ? (
+                {isSearching ? (
                   <>
                     <Loader2 className="w-8 h-8 animate-spin text-sky-400" />
-                    <p className="text-xs text-slate-400">Recherche dans vos bouquets TV et VOD...</p>
+                    <p className="text-xs text-slate-400">Recherche locale en cours...</p>
                   </>
                 ) : (
                   <>

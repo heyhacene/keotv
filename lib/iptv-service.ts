@@ -30,6 +30,9 @@ export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'js
 
   if (Capacitor.isNativePlatform()) {
     try {
+      // NOTE: Always request 'text' from CapacitorHttp on Android!
+      // Android's native org.json parser blows up memory (OutOfMemoryError) or hangs for 30s on 10MB+ JSON payloads.
+      // Passing raw text directly to V8 allows JavaScript's C++ SIMD parser (JSON.parse) to parse 50MB in <100ms!
       const response = await CapacitorHttp.get({
         url: cleanUrl,
         headers: {
@@ -39,9 +42,9 @@ export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'js
           'Pragma': 'no-cache',
           'Connection': 'keep-alive',
         },
-        responseType: responseType === 'json' ? 'json' : 'text',
+        responseType: 'text',
         connectTimeout: 20000,
-        readTimeout: 35000,
+        readTimeout: 60000,
       });
 
       if (response.status >= 400) {
@@ -1734,7 +1737,31 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     console.warn('Bulk live stream fetch failed during sync, fallback to first category:', bulkErr);
   }
 
-  // Fallback to first category only if bulk fetch failed
+  // Fallback if bulk fetch failed: load all live categories progressively
+  if (channels.length === 0) {
+    onProgress?.('Étape 3/3 : Téléchargement progressif des bouquets TV en direct...');
+    try {
+      await loadAllLiveCategories({
+        serverUrl: server,
+        username: cleanUsername,
+        password: cleanPassword,
+        categories,
+        onCategoryLoaded: (cat, streams) => {
+          if (streams.length > 0) {
+            channels.push(...streams);
+            cat.count = streams.length;
+          }
+        },
+        onProgress: (done, total) => {
+          onProgress?.(`Téléchargement des bouquets TV : ${done}/${total} (${channels.length} chaînes)...`);
+        },
+      });
+    } catch (progErr) {
+      console.warn('Progressive live categories fallback notice:', progErr);
+    }
+  }
+
+  // Emergency single category fallback if progressive loading also failed
   if (channels.length === 0 && firstLiveCategory) {
     const rawCatId = firstLiveCategory.id.replace(/^grp_live_/, '');
     try {
@@ -1751,7 +1778,7 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
         firstLiveCategory.count = firstStreams.length;
       }
     } catch (err) {
-      console.warn('Initial category pre-fetch fallback:', err);
+      console.warn('Emergency category pre-fetch fallback:', err);
     }
   }
 
