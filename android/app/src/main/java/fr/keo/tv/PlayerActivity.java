@@ -1655,72 +1655,76 @@ public class PlayerActivity extends AppCompatActivity {
                 }
             }
 
-            // 3. CRITICAL: When player controls (Controller or OSD) are visible:
-            // - BACK button MUST hide the controls instead of exiting the player!
-            // - DPAD buttons (UP / DOWN / LEFT / RIGHT) MUST ONLY control the player UI (or do nothing in OSD), NEVER change channel!
-            boolean controlsVisible = isControllerVisible() || isOsdVisible();
-            if (controlsVisible) {
-                if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
-                    if (playerView != null) {
-                        playerView.hideController();
-                    }
+            // 3. Back key handling: hides controls/OSD if visible, else closes player
+            if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
+                if (isControllerVisible()) {
+                    if (playerView != null) playerView.hideController();
                     hideOsdImmediately();
                     return true;
                 }
+                if (isOsdVisible()) {
+                    hideOsdImmediately();
+                    return true;
+                }
+                finish();
+                return true;
+            }
 
-                // If the full transport controller (VOD / Series / Replay) is visible, let ExoPlayer's PlayerView handle all DPAD navigation!
+            // 4. LIVE TV ZAPPING & REMOTE CONTROLS
+            // D-Pad UP: ALWAYS zap to next channel (Chaîne +)
+            // D-Pad DOWN: ALWAYS zap to previous channel (Chaîne -)
+            // OK / Center: Toggle OSD & EPG overlay banner
+            if (isLive) {
+                boolean isBottomButtonFocused = (btnPlayPause != null && btnPlayPause.isFocused()) ||
+                        (btnAudioTrack != null && btnAudioTrack.isFocused()) ||
+                        (btnSubtitles != null && btnSubtitles.isFocused()) ||
+                        (btnAspectRatio != null && btnAspectRatio.isFocused()) ||
+                        (btnPrevChannel != null && btnPrevChannel.isFocused()) ||
+                        (btnNextChannel != null && btnNextChannel.isFocused());
+
+                // D-Pad UP or Channel UP -> Chaîne + (zapNextChannel)
+                if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_CHANNEL_UP || key == KeyEvent.KEYCODE_PAGE_UP) {
+                    zapNextChannel();
+                    return true;
+                }
+
+                // D-Pad DOWN or Channel DOWN -> Chaîne - (zapPreviousChannel)
+                if (key == KeyEvent.KEYCODE_DPAD_DOWN || key == KeyEvent.KEYCODE_CHANNEL_DOWN || key == KeyEvent.KEYCODE_PAGE_DOWN) {
+                    zapPreviousChannel();
+                    return true;
+                }
+
+                // Center / OK / Enter
+                if (key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                    if (isBottomButtonFocused) {
+                        return super.dispatchKeyEvent(event);
+                    }
+                    toggleOsd();
+                    return true;
+                }
+
+                // Left / Right: if bottom controls are focused, navigate between them; otherwise allow Left/Right zapping or OSD
+                if (isBottomButtonFocused && (key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT)) {
+                    showOsd();
+                    return super.dispatchKeyEvent(event);
+                }
+            }
+
+            // 5. VOD / SERIES / REPLAY NAVIGATION
+            if (!isLive) {
                 if (isControllerVisible()) {
-                    showOsd(); // Keep top title bar synced while interacting with controls
+                    showOsd();
                     return super.dispatchKeyEvent(event);
                 }
 
-                // If Live TV OSD banner is visible:
-                // - OK / Center hides the OSD banner
-                // - UP / DOWN do NOT zap channels while OSD is shown unless user uses dedicated CHANNEL_UP / CHANNEL_DOWN hardware keys!
-                if (key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER) {
-                    hideOsdImmediately();
-                    return true;
-                }
-                if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN || key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                    if (!isLive && playerView != null) {
-                        playerView.showController();
-                        return super.dispatchKeyEvent(event);
-                    }
-                    // In Live TV when OSD is visible, keep OSD alive or let user dismiss with Back/OK without accidental channel change
+                if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN ||
+                        key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER ||
+                        key == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                    if (playerView != null) playerView.showController();
                     showOsd();
                     return true;
                 }
-            }
 
-            // 4. Dedicated Channel Up / Channel Down keys (always zap in Live TV)
-            // Or DPAD_UP / DPAD_DOWN when controls are HIDDEN!
-            if (isLive && (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_CHANNEL_UP || key == KeyEvent.KEYCODE_PAGE_UP)) {
-                zapPreviousChannel();
-                return true;
-            }
-
-            if (isLive && (key == KeyEvent.KEYCODE_DPAD_DOWN || key == KeyEvent.KEYCODE_CHANNEL_DOWN || key == KeyEvent.KEYCODE_PAGE_DOWN)) {
-                zapNextChannel();
-                return true;
-            }
-
-            // 5. In VOD / Replay / Series when controls are hidden: pressing OK, UP, DOWN shows the player controls!
-            if (!isLive && (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN || key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER)) {
-                if (playerView != null) {
-                    playerView.showController();
-                }
-                showOsd();
-                return true;
-            }
-
-            // 6. Toggle OSD Info Banner in Live TV (OK / Enter / Center when hidden)
-            if (key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER) {
-                toggleOsd();
-                return true;
-            }
-
-            // 7. Fast Forward / Rewind for VOD & Replay when controls are hidden
-            if (!isLive) {
                 if (key == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
                     long currentPos = player.getCurrentPosition();
                     player.seekTo(currentPos + 10000);
@@ -1728,6 +1732,7 @@ public class PlayerActivity extends AppCompatActivity {
                     if (playerView != null) playerView.showController();
                     return true;
                 }
+
                 if (key == KeyEvent.KEYCODE_MEDIA_REWIND || key == KeyEvent.KEYCODE_DPAD_LEFT) {
                     long currentPos = player.getCurrentPosition();
                     player.seekTo(Math.max(0, currentPos - 10000));

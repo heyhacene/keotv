@@ -1137,6 +1137,7 @@ export async function loadAllVodCategories(params: {
 }
 
 // Search cache for Xtream catalogs
+let xtreamLiveCache: { credKey: string; data: any[]; timestamp: number } | null = null;
 let xtreamSeriesCache: { credKey: string; data: any[]; timestamp: number } | null = null;
 let xtreamVodCache: { credKey: string; data: any[]; timestamp: number } | null = null;
 
@@ -1164,7 +1165,7 @@ export async function searchXtreamCatalog(params: {
   const results: Channel[] = [];
   const now = Date.now();
 
-  // 1. Search in SERIES (Fast & Lightweight, max 3.5s timeout)
+  // 1. Search in SERIES
   try {
     let seriesList =
       xtreamSeriesCache &&
@@ -1206,7 +1207,7 @@ export async function searchXtreamCatalog(params: {
             custom_order: Number(s.num) || results.length + 1,
             resolution: detectResolution(sName),
           });
-          if (results.length >= 40) break;
+          if (results.length >= 30) break;
         }
       }
     }
@@ -1214,7 +1215,196 @@ export async function searchXtreamCatalog(params: {
     console.warn('Series remote search notice:', err);
   }
 
+  // 2. Search in VOD MOVIES
+  try {
+    let vodList =
+      xtreamVodCache &&
+      xtreamVodCache.credKey === credKey &&
+      now - xtreamVodCache.timestamp < 300000
+        ? xtreamVodCache.data
+        : null;
+
+    if (!vodList) {
+      const fetchPromise = (async () => {
+        const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_vod_streams`;
+        const res = await fetchHttp(url, 'json');
+        return toArray(res);
+      })();
+      const timeoutPromise = new Promise<any[]>((_, reject) =>
+        setTimeout(() => reject(new Error('VOD search timeout')), 3500)
+      );
+      vodList = await Promise.race([fetchPromise, timeoutPromise]);
+      xtreamVodCache = { credKey, data: vodList, timestamp: now };
+    }
+
+    if (Array.isArray(vodList)) {
+      let matchedCount = 0;
+      for (const m of vodList) {
+        const mName = String(m.name || '').trim();
+        if (normalizeMovieTitle(mName).includes(normQ)) {
+          const streamId = m.stream_id || m.id;
+          const ext = m.container_extension || 'mp4';
+          results.push({
+            id: `ch_xtream_vod_${streamId}`,
+            num: Number(m.num) || results.length + 1,
+            name: mName,
+            logo: m.stream_icon || m.cover || '',
+            stream_url: `${server}/movie/${encUser}/${encPass}/${streamId}.${ext}`,
+            stream_type: 'vod',
+            group_id: `grp_vod_${m.category_id || 'all'}`,
+            group_name: 'Films VOD',
+            epg_id: String(streamId),
+            is_favorite: false,
+            is_hidden: false,
+            custom_order: Number(m.num) || results.length + 1,
+            resolution: detectResolution(mName),
+            added: Number(m.added) > 0 ? Number(m.added) : undefined,
+          });
+          matchedCount++;
+          if (matchedCount >= 35) break;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('VOD remote search notice:', err);
+  }
+
+  // 3. Search in LIVE TV
+  try {
+    let liveList =
+      xtreamLiveCache &&
+      xtreamLiveCache.credKey === credKey &&
+      now - xtreamLiveCache.timestamp < 300000
+        ? xtreamLiveCache.data
+        : null;
+
+    if (!liveList) {
+      const fetchPromise = (async () => {
+        const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_live_streams`;
+        const res = await fetchHttp(url, 'json');
+        return toArray(res);
+      })();
+      const timeoutPromise = new Promise<any[]>((_, reject) =>
+        setTimeout(() => reject(new Error('Live search timeout')), 3500)
+      );
+      liveList = await Promise.race([fetchPromise, timeoutPromise]);
+      xtreamLiveCache = { credKey, data: liveList, timestamp: now };
+    }
+
+    if (Array.isArray(liveList)) {
+      let matchedCount = 0;
+      for (const l of liveList) {
+        const lName = String(l.name || '').trim();
+        if (normalizeMovieTitle(lName).includes(normQ)) {
+          const streamId = l.stream_id || l.id;
+          const hasArchive = Number(l.tv_archive) === 1;
+          results.push({
+            id: `ch_xtream_live_${streamId}`,
+            num: Number(l.num) || results.length + 1,
+            name: lName,
+            logo: l.stream_icon || '',
+            stream_url: `${server}/live/${encUser}/${encPass}/${streamId}.m3u8`,
+            stream_type: 'live',
+            group_id: `grp_live_${l.category_id || 'all'}`,
+            group_name: 'Direct TV',
+            epg_id: l.epg_channel_id ? String(l.epg_channel_id).trim() : undefined,
+            is_favorite: false,
+            is_hidden: false,
+            custom_order: Number(l.num) || results.length + 1,
+            resolution: detectResolution(lName),
+            has_archive: hasArchive,
+            archive_days: hasArchive ? Math.max(1, Number(l.tv_archive_duration || l.archive_days || 7)) : 0,
+          });
+          matchedCount++;
+          if (matchedCount >= 25) break;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Live remote search notice:', err);
+  }
+
   return results;
+}
+
+// Fetch all Live TV streams in catalog in one single call (~2-3MB JSON)
+export async function fetchAllLiveStreamsBulk(params: {
+  serverUrl: string;
+  username: string;
+  password: string;
+}): Promise<Channel[]> {
+  let server = params.serverUrl.trim().replace(/\/+$/, '');
+  if (!server.startsWith('http://') && !server.startsWith('https://')) {
+    server = 'http://' + server;
+  }
+  const cleanUser = decodeURIComponent(params.username.trim());
+  const cleanPass = decodeURIComponent(params.password.trim());
+  const encUser = encodeURIComponent(cleanUser);
+  const encPass = encodeURIComponent(cleanPass);
+  const credKey = `${server}_${cleanUser}`;
+  const now = Date.now();
+
+  let liveList =
+    xtreamLiveCache &&
+    xtreamLiveCache.credKey === credKey &&
+    now - xtreamLiveCache.timestamp < 600000
+      ? xtreamLiveCache.data
+      : null;
+
+  if (!liveList) {
+    const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_live_streams`;
+    const res = await fetchHttp(url, 'json');
+    liveList = toArray(res);
+    xtreamLiveCache = { credKey, data: liveList, timestamp: now };
+  }
+
+  let catNames = new Map<string, string>();
+  try {
+    const cats = await db.categories.where('type').equals('live').toArray();
+    catNames = new Map(cats.map((c) => [c.id, c.name]));
+  } catch {}
+
+  const favIds = new Set<string>();
+  try {
+    const favs = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
+    favs.forEach((c) => favIds.add(c.id));
+  } catch {}
+
+  const channels: Channel[] = [];
+  for (let i = 0; i < liveList.length; i++) {
+    const item = liveList[i];
+    if (!item) continue;
+    const streamId = item.stream_id || item.id || i + 1;
+    const itemName = String(item.name || `Chaîne ${i + 1}`).trim();
+    const logo = item.stream_icon || '';
+    const rawCat = item.category_id ? String(item.category_id).trim() : 'all';
+    const groupId = `grp_live_${rawCat}`;
+    const id = `ch_xtream_live_${streamId}`;
+    const hasArchive = Number(item.tv_archive) === 1;
+    const archiveDays = hasArchive ? Math.max(1, Number(item.tv_archive_duration || item.archive_days || 7)) : 0;
+
+    channels.push({
+      id,
+      num: typeof item.num === 'number' && item.num > 0 ? item.num : i + 1,
+      name: itemName,
+      logo: logo ? String(logo).trim() : '',
+      stream_url: `${server}/live/${encUser}/${encPass}/${streamId}.m3u8`,
+      stream_type: 'live',
+      group_id: groupId,
+      group_name: catNames.get(groupId) || 'Direct TV',
+      epg_id: item.epg_channel_id ? String(item.epg_channel_id).trim() : undefined,
+      is_favorite: favIds.has(id),
+      is_hidden: false,
+      custom_order: i + 1,
+      resolution: detectResolution(itemName),
+      is_separator: false,
+      stream_id: streamId,
+      has_archive: hasArchive,
+      archive_days: archiveDays,
+    });
+  }
+
+  return channels;
 }
 
 export async function getAllVodChannels(
@@ -1222,7 +1412,7 @@ export async function getAllVodChannels(
   username: string,
   password: string
 ): Promise<Channel[]> {
-  // Check local database first: avoids downloading 40MB if VODs are already in Dexie
+  // Check local database first: avoids downloading if VODs are already in Dexie
   try {
     const localVods = await db.channels.where('stream_type').equals('vod').toArray();
     if (localVods.length > 50) {
@@ -1284,8 +1474,8 @@ export async function getAllVodChannels(
 
 /**
  * "Récemment ajoutés": VOD titles sorted STRICTLY by the date the provider added the file to its catalog
- * (Xtream `added`, unix seconds), newest first. This is deliberately different from the movie release year,
- * so older films that were just integrated by the provider are not missed.
+ * (Xtream `added`, unix seconds), newest first.
+ * If provider doesn't populate `added`, falls back to stream_id descending (newer IDs = newer content).
  */
 export async function fetchRecentlyAddedVod(params: {
   serverUrl: string;
@@ -1294,6 +1484,28 @@ export async function fetchRecentlyAddedVod(params: {
   limit?: number;
 }): Promise<Channel[]> {
   const limit = params.limit ?? 300;
+
+  // 1. Fast path: check local Dexie DB first!
+  try {
+    const localVods = await db.channels.where('stream_type').equals('vod').toArray();
+    if (localVods.length >= 20) {
+      let withDate = localVods.filter((m) => Number(m.added) > 0);
+      if (withDate.length > 0) {
+        withDate.sort((a, b) => Number(b.added) - Number(a.added));
+        return withDate.slice(0, limit);
+      }
+      // Fallback: sort by stream_id descending
+      const sortedByStreamId = [...localVods].sort((a, b) => {
+        const idA = Number(a.stream_id || a.id.replace(/\D/g, '') || 0);
+        const idB = Number(b.stream_id || b.id.replace(/\D/g, '') || 0);
+        return idB - idA;
+      });
+      return sortedByStreamId.slice(0, limit);
+    }
+  } catch (err) {
+    console.warn('Local check for recently added notice:', err);
+  }
+
   let server = params.serverUrl.trim().replace(/\/+$/, '');
   if (!server.startsWith('http://') && !server.startsWith('https://')) {
     server = 'http://' + server;
@@ -1321,10 +1533,17 @@ export async function fetchRecentlyAddedVod(params: {
     }
   }
 
-  const withDate = vodList
+  let withDate = vodList
     .filter((m: any) => Number(m?.added) > 0)
     .sort((a: any, b: any) => Number(b.added) - Number(a.added))
     .slice(0, limit);
+
+  // If provider did not supply `added` timestamp, fall back to stream_id descending (universal Xtream convention)
+  if (withDate.length === 0 && vodList.length > 0) {
+    withDate = [...vodList]
+      .sort((a: any, b: any) => Number(b.stream_id || b.id || 0) - Number(a.stream_id || a.id || 0))
+      .slice(0, limit);
+  }
 
   let catNames = new Map<string, string>();
   try {
@@ -1338,7 +1557,7 @@ export async function fetchRecentlyAddedVod(params: {
     favs.forEach((c) => favIds.add(c.id));
   } catch {}
 
-  return withDate.map((m: any, i: number) => {
+  const mapped = withDate.map((m: any, i: number) => {
     const streamId = m.stream_id || m.id || i + 1;
     const ext = m.container_extension || 'mp4';
     const mName = String(m.name || `Film ${i + 1}`).trim();
@@ -1359,9 +1578,16 @@ export async function fetchRecentlyAddedVod(params: {
       custom_order: i + 1,
       resolution: detectResolution(mName),
       stream_id: streamId,
-      added: Number(m.added),
+      added: Number(m.added) > 0 ? Number(m.added) : undefined,
     };
   });
+
+  // Background cache newly retrieved VODs into Dexie so search can find them
+  if (mapped.length > 0) {
+    db.channels.bulkPut(mapped).catch(() => {});
+  }
+
+  return mapped;
 }
 
 export interface XtreamSyncParams {

@@ -25,6 +25,7 @@ import { PlaylistConfig } from '@/types/iptv';
 import { submitAppFeedback, getActiveKeoUser, logoutKeoUser, KeoUserAccount } from '@/lib/supabase';
 import { ParentalPinModal } from "./ParentalPinModal";
 import { checkForAppUpdate, AppUpdateInfo, CURRENT_BUILD_NUMBER, DOWNLOADER_CODE, DIRECT_APK_URL } from '@/lib/update-service';
+import { db } from '@/lib/db';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -158,12 +159,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
 
+  const [totalLoadedStreams, setTotalLoadedStreams] = useState<number>(0);
+
   // TV Remote & Zapping configurable settings
   const [zappingMode, setZappingMode] = useState<'direct' | 'banner'>('direct');
   const [osdDuration, setOsdDuration] = useState<'2s' | '3s' | '5s' | '7s' | '10s' | 'manual'>(osdDurationProp || '5s');
   const [epgOverlayPosition, setEpgOverlayPosition] = useState<'bottom' | 'top'>(epgOverlayPositionProp || 'bottom');
   const [okAction, setOkAction] = useState<'fullscreen' | 'preview'>('fullscreen');
   const [bufferSize, setBufferSize] = useState<'300ms' | '1000ms' | '2500ms'>('300ms');
+
+  // Query actual channel and stream count in Dexie when modal is open
+  useEffect(() => {
+    if (isOpen) {
+      db.channels.count().then((cnt) => setTotalLoadedStreams(cnt)).catch(() => {});
+    }
+  }, [isOpen, localPlaylists]);
 
   // Load saved preferences on mount
   useEffect(() => {
@@ -737,7 +747,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </span>
                         </div>
                         <p className="text-xs text-slate-400 truncate mt-0.5">
-                          {pl.channel_count > 0 ? `${pl.channel_count} chaînes chargées` : 'Flux disponibles'} •{' '}
+                          {totalLoadedStreams > 0
+                            ? `${totalLoadedStreams} chaînes & flux chargés`
+                            : pl.channel_count > 0
+                            ? `${pl.channel_count} chaînes chargées`
+                            : 'Flux disponibles'} •{' '}
                           {pl.server_url || 'Serveur configuré'}
                         </p>
                       </div>

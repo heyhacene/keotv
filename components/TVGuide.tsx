@@ -74,6 +74,7 @@ interface TVGuideProps {
   isModalCovering?: boolean;
   singleStreamMode?: boolean;
   osdTimeoutMs?: number;
+  isLoadingCategory?: boolean;
 }
 
 // Helper for category icons
@@ -683,6 +684,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
   isModalCovering = false,
   singleStreamMode = false,
   osdTimeoutMs = 5000,
+  isLoadingCategory = false,
 }) => {
   const channelListRef = useRef<HTMLDivElement | null>(null);
   const categoryListRef = useRef<HTMLDivElement | null>(null);
@@ -1537,7 +1539,12 @@ export const TVGuide: React.FC<TVGuideProps> = ({
             }}
             className="flex-1 flex flex-col py-1 overflow-y-auto overflow-x-hidden"
           >
-            {channels.length === 0 ? (
+            {isLoadingCategory ? (
+              <div className="flex-1 flex flex-col items-center justify-center p-8 text-slate-400">
+                <Loader2 className="w-8 h-8 animate-spin text-sky-400 mb-3" />
+                <p className="text-sm font-medium">Chargement des programmes...</p>
+              </div>
+            ) : channels.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center p-8 text-slate-500">
                 {selectedCategory?.id.startsWith('fav') ? (
                   <>

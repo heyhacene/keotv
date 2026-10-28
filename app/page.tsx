@@ -32,6 +32,8 @@ import {
   loadAllLiveCategories,
   loadAllVodCategories,
   fetchAllSeriesCatalog,
+  fetchAllLiveStreamsBulk,
+  fetchAllVodStreamsBulk,
   fetchRecentlyAddedVod,
   SeriesEpisode,
   isSeparatorChannel,
@@ -592,17 +594,19 @@ export default function KeoTVHome() {
 
         if (categoryLoadTokenRef.current !== token) return;
 
-        // Apply channel sort
+        // Apply channel sort (except for "Récemment ajoutés" and "Pour vous" which have custom chronological / algorithmic ordering)
         let sorted = [...rawList];
-        if (sortMode === 'alpha') {
-          sorted.sort((a, b) =>
-            a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
-          );
-        } else if (sortMode === 'num') {
-          sorted.sort((a, b) => (a.num || 0) - (b.num || 0));
-        } else {
-          // 'playlist' (strict default original lineup order)
-          sorted.sort((a, b) => (a.custom_order || a.num || 0) - (b.custom_order || b.num || 0));
+        if (cat.id !== 'vod_recent_added' && cat.id !== 'vod_for_you') {
+          if (sortMode === 'alpha') {
+            sorted.sort((a, b) =>
+              a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true })
+            );
+          } else if (sortMode === 'num') {
+            sorted.sort((a, b) => (a.num || 0) - (b.num || 0));
+          } else {
+            // 'playlist' (strict default original lineup order)
+            sorted.sort((a, b) => (a.custom_order || a.num || 0) - (b.custom_order || b.num || 0));
+          }
         }
 
         setChannels(sorted);
@@ -660,63 +664,141 @@ export default function KeoTVHome() {
         }
       }
 
-      // 2. Load live categories progressively (3 by 3)
-      await loadAllLiveCategories({
-        serverUrl: pl.server_url,
-        username: pl.username,
-        password: pl.password,
-        categories: cats,
-        skipCategoryIds: skip,
-        shouldAbort: () => bgLoadTokenRef.current !== token,
-        onCategoryLoaded: async (cat, streams) => {
-          if (streams.length === 0) return;
-          const favIds = await getFavoriteChannelIds();
-          const mergedStreams = streams.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
-          try {
-            await db.channels.bulkPut(mergedStreams);
-          } catch {
-            for (const s of mergedStreams) {
-              try { await db.channels.put(s); } catch {}
-            }
-          }
-          await db.categories.update(cat.id, { count: streams.length });
-          setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, count: streams.length } : c)));
-        },
-        onProgress: (done, total) => {
-          if (bgLoadTokenRef.current === token) {
-            setBgLoadStatus(`Synchronisation : ${done}/${total} bouquets TV`);
-          }
-        },
-      });
+      // 2. High-speed Bulk fetch of ALL live streams in ONE fast call (gets all 9,000+ channels)
+      let bulkLiveSuccess = false;
+      const localLiveCount = await db.channels.where('stream_type').equals('live').count();
+      if (localLiveCount < 500 && pl.server_url && pl.username && pl.password) {
+        if (bgLoadTokenRef.current === token) {
+          setBgLoadStatus('Synchronisation en masse des chaînes TV...');
+        }
+        try {
+          const allLive = await fetchAllLiveStreamsBulk({
+            serverUrl: pl.server_url,
+            username: pl.username,
+            password: pl.password,
+          });
+          if (allLive.length > 0 && bgLoadTokenRef.current === token) {
+            const favIds = await getFavoriteChannelIds();
+            const mergedLive = allLive.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
+            await db.channels.bulkPut(mergedLive);
 
-      // 3. Load VOD categories progressively in the background (2 by 2, safe memory footprint)
-      await loadAllVodCategories({
-        serverUrl: pl.server_url,
-        username: pl.username,
-        password: pl.password,
-        categories: cats,
-        skipCategoryIds: skip,
-        shouldAbort: () => bgLoadTokenRef.current !== token,
-        onCategoryLoaded: async (cat, streams) => {
-          if (streams.length === 0) return;
-          const favIds = await getFavoriteChannelIds();
-          const mergedStreams = streams.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
-          try {
-            await db.channels.bulkPut(mergedStreams);
-          } catch {
-            for (const s of mergedStreams) {
-              try { await db.channels.put(s); } catch {}
+            const countsByGroup = new Map<string, number>();
+            for (const s of mergedLive) {
+              countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
+            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
+              await db.categories.update(gid, { count: cnt });
+            }
+            setCategories((prev) =>
+              prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
+            );
+            bulkLiveSuccess = true;
           }
-          await db.categories.update(cat.id, { count: streams.length });
-          setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, count: streams.length } : c)));
-        },
-        onProgress: (done, total) => {
-          if (bgLoadTokenRef.current === token) {
-            setBgLoadStatus(`Synchronisation films : ${done}/${total} catégories VOD`);
+        } catch (bulkLiveErr) {
+          console.warn('Bulk live stream fetch error, falling back to progressive:', bulkLiveErr);
+        }
+      } else if (localLiveCount >= 500) {
+        bulkLiveSuccess = true;
+      }
+
+      if (!bulkLiveSuccess) {
+        // Fallback: Load live categories progressively (3 by 3)
+        await loadAllLiveCategories({
+          serverUrl: pl.server_url,
+          username: pl.username,
+          password: pl.password,
+          categories: cats,
+          skipCategoryIds: skip,
+          shouldAbort: () => bgLoadTokenRef.current !== token,
+          onCategoryLoaded: async (cat, streams) => {
+            if (streams.length === 0) return;
+            const favIds = await getFavoriteChannelIds();
+            const mergedStreams = streams.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
+            try {
+              await db.channels.bulkPut(mergedStreams);
+            } catch {
+              for (const s of mergedStreams) {
+                try { await db.channels.put(s); } catch {}
+              }
+            }
+            await db.categories.update(cat.id, { count: streams.length });
+            setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, count: streams.length } : c)));
+          },
+          onProgress: (done, total) => {
+            if (bgLoadTokenRef.current === token) {
+              setBgLoadStatus(`Synchronisation : ${done}/${total} bouquets TV`);
+            }
+          },
+        });
+      }
+
+      // 3. High-speed Bulk fetch of ALL VOD streams in ONE fast call
+      let bulkVodSuccess = false;
+      const localVodCount = await db.channels.where('stream_type').equals('vod').count();
+      if (localVodCount === 0 && pl.server_url && pl.username && pl.password) {
+        if (bgLoadTokenRef.current === token) {
+          setBgLoadStatus('Synchronisation du catalogue de films...');
+        }
+        try {
+          const allVod = await fetchAllVodStreamsBulk({
+            serverUrl: pl.server_url,
+            username: pl.username,
+            password: pl.password,
+          });
+          if (allVod.length > 0 && bgLoadTokenRef.current === token) {
+            const favIds = await getFavoriteChannelIds();
+            const mergedVod = allVod.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
+            await db.channels.bulkPut(mergedVod);
+
+            const countsByGroup = new Map<string, number>();
+            for (const s of mergedVod) {
+              countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
+            }
+            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
+              await db.categories.update(gid, { count: cnt });
+            }
+            setCategories((prev) =>
+              prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
+            );
+            bulkVodSuccess = true;
           }
-        },
-      });
+        } catch (bulkVodErr) {
+          console.warn('BulkVOD fetch error, falling back to progressive:', bulkVodErr);
+        }
+      } else if (localVodCount > 0) {
+        bulkVodSuccess = true;
+      }
+
+      if (!bulkVodSuccess) {
+        // Fallback: Load VOD categories progressively in the background (2 by 2)
+        await loadAllVodCategories({
+          serverUrl: pl.server_url,
+          username: pl.username,
+          password: pl.password,
+          categories: cats,
+          skipCategoryIds: skip,
+          shouldAbort: () => bgLoadTokenRef.current !== token,
+          onCategoryLoaded: async (cat, streams) => {
+            if (streams.length === 0) return;
+            const favIds = await getFavoriteChannelIds();
+            const mergedStreams = streams.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
+            try {
+              await db.channels.bulkPut(mergedStreams);
+            } catch {
+              for (const s of mergedStreams) {
+                try { await db.channels.put(s); } catch {}
+              }
+            }
+            await db.categories.update(cat.id, { count: streams.length });
+            setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, count: streams.length } : c)));
+          },
+          onProgress: (done, total) => {
+            if (bgLoadTokenRef.current === token) {
+              setBgLoadStatus(`Synchronisation films : ${done}/${total} catégories VOD`);
+            }
+          },
+        });
+      }
 
       await updateFavoriteCounts();
 
@@ -3798,6 +3880,7 @@ export default function KeoTVHome() {
               boundaryHit={boundaryHit}
               singleStreamMode={singleStreamMode}
               osdTimeoutMs={osdTimeoutMs}
+              isLoadingCategory={isLoadingCategory}
               isModalCovering={
                 isSplashVisible ||
                 isSettingsModalOpen ||
