@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Tv, Film, Clapperboard, Star, Search, Settings, RefreshCw } from 'lucide-react';
+import { Tv, Film, Clapperboard, Star, Search, Settings, RefreshCw, RotateCcw } from 'lucide-react';
 import { NavigationPane } from '@/types/iptv';
 
 interface NavigationSidebarProps {
@@ -36,6 +36,7 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
 
   const menuItems = [
     { id: 'live', label: 'Direct', icon: Tv },
+    { id: 'replay', label: 'Replay', icon: RotateCcw },
     { id: 'vod', label: 'Films', icon: Film },
     { id: 'series', label: 'Séries', icon: Clapperboard },
     { id: 'fav', label: 'Favoris', icon: Star },
@@ -67,7 +68,7 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
         </span>
       </div>
 
-      {/* Main sections (indices 0 to 4) */}
+      {/* Main sections (indices 0 to 5) */}
       <div className="flex flex-col space-y-1.5 w-full px-1.5 flex-shrink-0">
         {menuItems.map((item, idx) => {
           const Icon = item.icon;
@@ -101,14 +102,14 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
         })}
       </div>
 
-      {/* Bottom utility buttons (indices 5 and 6) */}
+      {/* Bottom utility buttons (indices 6 and 7) */}
       <div className="flex flex-col space-y-1.5 w-full px-1.5 pt-2 border-t border-tv-border/50 flex-shrink-0 mt-2">
-        {/* Settings / Options (index 5) */}
+        {/* Settings / Options (index 6) */}
         <button
-          id="menu-item-5"
+          id="menu-item-6"
           onClick={onOpenSettingsModal}
           className={`w-full py-1.5 md:py-2 rounded-xl flex flex-col items-center justify-center transition-transform duration-150 ${
-            activePane === 'menu' && focusedMenuIndex === 5
+            activePane === 'menu' && focusedMenuIndex === 6
               ? 'bg-tv-focus text-white ring-2 ring-tv-accent ring-offset-2 ring-offset-tv-bg shadow-tv-focus scale-105 font-bold'
               : 'text-slate-400 hover:text-tv-accent hover:bg-tv-card/50'
           }`}
@@ -118,12 +119,12 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
           <span className="text-[8px] font-semibold">Options</span>
         </button>
 
-        {/* Sync (index 6) */}
+        {/* Sync (index 7) */}
         <button
-          id="menu-item-6"
+          id="menu-item-7"
           onClick={onOpenSyncModal}
           className={`w-full py-1.5 md:py-2 rounded-xl flex flex-col items-center justify-center transition-transform duration-150 ${
-            activePane === 'menu' && focusedMenuIndex === 6
+            activePane === 'menu' && focusedMenuIndex === 7
               ? 'bg-tv-focus text-white ring-2 ring-emerald-400 ring-offset-2 ring-offset-tv-bg shadow-tv-focus scale-105 font-bold'
               : 'text-slate-400 hover:text-emerald-400 hover:bg-tv-card/50'
           }`}

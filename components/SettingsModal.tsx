@@ -1557,7 +1557,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <div className="flex items-center space-x-2 mt-1">
                         <span className={`w-2.5 h-2.5 rounded-full ${activeUser ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
                         <span className="text-base font-bold text-white">
-                          {activeUser ? activeUser.username : 'Non connecté'}
+                          {activeUser ? (activeUser.user_label || activeUser.email) : 'Non connecté'}
                         </span>
                       </div>
                     </div>

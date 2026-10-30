@@ -3,40 +3,36 @@
 import React, { useState, useEffect } from 'react';
 import {
   Tv,
-  Film,
-  Clapperboard,
   Server,
-  RefreshCw,
   KeyRound,
+  User,
+  Link as LinkIcon,
+  RefreshCw,
   CheckCircle2,
   AlertCircle,
-  ExternalLink,
-  ShieldCheck,
-  User,
+  Eye,
+  EyeOff,
+  Sparkles,
   LogIn,
   UserPlus,
   LogOut,
-  Sparkles,
+  Film,
   Clock,
-  Eye,
-  EyeOff,
-  Link as LinkIcon,
-  PlusCircle,
-  Trash2,
+  Send,
 } from 'lucide-react';
 import {
-  registerKeoUser,
+  KeoUserAccount,
   loginKeoUser,
+  registerKeoUser,
+  saveUserCloudSync,
   getActiveKeoUser,
   logoutKeoUser,
-  saveUserCloudSync,
-  KeoUserAccount,
-  WatchedItem,
+  resetPasswordForEmail,
 } from '@/lib/supabase';
 
 export default function WebSyncDashboard() {
   const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [authUsername, setAuthUsername] = useState('');
+  const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [showPlaylistPassword, setShowPlaylistPassword] = useState(false);
@@ -74,8 +70,8 @@ export default function WebSyncDashboard() {
 
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!authUsername.trim() || !authPassword.trim()) {
-      setStatusMessage({ type: 'error', text: 'Veuillez saisir votre identifiant et votre mot de passe.' });
+    if (!authEmail.trim() || !authPassword.trim()) {
+      setStatusMessage({ type: 'error', text: 'Veuillez saisir votre email et votre mot de passe.' });
       return;
     }
 
@@ -83,7 +79,7 @@ export default function WebSyncDashboard() {
     setStatusMessage(null);
 
     if (authMode === 'login') {
-      const res = await loginKeoUser({ username: authUsername, password: authPassword });
+      const res = await loginKeoUser({ email: authEmail, password: authPassword });
       setIsLoading(false);
       if (res.user) {
         setCurrentUser(res.user);
@@ -94,16 +90,16 @@ export default function WebSyncDashboard() {
           setPassword(firstPl.password || '');
           setPlaylistName(firstPl.name || 'Mon Abonnement IPTV');
         }
-        setStatusMessage({ type: 'success', text: `Connecté avec succès en tant que ${res.user.username} !` });
+        setStatusMessage({ type: 'success', text: `Connecté avec succès en tant que ${res.user.email} !` });
       } else {
         setStatusMessage({ type: 'error', text: res.error || 'Erreur lors de la connexion.' });
       }
     } else {
       const res = await registerKeoUser({
-        username: authUsername,
+        email: authEmail,
         password: authPassword,
         data: {
-          user_label: authUsername,
+          user_label: authEmail.split('@')[0],
         },
       });
       setIsLoading(false);
@@ -113,6 +109,22 @@ export default function WebSyncDashboard() {
       } else {
         setStatusMessage({ type: 'error', text: res.error || 'Erreur lors de la création du compte.' });
       }
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!authEmail.trim() || !authEmail.includes('@')) {
+      setStatusMessage({ type: 'error', text: 'Veuillez saisir votre adresse email pour réinitialiser le mot de passe.' });
+      return;
+    }
+    setIsLoading(true);
+    setStatusMessage(null);
+    const res = await resetPasswordForEmail(authEmail);
+    setIsLoading(false);
+    if (res.success) {
+      setStatusMessage({ type: 'success', text: 'Un lien de réinitialisation sécurisé a été envoyé à votre adresse email.' });
+    } else {
+      setStatusMessage({ type: 'error', text: res.error || 'Erreur lors de la demande.' });
     }
   };
 
@@ -226,10 +238,10 @@ export default function WebSyncDashboard() {
     }
   };
 
-  const handleLogout = () => {
-    logoutKeoUser();
+  const handleLogout = async () => {
+    await logoutKeoUser();
     setCurrentUser(null);
-    setAuthUsername('');
+    setAuthEmail('');
     setAuthPassword('');
     setStatusMessage({ type: 'success', text: 'Vous avez été déconnecté.' });
   };
@@ -268,7 +280,7 @@ export default function WebSyncDashboard() {
           </div>
         </div>
 
-        {/* Section 1: User Account Authentication (ID + Mot de passe) */}
+        {/* Section 1: User Account Authentication (Email + Mot de passe Supabase) */}
         {!currentUser ? (
           <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
             <div className="flex items-center justify-between">
@@ -297,23 +309,34 @@ export default function WebSyncDashboard() {
             </div>
 
             <p className="text-xs sm:text-sm text-slate-300">
-              Connectez-vous avec vos identifiants pour synchroniser automatiquement vos playlists entre cette page web et vos téléviseurs.
+              Connectez-vous avec votre adresse email pour sauvegarder vos playlists, réglages et reprises de lecture VOD en toute sécurité.
             </p>
 
             <form onSubmit={handleAuthSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Identifiant / Pseudo</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Email</label>
                 <input
-                  type="text"
-                  placeholder="votre_identifiant"
-                  value={authUsername}
-                  onChange={(e) => setAuthUsername(e.target.value)}
+                  type="email"
+                  placeholder="votre_email@exemple.com"
+                  value={authEmail}
+                  onChange={(e) => setAuthEmail(e.target.value)}
                   className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 rounded-xl text-sm focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Mot de passe</label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-slate-300">Mot de passe</label>
+                  {authMode === 'login' && (
+                    <button
+                      type="button"
+                      onClick={handleForgotPassword}
+                      className="text-[11px] text-sky-400 hover:text-sky-300 transition"
+                    >
+                      Mot de passe oublié ?
+                    </button>
+                  )}
+                </div>
                 <div className="relative">
                   <input
                     type={showAuthPassword ? 'text' : 'password'}
@@ -332,223 +355,222 @@ export default function WebSyncDashboard() {
                 </div>
               </div>
 
-            <div className="sm:col-span-2 flex justify-end pt-2">
+              <div className="sm:col-span-2 flex justify-end pt-2">
+                <button
+                  type="submit"
+                  disabled={isLoading || !authEmail.trim() || !authPassword.trim()}
+                  className="px-6 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm flex items-center space-x-2 transition disabled:opacity-50 shadow-lg shadow-sky-500/25"
+                >
+                  {isLoading ? (
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                  ) : authMode === 'login' ? (
+                    <LogIn className="w-4 h-4" />
+                  ) : (
+                    <UserPlus className="w-4 h-4" />
+                  )}
+                  <span>{isLoading ? 'Traitement...' : authMode === 'login' ? 'Se connecter' : 'Créer mon compte'}</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : (
+          <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-6 shadow-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="flex items-center space-x-4">
+              <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xl flex-shrink-0">
+                {(currentUser.user_label || currentUser.email).slice(0, 2).toUpperCase()}
+              </div>
+              <div>
+                <div className="flex items-center space-x-2">
+                  <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
+                    Compte Connecté
+                  </span>
+                  <span className="text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-full font-mono">
+                    Cloud Synchronisé
+                  </span>
+                </div>
+                <h2 className="text-lg font-black text-white">{currentUser.user_label || currentUser.email}</h2>
+                <p className="text-xs text-slate-400">
+                  {currentUser.playlists?.length || 0} playlist(s) enregistrée(s) • {currentUser.favorites?.length || 0} favoris • {currentUser.watched_positions?.length || 0} reprise(s) VOD
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
               <button
-                type="submit"
-                disabled={isLoading || !authUsername.trim() || !authPassword.trim()}
-                className="px-6 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm flex items-center space-x-2 transition disabled:opacity-50 shadow-lg shadow-sky-500/25"
+                onClick={handleInjectDemoPlaylist}
+                disabled={isLoading}
+                className="px-4 py-2.5 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30 hover:border-amber-400 text-amber-300 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow-sm"
+                title="Ajouter la playlist de test française (BFM, CNews, CStar, Euronews, Films VOD)"
               >
-                {isLoading ? (
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                ) : authMode === 'login' ? (
-                  <LogIn className="w-4 h-4" />
-                ) : (
-                  <UserPlus className="w-4 h-4" />
-                )}
-                <span>{isLoading ? 'Traitement...' : authMode === 'login' ? 'Se connecter' : 'Créer mon compte'}</span>
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>Charger la Playlist Démo France</span>
+              </button>
+              <button
+                onClick={handleLogout}
+                className="px-4 py-2.5 bg-white/10 hover:bg-rose-500/20 hover:text-rose-300 text-slate-300 rounded-xl text-xs font-bold transition flex items-center space-x-1.5"
+              >
+                <LogOut className="w-4 h-4" />
+                <span>Déconnexion</span>
               </button>
             </div>
-          </form>
-        </div>
-      ) : (
-        <div className="bg-slate-900 border border-emerald-500/30 rounded-3xl p-6 shadow-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <div className="flex items-center space-x-4">
-            <div className="w-14 h-14 rounded-2xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xl flex-shrink-0">
-              {currentUser.username.slice(0, 2).toUpperCase()}
+          </div>
+        )}
+
+        {statusMessage && (
+          <div
+            className={`p-4 rounded-2xl border text-xs sm:text-sm flex items-center space-x-3 ${
+              statusMessage.type === 'success'
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+            }`}
+          >
+            {statusMessage.type === 'success' ? (
+              <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+            ) : (
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            )}
+            <span>{statusMessage.text}</span>
+          </div>
+        )}
+
+        {/* Section 2: IPTV Playlist Configuration Form */}
+        <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-2 text-sky-400 font-bold text-sm uppercase tracking-wider">
+              <Server className="w-4 h-4" />
+              <span>Gestion de vos Abonnements & Playlists</span>
             </div>
+
+            {/* Type Switcher: Xtream vs M3U */}
+            <div className="flex p-1 bg-black/40 rounded-xl border border-white/5">
+              <button
+                type="button"
+                onClick={() => setPlaylistType('xtream')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 ${
+                  playlistType === 'xtream' ? 'bg-sky-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Server className="w-3.5 h-3.5" />
+                <span>Xtream Codes</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setPlaylistType('m3u')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 ${
+                  playlistType === 'm3u' ? 'bg-sky-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <LinkIcon className="w-3.5 h-3.5" />
+                <span>Lien M3U</span>
+              </button>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-400">
+            Saisissez vos paramètres IPTV ci-dessous. Dès que vous enregistrez, ils sont synchronisés dans votre Cloud. Sur votre TV ou smartphone, il vous suffira de vous connecter ou de cliquer sur « Rapatrier » pour les récupérer sans saisir un seul mot de passe à la télécommande !
+          </p>
+
+          <div className="grid grid-cols-1 gap-4">
             <div>
-              <div className="flex items-center space-x-2">
-                <span className="text-xs font-bold text-emerald-400 uppercase tracking-wider">
-                  Compte Connecté
-                </span>
-                <span className="text-[10px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2 py-0.5 rounded-full font-mono">
-                  Cloud Synchronisé
-                </span>
-              </div>
-              <h2 className="text-lg font-black text-white">{currentUser.username}</h2>
-              <p className="text-xs text-slate-400">
-                {currentUser.playlists?.length || 0} playlist(s) enregistrée(s) • Prêt pour vos écrans TV et mobiles
-              </p>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">Nom de la playlist / Fournisseur</label>
+              <input
+                type="text"
+                placeholder="Ex: Mon Abonnement IPTV"
+                value={playlistName}
+                onChange={(e) => setPlaylistName(e.target.value)}
+                className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 rounded-xl text-sm focus:outline-none"
+              />
             </div>
-          </div>
 
-          <div className="flex items-center space-x-2 w-full sm:w-auto justify-end">
-            <button
-              onClick={handleInjectDemoPlaylist}
-              disabled={isLoading}
-              className="px-4 py-2.5 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30 hover:border-amber-400 text-amber-300 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow-sm"
-              title="Ajouter la playlist de test française (BFM, CNews, CStar, Euronews, Films VOD)"
-            >
-              <Sparkles className="w-4 h-4 text-amber-400" />
-              <span>Charger la Playlist Démo France</span>
-            </button>
-            <button
-              onClick={handleLogout}
-              className="px-4 py-2.5 bg-white/10 hover:bg-rose-500/20 hover:text-rose-300 text-slate-300 rounded-xl text-xs font-bold transition flex items-center space-x-1.5"
-            >
-              <LogOut className="w-4 h-4" />
-              <span>Déconnexion</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {statusMessage && (
-        <div
-          className={`p-4 rounded-2xl border text-xs sm:text-sm flex items-center space-x-3 ${
-            statusMessage.type === 'success'
-              ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
-              : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-          }`}
-        >
-          {statusMessage.type === 'success' ? (
-            <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-          ) : (
-            <AlertCircle className="w-5 h-5 flex-shrink-0" />
-          )}
-          <span>{statusMessage.text}</span>
-        </div>
-      )}
-
-      {/* Section 2: IPTV Playlist Configuration Form */}
-      <div className="bg-slate-900 border border-white/10 rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center space-x-2 text-sky-400 font-bold text-sm uppercase tracking-wider">
-            <Server className="w-4 h-4" />
-            <span>Gestion de vos Abonnements & Playlists</span>
-          </div>
-
-          {/* Type Switcher: Xtream vs M3U */}
-          <div className="flex p-1 bg-black/40 rounded-xl border border-white/5">
-            <button
-              type="button"
-              onClick={() => setPlaylistType('xtream')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 ${
-                playlistType === 'xtream' ? 'bg-sky-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Server className="w-3.5 h-3.5" />
-              <span>Xtream Codes</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setPlaylistType('m3u')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center space-x-1.5 ${
-                playlistType === 'm3u' ? 'bg-sky-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <LinkIcon className="w-3.5 h-3.5" />
-              <span>Lien M3U</span>
-            </button>
-          </div>
-        </div>
-
-        <p className="text-xs text-slate-400">
-          Saisissez vos paramètres IPTV ci-dessous. Dès que vous enregistrez, ils sont synchronisés dans votre Cloud. Sur votre TV ou smartphone, il vous suffira de cliquer sur « Rapatrier » pour les récupérer sans saisir un seul mot de passe à la télécommande !
-        </p>
-
-        <div className="grid grid-cols-1 gap-4">
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1.5">Nom de la playlist / Fournisseur</label>
-            <input
-              type="text"
-              placeholder="Ex: Mon Abonnement IPTV"
-              value={playlistName}
-              onChange={(e) => setPlaylistName(e.target.value)}
-              className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 rounded-xl text-sm focus:outline-none"
-            />
-          </div>
-
-          {playlistType === 'xtream' ? (
-            <>
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  URL du Serveur IPTV (avec port)
-                </label>
-                <input
-                  type="url"
-                  placeholder="http://iptv-fournisseur.com:8080"
-                  value={serverUrl}
-                  onChange={(e) => setServerUrl(e.target.value)}
-                  className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 rounded-xl text-sm font-mono focus:outline-none"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {playlistType === 'xtream' ? (
+              <>
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">Identifiant / Username</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    URL du Serveur IPTV (avec port)
+                  </label>
                   <input
-                    type="text"
-                    placeholder="votre_identifiant"
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
+                    type="url"
+                    placeholder="http://iptv-fournisseur.com:8080"
+                    value={serverUrl}
+                    onChange={(e) => setServerUrl(e.target.value)}
                     className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 rounded-xl text-sm font-mono focus:outline-none"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">Mot de passe / Password</label>
-                  <div className="relative">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">Identifiant / Username</label>
                     <input
-                      type={showPlaylistPassword ? 'text' : 'password'}
-                      placeholder="••••••••••••"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 pr-10 rounded-xl text-sm font-mono focus:outline-none"
+                      type="text"
+                      placeholder="votre_identifiant"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 rounded-xl text-sm font-mono focus:outline-none"
                     />
-                    <button
-                      type="button"
-                      onClick={() => setShowPlaylistPassword(!showPlaylistPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
-                    >
-                      {showPlaylistPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">Mot de passe / Password</label>
+                    <div className="relative">
+                      <input
+                        type={showPlaylistPassword ? 'text' : 'password'}
+                        placeholder="••••••••••••"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 pr-10 rounded-xl text-sm font-mono focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPlaylistPassword(!showPlaylistPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+                      >
+                        {showPlaylistPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
+              </>
+            ) : (
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Lien ou URL du fichier M3U / M3U8
+                </label>
+                <input
+                  type="url"
+                  placeholder="https://mon-fournisseur.com/get.php?username=...&type=m3u_plus"
+                  value={m3uUrl}
+                  onChange={(e) => setM3uUrl(e.target.value)}
+                  className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 rounded-xl text-sm font-mono focus:outline-none"
+                />
               </div>
-            </>
-          ) : (
-            <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Lien ou URL du fichier M3U / M3U8
-              </label>
-              <input
-                type="url"
-                placeholder="https://mon-fournisseur.com/get.php?username=...&type=m3u_plus"
-                value={m3uUrl}
-                onChange={(e) => setM3uUrl(e.target.value)}
-                className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 rounded-xl text-sm font-mono focus:outline-none"
-              />
-            </div>
-          )}
+            )}
+          </div>
+
+          <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-white/10 pt-4">
+            <button
+              type="button"
+              onClick={handleInjectDemoPlaylist}
+              className="text-xs text-amber-400 hover:text-amber-300 flex items-center space-x-1.5 underline underline-offset-4"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>Tester avec la playlist générique (12 chaînes françaises & VODs)</span>
+            </button>
+
+            <button
+              onClick={handleSavePlaylistToAccount}
+              disabled={
+                isLoading ||
+                !currentUser ||
+                (playlistType === 'xtream' && (!serverUrl.trim() || !username.trim())) ||
+                (playlistType === 'm3u' && !m3uUrl.trim())
+              }
+              className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm flex items-center justify-center space-x-2 transition disabled:opacity-50 shadow-lg shadow-sky-500/25"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span>Enregistrer dans mon compte Cloud</span>
+            </button>
+          </div>
         </div>
-
-        <div className="pt-2 flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-white/10 pt-4">
-          <button
-            type="button"
-            onClick={handleInjectDemoPlaylist}
-            className="text-xs text-amber-400 hover:text-amber-300 flex items-center space-x-1.5 underline underline-offset-4"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>Tester avec la playlist générique (12 chaînes françaises & VODs)</span>
-          </button>
-
-          <button
-            onClick={handleSavePlaylistToAccount}
-            disabled={
-              isLoading ||
-              !currentUser ||
-              (playlistType === 'xtream' && (!serverUrl.trim() || !username.trim())) ||
-              (playlistType === 'm3u' && !m3uUrl.trim())
-            }
-            className="w-full sm:w-auto px-6 py-3 rounded-2xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-black text-sm flex items-center justify-center space-x-2 transition disabled:opacity-50 shadow-lg shadow-sky-500/25"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span>Enregistrer dans mon compte Cloud</span>
-          </button>
-        </div>
-      </div>
-
 
         {/* Section 3: Watched positions / Resume */}
         {currentUser && currentUser.watched_positions && currentUser.watched_positions.length > 0 && (

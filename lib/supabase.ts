@@ -34,9 +34,8 @@ export interface CloudDeviceSync {
 }
 
 export interface KeoUserAccount {
-  id: string;
-  username: string; // Identifier or email
-  password_hash: string;
+  id: string; // The UUID from auth.users
+  email: string; // Email is the primary identifier
   user_label?: string;
   playlists: any[];
   favorites: string[];
@@ -48,42 +47,42 @@ export interface KeoUserAccount {
   updated_at: string;
 }
 
-// Simple deterministic hash for password checking without external heavy libraries
-export function hashPassword(str: string): string {
-  let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    const char = str.charCodeAt(i);
-    hash = (hash << 5) - hash + char;
-    hash |= 0;
-  }
-  return `h_${Math.abs(hash).toString(36)}_${str.length}`;
-}
-
-// Register or update user with identifier and password
+// Register new user with email and password via Supabase Auth
 export async function registerKeoUser(params: {
-  username: string;
+  email: string;
   password: string;
   data?: Partial<KeoUserAccount>;
 }): Promise<{ user?: KeoUserAccount; error?: string }> {
   try {
-    const cleanUser = params.username.trim().toLowerCase();
+    const cleanEmail = params.email.trim().toLowerCase();
     const cleanPass = params.password.trim();
 
-    if (!cleanUser || cleanUser.length < 3) {
-      return { error: "L'identifiant doit comporter au moins 3 caractères." };
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      return { error: 'Veuillez fournir une adresse email valide.' };
     }
-    if (!cleanPass || cleanPass.length < 4) {
-      return { error: 'Le mot de passe doit comporter au moins 4 caractères.' };
+    if (!cleanPass || cleanPass.length < 6) {
+      return { error: 'Le mot de passe doit comporter au moins 6 caractères.' };
     }
 
-    const hashed = hashPassword(cleanPass);
+    const { data: authData, error: authError } = await supabase.auth.signUp({
+      email: cleanEmail,
+      password: cleanPass,
+    });
+
+    if (authError) {
+      return { error: authError.message };
+    }
+
+    if (!authData.user) {
+      return { error: 'Erreur lors de la création du compte.' };
+    }
+
     const nowIso = new Date().toISOString();
 
     const account: KeoUserAccount = {
-      id: `usr_${cleanUser}`,
-      username: cleanUser,
-      password_hash: hashed,
-      user_label: params.data?.user_label || cleanUser,
+      id: authData.user.id,
+      email: cleanEmail,
+      user_label: params.data?.user_label || cleanEmail.split('@')[0],
       playlists: params.data?.playlists || [],
       favorites: params.data?.favorites || [],
       hidden_groups: params.data?.hidden_groups || [],
@@ -94,18 +93,19 @@ export async function registerKeoUser(params: {
       updated_at: nowIso,
     };
 
-    // Cache locally
-    if (typeof window !== 'undefined') {
-      localStorage.setItem(`keotv_account_${cleanUser}`, JSON.stringify(account));
-      localStorage.setItem('keotv_active_user', JSON.stringify(account));
+    // Store profile in public.keotv_users
+    const { error: dbError } = await supabase
+      .from('keotv_users')
+      .upsert(account, { onConflict: 'id' });
+
+    if (dbError) {
+      console.warn('Error saving profile to keotv_users:', dbError);
     }
 
-    try {
-      await supabase
-        .from('keotv_users')
-        .upsert(account, { onConflict: 'username' });
-    } catch (e) {
-      console.warn('Supabase keotv_users upsert fallback to local:', e);
+    // Cache locally
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(`keotv_account_${cleanEmail}`, JSON.stringify(account));
+      localStorage.setItem('keotv_active_user', JSON.stringify(account));
     }
 
     return { user: account };
@@ -114,55 +114,80 @@ export async function registerKeoUser(params: {
   }
 }
 
-// Log in with identifier and password
+// Log in with email and password via Supabase Auth
 export async function loginKeoUser(params: {
-  username: string;
+  email: string;
   password: string;
 }): Promise<{ user?: KeoUserAccount; error?: string }> {
   try {
-    const cleanUser = params.username.trim().toLowerCase();
+    const cleanEmail = params.email.trim().toLowerCase();
     const cleanPass = params.password.trim();
-    const expectedHash = hashPassword(cleanPass);
 
-    // 1. Try remote Supabase
-    try {
-      const { data, error } = await supabase
-        .from('keotv_users')
-        .select('*')
-        .eq('username', cleanUser)
-        .single();
+    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+      email: cleanEmail,
+      password: cleanPass,
+    });
 
-      if (!error && data) {
-        if (data.password_hash !== expectedHash) {
-          return { error: 'Mot de passe incorrect.' };
-        }
-        if (typeof window !== 'undefined') {
-          localStorage.setItem(`keotv_account_${cleanUser}`, JSON.stringify(data));
-          localStorage.setItem('keotv_active_user', JSON.stringify(data));
-        }
-        return { user: data as KeoUserAccount };
-      }
-    } catch (err) {
-      console.warn('Remote login failed, trying local account storage:', err);
+    if (authError) {
+      return { error: authError.message };
     }
 
-    // 2. Fallback to local account storage
+    if (!authData.user) {
+      return { error: 'Identifiants invalides.' };
+    }
+
+    // Fetch user profile from public.keotv_users
+    const { data: profile, error: profileError } = await supabase
+      .from('keotv_users')
+      .select('*')
+      .eq('id', authData.user.id)
+      .single();
+
+    let account: KeoUserAccount;
+
+    if (!profileError && profile) {
+      account = profile as KeoUserAccount;
+    } else {
+      // First login or missing profile record -> initialize profile
+      const nowIso = new Date().toISOString();
+      account = {
+        id: authData.user.id,
+        email: cleanEmail,
+        user_label: cleanEmail.split('@')[0],
+        playlists: [],
+        favorites: [],
+        hidden_groups: [],
+        hidden_channels: [],
+        excluded_prefixes: [],
+        watched_positions: [],
+        created_at: nowIso,
+        updated_at: nowIso,
+      };
+      await supabase.from('keotv_users').upsert(account, { onConflict: 'id' });
+    }
+
     if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem(`keotv_account_${cleanUser}`);
-      if (stored) {
-        const parsed = JSON.parse(stored) as KeoUserAccount;
-        if (parsed.password_hash === expectedHash) {
-          localStorage.setItem('keotv_active_user', JSON.stringify(parsed));
-          return { user: parsed };
-        } else {
-          return { error: 'Mot de passe incorrect.' };
-        }
-      }
+      localStorage.setItem(`keotv_account_${cleanEmail}`, JSON.stringify(account));
+      localStorage.setItem('keotv_active_user', JSON.stringify(account));
     }
 
-    return { error: 'Compte introuvable. Veuillez vérifier vos identifiants ou créer un compte.' };
+    return { user: account };
   } catch (err: any) {
     return { error: err?.message || 'Erreur de connexion.' };
+  }
+}
+
+// Trigger password reset email
+export async function resetPasswordForEmail(email: string): Promise<{ success: boolean; error?: string }> {
+  try {
+    const cleanEmail = email.trim().toLowerCase();
+    const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail);
+    if (error) {
+      return { success: false, error: error.message };
+    }
+    return { success: true };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Erreur lors de la réinitialisation du mot de passe.' };
   }
 }
 
@@ -174,14 +199,14 @@ export async function saveUserCloudSync(account: KeoUserAccount): Promise<boolea
   };
 
   if (typeof window !== 'undefined') {
-    localStorage.setItem(`keotv_account_${account.username}`, JSON.stringify(updated));
+    localStorage.setItem(`keotv_account_${account.email}`, JSON.stringify(updated));
     localStorage.setItem('keotv_active_user', JSON.stringify(updated));
   }
 
   try {
     const { error } = await supabase
       .from('keotv_users')
-      .upsert(updated, { onConflict: 'username' });
+      .upsert(updated, { onConflict: 'id' });
     return !error;
   } catch {
     return false;
@@ -200,32 +225,39 @@ export function getActiveKeoUser(): KeoUserAccount | null {
 }
 
 // Fetch freshest account data directly from cloud
-export async function fetchLatestKeoUser(username: string): Promise<KeoUserAccount | null> {
-  const cleanUser = username.trim().toLowerCase();
+export async function fetchLatestKeoUser(email?: string): Promise<KeoUserAccount | null> {
   try {
-    const { data, error } = await supabase
-      .from('keotv_users')
-      .select('*')
-      .eq('username', cleanUser)
-      .single();
+    const { data: { session } } = await supabase.auth.getSession();
+    
+    if (session?.user) {
+      const { data, error } = await supabase
+        .from('keotv_users')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
 
-    if (!error && data) {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(`keotv_account_${cleanUser}`, JSON.stringify(data));
-        localStorage.setItem('keotv_active_user', JSON.stringify(data));
+      if (!error && data) {
+        if (typeof window !== 'undefined') {
+          if (email) localStorage.setItem(`keotv_account_${email.toLowerCase()}`, JSON.stringify(data));
+          localStorage.setItem('keotv_active_user', JSON.stringify(data));
+        }
+        return data as KeoUserAccount;
       }
-      return data as KeoUserAccount;
     }
   } catch (err) {
     console.warn('Failed to fetch latest user from cloud:', err);
   }
 
-  // Fallback to local
   return getActiveKeoUser();
 }
 
 // Log out active user
-export function logoutKeoUser(): void {
+export async function logoutKeoUser(): Promise<void> {
+  try {
+    await supabase.auth.signOut();
+  } catch (err) {
+    console.warn('Supabase logout error:', err);
+  }
   if (typeof window !== 'undefined') {
     localStorage.removeItem('keotv_active_user');
   }

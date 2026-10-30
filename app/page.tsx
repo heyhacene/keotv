@@ -23,7 +23,16 @@ import { CategoryManagerModal } from '@/components/CategoryManagerModal';
 import { ParentalPinModal } from '@/components/ParentalPinModal';
 import { CatchupModal } from '@/components/CatchupModal';
 import { checkForAppUpdate, AppUpdateInfo, CURRENT_BUILD_NUMBER } from '@/lib/update-service';
-import { pushSyncToCloud, pullSyncFromCloud } from '@/lib/supabase';
+import {
+  pushSyncToCloud,
+  pullSyncFromCloud,
+  getActiveKeoUser,
+  fetchLatestKeoUser,
+  saveUserCloudSync,
+  KeoUserAccount,
+  WatchedItem,
+} from '@/lib/supabase';
+import { getAllSavedPositions } from '@/lib/playback-positions';
 import {
   syncXtreamPlaylist,
   parseM3UPlaylist,
@@ -48,7 +57,7 @@ import { CatchupService } from '@/lib/catchup-service';
 
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
-import { Star, Tv, Film, Clapperboard, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square, ArrowUpDown, AlertCircle, Loader2, Search, Sliders, Maximize, Smartphone, RotateCw } from 'lucide-react';
+import { Star, Tv, Film, Clapperboard, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square, ArrowUpDown, AlertCircle, Loader2, Search, Sliders, Maximize, Smartphone, RotateCw, RotateCcw } from 'lucide-react';
 
 export default function KeoTVHome() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -221,7 +230,8 @@ export default function KeoTVHome() {
   const [nextEpg, setNextEpg] = useState<EpgProgram | null>(null);
   const [channelEpgMap, setChannelEpgMap] = useState<Record<string, EpgProgram[]>>({});
 
-  const [activeSection, setActiveSection] = useState<'live' | 'vod' | 'series' | 'fav'>('live');
+  const [activeSection, setActiveSection] = useState<'live' | 'replay' | 'vod' | 'series' | 'fav'>('live');
+  const [activeUser, setActiveUser] = useState<KeoUserAccount | null>(null);
   const [syncCode, setSyncCode] = useState<string>('');
   const [isLoadingCategory, setIsLoadingCategory] = useState<boolean>(false);
   const [categoryError, setCategoryError] = useState<string | null>(null);
@@ -412,6 +422,19 @@ export default function KeoTVHome() {
     [favCounts.live]
   );
 
+  const replayAllCategory: Category = useMemo(
+    () => ({
+      id: 'replay_all',
+      name: '⏪ Chaînes avec Replay (7 jours)',
+      type: 'live',
+      count: 0,
+      icon: 'RotateCcw',
+      is_hidden: false,
+      custom_order: -100,
+    }),
+    []
+  );
+
   const favAllCategory: Category = useMemo(
     () => ({
       id: 'fav',
@@ -468,7 +491,11 @@ export default function KeoTVHome() {
       setCategoryError(null);
       try {
         let rawList: Channel[] = [];
-        if (cat.id === 'fav' || cat.id === 'fav_all') {
+        if (cat.id === 'replay_all') {
+          rawList = await db.channels
+            .filter((c) => Boolean(c.has_archive || (c.archive_days && c.archive_days > 0) || c.has_catchup))
+            .toArray();
+        } else if (cat.id === 'fav' || cat.id === 'fav_all') {
           rawList = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
         } else if (cat.id === 'fav_series') {
           rawList = await db.channels
@@ -1029,6 +1056,20 @@ export default function KeoTVHome() {
         setCategorySort(savedCatSort);
         setChannelSort(savedChSort);
 
+        // Check logged-in user and pull latest Cloud account data
+        if (typeof window !== 'undefined') {
+          const user = getActiveKeoUser();
+          if (user) {
+            setActiveUser(user);
+            fetchLatestKeoUser(user.email).then((fresh) => {
+              if (fresh) {
+                setActiveUser(fresh);
+                handleApplyAccountSync(fresh, true).catch(() => {});
+              }
+            }).catch(() => {});
+          }
+        }
+
         // 1. Permanent Playlist Persistence: Check Dexie, LocalStorage, and DB Settings
         const backupPlJson = typeof window !== 'undefined' ? localStorage.getItem('keotv_saved_playlist_v1') : null;
         const backupXtreamJson = typeof window !== 'undefined' ? localStorage.getItem('keotv_saved_xtream_creds') : null;
@@ -1261,6 +1302,52 @@ export default function KeoTVHome() {
     initDB();
   }, [triggerSilentRefresh, handleResyncPlaylist, startBackgroundLiveLoad, loadCategoryChannels]);
 
+  // Listen to playback position changes and push updated watched_positions to cloud
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let debounceTimer: any = null;
+    const onPosUpdated = () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(async () => {
+        const user = getActiveKeoUser();
+        if (!user) return;
+        const localPositions = getAllSavedPositions();
+        const watchedList: WatchedItem[] = Object.values(localPositions)
+          .filter((p) => p && (p.positionMs > 10000 || p.completed))
+          .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+          .slice(0, 50)
+          .map((p) => ({
+            id: p.url,
+            url: p.url,
+            title: p.title || 'Programme VOD',
+            position: Math.round(p.positionMs / 1000),
+            duration: Math.round(p.durationMs / 1000),
+            positionMs: p.positionMs,
+            durationMs: p.durationMs,
+            updatedAt: p.updatedAt || Date.now(),
+            updated_at: new Date(p.updatedAt || Date.now()).toISOString(),
+            stream_type: p.seriesId ? ('series' as const) : ('vod' as const),
+            completed: Boolean(p.completed),
+            seriesId: p.seriesId,
+            episodeIndex: p.episodeIndex,
+          }));
+
+        const updated: KeoUserAccount = {
+          ...user,
+          watched_positions: watchedList,
+        };
+        await saveUserCloudSync(updated);
+        setActiveUser(updated);
+      }, 1500);
+    };
+
+    window.addEventListener('keotv-positions-updated', onPosUpdated);
+    return () => {
+      clearTimeout(debounceTimer);
+      window.removeEventListener('keotv-positions-updated', onPosUpdated);
+    };
+  }, []);
+
   // ---- Parental control: auto-detect explicit adult bouquets + user manual overrides ----
   // Overrides are stored separately ({ [categoryId]: boolean }) so they survive playlist resyncs.
   const adultOverridesRef = useRef<Record<string, boolean> | null>(null);
@@ -1307,6 +1394,11 @@ export default function KeoTVHome() {
 
   // Compute sorted categories based on user's preference and activeSection (Direct / Films / Séries / Favoris)
   const sortedCategories = useMemo(() => {
+    // 0. If activeSection === 'replay', return dedicated replay category
+    if (activeSection === 'replay') {
+      return [replayAllCategory];
+    }
+
     // 1. If activeSection === 'fav', return the dedicated favorites categories split by universe
     if (activeSection === 'fav') {
       return [favSeriesCategory, favVodCategory, favLiveCategory, favAllCategory];
@@ -1376,18 +1468,21 @@ export default function KeoTVHome() {
     favVodCategory,
     favLiveCategory,
     favAllCategory,
+    replayAllCategory,
     vodRecentCategory,
     vodForYouCategory,
   ]);
 
   // Section switcher (Direct, Films, Séries, Favoris)
   const handleSelectSection = useCallback(
-    async (section: 'live' | 'vod' | 'series' | 'fav') => {
+    async (section: 'live' | 'replay' | 'vod' | 'series' | 'fav') => {
       setActiveSection(section);
       setChannels([]); // Immediately clear channels to prevent ghost items from previous category!
 
       let targetCat: Category | null = null;
-      if (section === 'fav') {
+      if (section === 'replay') {
+        targetCat = replayAllCategory;
+      } else if (section === 'fav') {
         if (activeSection === 'series' || (favCounts.series > 0 && favCounts.vod === 0 && favCounts.live === 0)) {
           targetCat = favSeriesCategory;
         } else if (activeSection === 'vod') {
@@ -1451,6 +1546,7 @@ export default function KeoTVHome() {
       favSeriesCategory,
       favVodCategory,
       favLiveCategory,
+      replayAllCategory,
     ]
   );
 
@@ -1741,6 +1837,13 @@ export default function KeoTVHome() {
           console.warn('Live EPG fetch non-fatal error:', epgErr);
         }
       })();
+
+      // ---- REPLAY / CATCHUP: A click on a channel in replay section opens the Catchup / 7-day replay modal! ----
+      if (activeSection === 'replay') {
+        setCatchupTargetChannel(targetChannel);
+        setIsCatchupModalOpen(true);
+        return;
+      }
 
       // ---- SÉRIES: A click on a series opens its dedicated page with seasons and all episodes! ----
       if (targetChannel.stream_type === 'series' || targetChannel.type === 'series' || (activeSection === 'series' && targetChannel.stream_type !== 'live')) {
@@ -2556,12 +2659,13 @@ export default function KeoTVHome() {
     },
     onSelectMenuItem: (menuIdx) => {
       if (menuIdx === 0) handleSelectSection('live');
-      else if (menuIdx === 1) handleSelectSection('vod');
-      else if (menuIdx === 2) handleSelectSection('series');
-      else if (menuIdx === 3) handleSelectSection('fav');
-      else if (menuIdx === 4) setIsSearchModalOpen(true);
-      else if (menuIdx === 5) setIsSettingsModalOpen(true);
-      else if (menuIdx === 6) setIsSyncModalOpen(true);
+      else if (menuIdx === 1) handleSelectSection('replay');
+      else if (menuIdx === 2) handleSelectSection('vod');
+      else if (menuIdx === 3) handleSelectSection('series');
+      else if (menuIdx === 4) handleSelectSection('fav');
+      else if (menuIdx === 5) setIsSearchModalOpen(true);
+      else if (menuIdx === 6) setIsSettingsModalOpen(true);
+      else if (menuIdx === 7) setIsSyncModalOpen(true);
     },
     isFullscreen,
     setIsFullscreen,
@@ -2897,8 +3001,9 @@ export default function KeoTVHome() {
   };
 
   // User Account Sync Handler (username + password account login / registration)
-  const handleApplyAccountSync = async (account: any) => {
+  const handleApplyAccountSync = async (account: any, silent: boolean = false) => {
     if (!account) return;
+    setActiveUser(account);
 
     try {
       // 1. If account has playlists, import credentials and configurations directly WITHOUT attempting to connect/fetch streams
@@ -2974,7 +3079,39 @@ export default function KeoTVHome() {
         await setSetting('excluded_prefixes', account.excluded_prefixes);
       }
 
-      showToast(`Compte « ${account.username} » synchronisé avec succès !`);
+      // 4. Restore VOD resume playback positions (watched_positions)
+      if (account.watched_positions && Array.isArray(account.watched_positions) && account.watched_positions.length > 0) {
+        const map = getAllSavedPositions();
+        for (const item of account.watched_positions) {
+          const url = item.url || item.id;
+          if (!url) continue;
+          const posMs = item.positionMs ?? (item.position ? item.position * 1000 : 0);
+          const durMs = item.durationMs ?? (item.duration ? item.duration * 1000 : 0);
+          const itemUpdated = item.updatedAt || (item.updated_at ? new Date(item.updated_at).getTime() : 0);
+          const existing = map[url];
+          if (!existing || itemUpdated > (existing.updatedAt || 0)) {
+            map[url] = {
+              url,
+              title: item.title,
+              positionMs: posMs,
+              durationMs: durMs,
+              updatedAt: itemUpdated || Date.now(),
+              completed: Boolean(item.completed || (durMs > 0 && posMs >= durMs - 45000)),
+              seriesId: item.seriesId,
+              episodeIndex: item.episodeIndex,
+            };
+          }
+        }
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('keotv_playback_positions', JSON.stringify(map));
+          (window as any).__KEOTV_PLAYBACK_POSITIONS__ = map;
+          window.dispatchEvent(new Event('keotv-positions-updated'));
+        }
+      }
+
+      if (!silent) {
+        showToast(`Compte « ${account.user_label || account.email} » synchronisé avec succès !`);
+      }
     } catch (err: any) {
       console.error('Account sync error:', err);
       showToast(`Erreur synchronisation : ${err?.message || 'Serveur indisponible'}`);
@@ -3367,6 +3504,17 @@ export default function KeoTVHome() {
             <span className="text-[10px] mt-0.5">Direct</span>
           </button>
 
+          {/* 1b. Replay */}
+          <button
+            onClick={() => handleSelectSection('replay')}
+            className={`flex flex-col items-center justify-center flex-1 py-1 transition ${
+              activeSection === 'replay' ? 'text-tv-accent font-bold' : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <RotateCcw className="w-4 h-4" />
+            <span className="text-[10px] mt-0.5">Replay</span>
+          </button>
+
           {/* 2. Films (VOD) */}
           <button
             onClick={() => handleSelectSection('vod')}
@@ -3438,6 +3586,18 @@ export default function KeoTVHome() {
                 title="Direct"
               >
                 <Tv className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => handleSelectSection('replay')}
+                className={`w-9 h-9 rounded-lg flex items-center justify-center transition ${
+                  activeSection === 'replay'
+                    ? 'bg-tv-focus text-white ring-1 ring-tv-accent shadow-md'
+                    : 'text-slate-400 hover:text-white hover:bg-tv-card/50'
+                }`}
+                title="Replay (7 jours)"
+              >
+                <RotateCcw className="w-4 h-4" />
               </button>
 
               <button
@@ -3859,6 +4019,8 @@ export default function KeoTVHome() {
           <TopBar
             currentCategoryName={selectedCategory?.name}
             onToggleFullscreen={() => setIsFullscreen(true)}
+            onOpenSyncModal={() => setIsSyncModalOpen(true)}
+            activeUserLabel={activeUser?.user_label || activeUser?.email || null}
           />
 
           <div className="flex-1 flex overflow-hidden">

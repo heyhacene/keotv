@@ -1,17 +1,21 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Clock, Wifi, Maximize2 } from 'lucide-react';
+import { Clock, Maximize2, User } from 'lucide-react';
 
 interface TopBarProps {
   currentCategoryName?: string;
   onOpenSearch?: () => void;
   onToggleFullscreen: () => void;
+  onOpenSyncModal?: () => void;
+  activeUserLabel?: string | null;
 }
 
 export const TopBar: React.FC<TopBarProps> = React.memo(({
   currentCategoryName,
   onToggleFullscreen,
+  onOpenSyncModal,
+  activeUserLabel,
 }) => {
   const [timeStr, setTimeStr] = useState('');
 
@@ -38,11 +42,19 @@ export const TopBar: React.FC<TopBarProps> = React.memo(({
         <span className="text-[10px] font-mono text-slate-500 hidden sm:inline">• by HO</span>
       </div>
 
-      <div className="flex items-center space-x-6">
-        <div className="flex items-center space-x-2 text-xs text-slate-400 font-mono">
-          <Wifi className="w-3.5 h-3.5 text-emerald-400" />
-          <span className="text-emerald-400 font-semibold">Connecté</span>
-        </div>
+      <div className="flex items-center space-x-4">
+        {/* User Account / Cloud Sync Pill (Interactive button, replaces unclickable fake icon) */}
+        {onOpenSyncModal && (
+          <button
+            onClick={onOpenSyncModal}
+            className="flex items-center space-x-1.5 text-xs font-medium px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 transition"
+            title="Gérer votre compte et la synchronisation multi-appareils"
+          >
+            <User className="w-3.5 h-3.5 text-tv-accent" />
+            <span className="max-w-[120px] truncate">{activeUserLabel || 'Connexion'}</span>
+            {activeUserLabel && <span className="w-2 h-2 rounded-full bg-emerald-400 ml-0.5" />}
+          </button>
+        )}
 
         <div className="flex items-center space-x-1.5 text-xs text-slate-300 font-mono bg-black/40 px-2.5 py-1 rounded-lg border border-white/5">
           <Clock className="w-3.5 h-3.5 text-tv-accent" />
@@ -61,4 +73,3 @@ export const TopBar: React.FC<TopBarProps> = React.memo(({
   );
 });
 TopBar.displayName = 'TopBar';
-
