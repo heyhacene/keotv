@@ -25,7 +25,7 @@ export function toArray<T = any>(data: any): T[] {
 const IPTV_USER_AGENT = 'IPTVSmartersPro/3.1.5 (Linux; Android 12)';
 
 // Universal HTTP fetcher that bypasses CORS on Android TV / Mobile using Capacitor Native HTTP
-export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'json'): Promise<any> {
+export async function fetchHttp<T = any>(url: string, responseType: 'json' | 'text' = 'json'): Promise<T> {
   const cleanUrl = url.trim();
 
   if (Capacitor.isNativePlatform()) {
@@ -55,16 +55,16 @@ export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'js
         if (responseType === 'json') {
           if (typeof response.data === 'string') {
             const trimmed = response.data.trim();
-            if (!trimmed || trimmed === 'null') return [];
+            if (!trimmed || trimmed === 'null') return [] as unknown as T;
             try {
               return JSON.parse(trimmed);
             } catch {
-              return response.data;
+              return response.data as unknown as T;
             }
           }
-          return response.data;
+          return response.data as unknown as T;
         }
-        return response.data;
+        return response.data as unknown as T;
       }
     } catch (nativeErr: any) {
       console.warn('CapacitorHttp native request failed, trying fetch fallback:', nativeErr);
@@ -85,7 +85,7 @@ export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'js
   if (responseType === 'json') {
     return await res.json();
   }
-  return await res.text();
+  return (await res.text()) as unknown as T;
 }
 
 // Category classification helpers to guarantee 100% strict separation between Films and Séries
