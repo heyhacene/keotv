@@ -1,0 +1,3 @@
+🎯 **What:** Le manque de tests concernant la fonction `isAdultCategoryName` (qui est basée sur des Regex) a été corrigé.
+📊 **Coverage:** Les tests couvrent désormais les cas nominaux (mots-clés standards), les cas limites (faux positifs comme "sussex", "playboy123"), l'insensibilité à la casse, l'ignorance des signes diacritiques (ex: "érotique"), ainsi que les chaînes nulles ou vides.
+✨ **Result:** Amélioration significative de la couverture de test, ce qui assure une validation fiable et robuste pour prévenir les faux positifs lors de la détection de catégories pour adultes. Les dépendances Vitest et Vite ont également été ajoutées au projet pour supporter ces tests.
