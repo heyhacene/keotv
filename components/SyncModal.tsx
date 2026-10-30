@@ -210,7 +210,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
       const target = e.target as HTMLElement | null;
       const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
 
-      // If user is editing text in an input and presses Backspace, do NOT close modal
+      /* If user is editing text in an input and presses Backspace, do NOT close modal */
       if (e.key === 'Backspace' && isInputFocused) {
         return;
       }
