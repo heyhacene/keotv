@@ -1371,16 +1371,10 @@ export default function KeoTVHome() {
             }
           }
 
-          if (savedAutoRefresh > 0) {
-            // Check if auto-refresh is due
-            const lastTime = savedLastRefresh ? new Date(savedLastRefresh).getTime() : 0;
-            const elapsedHours = (Date.now() - lastTime) / (1000 * 60 * 60);
-            if (elapsedHours >= savedAutoRefresh) {
-              // Trigger background refresh quietly after 4 seconds (app is fully interactive first)
-              setTimeout(() => {
-                triggerSilentRefresh();
-              }, 4000);
-            }
+          if (!savedLastRefresh) {
+            const nowIso = new Date().toISOString();
+            await setSetting('last_auto_refresh_at', nowIso);
+            setLastAutoRefreshAt(nowIso);
           }
         }
       } catch (err) {

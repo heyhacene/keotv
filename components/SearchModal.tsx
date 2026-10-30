@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Search, X, Film, Clapperboard, Tv, Loader2, Star, Mic, LucideIcon } from 'lucide-react';
 import { Channel } from '@/types/iptv';
 import { db } from '@/lib/db';
+import { fetchAllVodStreamsBulk } from '@/lib/iptv-service';
 import { ContextMenuModal } from './ContextMenuModal';
 
 interface SearchModalProps {
@@ -19,15 +20,15 @@ interface SearchModalProps {
 
 type SearchFilterType = 'all' | 'vod' | 'series' | 'live';
 
-// On-screen TV Keypad Grid (Rows 0-5: Letters & Numbers, Row 6: Special Characters, Row 7: Actions)
+// On-screen TV Keypad Grid (Lower-case letters, Numbers, Symbols)
 const KEYBOARD_GRID = [
-  ['A', 'B', 'C', 'D', 'E', 'F'],
-  ['G', 'H', 'I', 'J', 'K', 'L'],
-  ['M', 'N', 'O', 'P', 'Q', 'R'],
-  ['S', 'T', 'U', 'V', 'W', 'X'],
-  ['Y', 'Z', '0', '1', '2', '3'],
+  ['a', 'b', 'c', 'd', 'e', 'f'],
+  ['g', 'h', 'i', 'j', 'k', 'l'],
+  ['m', 'n', 'o', 'p', 'q', 'r'],
+  ['s', 't', 'u', 'v', 'w', 'x'],
+  ['y', 'z', '0', '1', '2', '3'],
   ['4', '5', '6', '7', '8', '9'],
-  ["'", "-", ".", "&", "/", "!"], // Special characters & symbols
+  ["'", "-", ".", "&", "/", "!"],
 ];
 
 export const SearchModal: React.FC<SearchModalProps> = ({
@@ -37,6 +38,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   onSelectMovie,
   onSelectSeries,
   onToggleFavorite,
+  serverCreds,
   isTvMode,
 }) => {
   const [query, setQuery] = useState('');
@@ -102,15 +104,39 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   }[] | null>(null);
   const cacheLoadedAtRef = useRef<number>(0);
 
-  // Pre-load / refresh search pool when modal opens
+  // Pre-load / refresh search pool when modal opens (Live channels + remote VOD catalog)
   useEffect(() => {
     if (!isOpen) return;
     const now = Date.now();
     if (!cacheRef.current || now - cacheLoadedAtRef.current > 30000) {
       db.channels
         .toArray()
-        .then((all) => {
-          cacheRef.current = all.map((c) => ({
+        .then(async (all) => {
+          let vodList: Channel[] = [];
+          if (serverCreds?.serverUrl && serverCreds.username && serverCreds.password) {
+            try {
+              vodList = await fetchAllVodStreamsBulk({
+                serverUrl: serverCreds.serverUrl,
+                username: serverCreds.username,
+                password: serverCreds.password,
+              });
+            } catch {}
+          }
+
+          const seenIds = new Set<string>();
+          const combined: Channel[] = [];
+          for (const c of all) {
+            seenIds.add(c.id);
+            combined.push(c);
+          }
+          for (const v of vodList) {
+            if (!seenIds.has(v.id)) {
+              seenIds.add(v.id);
+              combined.push(v);
+            }
+          }
+
+          cacheRef.current = combined.map((c) => ({
             channel: c,
             normName: (c.name || '')
               .normalize('NFD')
@@ -126,9 +152,9 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         })
         .catch((err) => console.warn('Search pre-index load notice:', err));
     }
-  }, [isOpen]);
+  }, [isOpen, serverCreds]);
 
-  // Lightning-fast in-memory multi-word search (<2ms, fuzzy, accent-insensitive, ranking)
+  // Lightning-fast in-memory multi-word search (<2ms, smart ranking, channel number support)
   useEffect(() => {
     if (!isOpen) return;
     const trimmed = query.trim();
@@ -173,27 +199,37 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           pool = items.filter((it) => it.type === activeFilter);
         }
 
-        // Match against name & category group with smart scoring
+        // Match against name, stripped name, channel number & group
         const matched: { channel: Channel; score: number }[] = [];
         for (let i = 0; i < pool.length; i++) {
           const item = pool[i];
           const name = item.normName;
           const group = item.normGroup;
+          const cleanName = (item.channel.name || '')
+            .replace(/^[|\[(].*?[|)\]]\s*/g, '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase();
+
+          const chNum = item.channel.num ? String(item.channel.num) : '';
+          const numMatch = chNum === normQuery || chNum.startsWith(normQuery);
 
           let allWordsMatch = true;
           for (let w = 0; w < normWords.length; w++) {
             const word = normWords[w];
-            if (!name.includes(word) && !group.includes(word)) {
+            if (!name.includes(word) && !cleanName.includes(word) && !group.includes(word)) {
               allWordsMatch = false;
               break;
             }
           }
 
-          if (allWordsMatch) {
+          if (allWordsMatch || numMatch) {
             let score = 0;
-            if (name.startsWith(normQuery)) score += 100;
-            else if (name.includes(' ' + normQuery)) score += 60;
-            else if (name.includes(normQuery)) score += 30;
+            if (numMatch) score += 300;
+            if (cleanName === normQuery || name === normQuery) score += 200;
+            else if (cleanName.startsWith(normQuery) || name.startsWith(normQuery)) score += 120;
+            else if (cleanName.includes(' ' + normQuery) || name.includes(' ' + normQuery)) score += 70;
+            else if (cleanName.includes(normQuery) || name.includes(normQuery)) score += 40;
             if (item.channel.is_favorite) score += 25;
             matched.push({ channel: item.channel, score });
           }
@@ -207,7 +243,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
       } finally {
         setIsSearching(false);
       }
-    }, 40);
+    }, 25);
 
     return () => clearTimeout(timer);
   }, [query, isOpen, activeFilter]);
@@ -378,7 +414,6 @@ export const SearchModal: React.FC<SearchModalProps> = ({
             const targetCol = Math.min(focusedKeyCol, maxCol);
             setFocusedKeyRow(nextRow);
             setFocusedKeyCol(targetCol);
-            document.getElementById(`tv-key-${nextRow}-${targetCol}`)?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
           }
           return;
         }
@@ -390,7 +425,6 @@ export const SearchModal: React.FC<SearchModalProps> = ({
             const targetCol = Math.min(focusedKeyCol, maxCol);
             setFocusedKeyRow(nextRow);
             setFocusedKeyCol(targetCol);
-            document.getElementById(`tv-key-${nextRow}-${targetCol}`)?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
           }
           return;
         }
@@ -399,7 +433,6 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           if (focusedKeyCol > 0) {
             const targetCol = focusedKeyCol - 1;
             setFocusedKeyCol(targetCol);
-            document.getElementById(`tv-key-${focusedKeyRow}-${targetCol}`)?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
           }
           return;
         }
@@ -409,7 +442,6 @@ export const SearchModal: React.FC<SearchModalProps> = ({
           if (focusedKeyCol < maxCol) {
             const targetCol = focusedKeyCol + 1;
             setFocusedKeyCol(targetCol);
-            document.getElementById(`tv-key-${focusedKeyRow}-${targetCol}`)?.scrollIntoView({ behavior: 'auto', block: 'nearest' });
           } else if (filteredResults.length > 0) {
             setFocusArea('results');
             setFocusedResultIndex(0);
@@ -640,9 +672,9 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                         key={`${rIdx}-${char}`}
                         type="button"
                         onClick={() => handleKeyPress(char)}
-                        className={`h-7 sm:h-8 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center transition border ${
+                        className={`h-7 sm:h-8 rounded-lg text-xs sm:text-sm font-bold flex items-center justify-center border select-none ${
                           isKeyFocused
-                            ? 'bg-sky-400 text-black border-white shadow-xl ring-2 ring-white scale-105 z-10 font-extrabold'
+                            ? 'bg-sky-400 text-slate-950 border-white ring-2 ring-sky-300 font-black'
                             : 'bg-white/5 text-slate-200 border-white/10 hover:bg-white/15'
                         }`}
                       >
@@ -659,9 +691,9 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                   id="tv-key-7-0"
                   type="button"
                   onClick={() => handleKeyPress('ESPACE')}
-                  className={`h-8 sm:h-9 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 transition border ${
+                  className={`h-8 sm:h-9 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 border select-none ${
                     focusArea === 'keyboard' && focusedKeyRow === 7 && focusedKeyCol === 0
-                      ? 'bg-sky-400 text-black border-white shadow-xl ring-2 ring-white scale-105 z-10'
+                      ? 'bg-sky-400 text-slate-950 border-white ring-2 ring-sky-300'
                       : 'bg-sky-500/15 text-sky-300 border-sky-500/30 hover:bg-sky-500/25'
                   }`}
                 >
@@ -671,9 +703,9 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                   id="tv-key-7-1"
                   type="button"
                   onClick={() => handleKeyPress('EFFACER')}
-                  className={`h-8 sm:h-9 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 transition border ${
+                  className={`h-8 sm:h-9 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 border select-none ${
                     focusArea === 'keyboard' && focusedKeyRow === 7 && focusedKeyCol === 1
-                      ? 'bg-amber-400 text-black border-white shadow-xl ring-2 ring-white scale-105 z-10'
+                      ? 'bg-amber-400 text-slate-950 border-white ring-2 ring-amber-300'
                       : 'bg-amber-500/15 text-amber-300 border-amber-500/30 hover:bg-amber-500/25'
                   }`}
                 >
@@ -683,9 +715,9 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                   id="tv-key-7-2"
                   type="button"
                   onClick={() => handleKeyPress('VIDER')}
-                  className={`h-8 sm:h-9 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 transition border ${
+                  className={`h-8 sm:h-9 rounded-xl text-xs sm:text-sm font-extrabold flex items-center justify-center space-x-1 border select-none ${
                     focusArea === 'keyboard' && focusedKeyRow === 7 && focusedKeyCol === 2
-                      ? 'bg-rose-500 text-white border-white shadow-xl ring-2 ring-white scale-105 z-10'
+                      ? 'bg-rose-500 text-white border-white ring-2 ring-rose-300'
                       : 'bg-rose-500/15 text-rose-300 border-rose-500/30 hover:bg-rose-500/25'
                   }`}
                 >

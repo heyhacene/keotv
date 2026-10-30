@@ -816,6 +816,17 @@ export async function fetchActorFilmography(actorName: string): Promise<string[]
   return fetchPersonFilmography(actorName, 'actor');
 }
 
+// Generic common single words that should NEVER trigger loose partial matches
+const GENERIC_TITLE_WORDS = new Set([
+  'the', 'a', 'an', 'le', 'la', 'les', 'un', 'une', 'des', 'du', 'de',
+  'war', 'love', 'night', 'day', 'man', 'men', 'woman', 'girl', 'boy',
+  'good', 'bad', 'dark', 'life', 'home', 'time', 'world', 'city', 'star',
+  'fire', 'blood', 'lost', 'dead', 'last', 'first', 'friend', 'friends',
+  'fall', 'end', 'out', 'one', 'two', 'part', 'movie', 'film', 'amour',
+  'nuit', 'jour', 'homme', 'femme', 'fille', 'garcon', 'monde', 'vie',
+  'mort', 'dernier', 'premier', 'ami', 'amis', 'paris', 'france', 'sans', 'avec',
+]);
+
 // Cross-reference a person's films (actor or director) with the user's VOD playlist
 export function matchMoviesInPlaylist(
   personName: string,
@@ -825,9 +836,10 @@ export function matchMoviesInPlaylist(
   const normPerson = normalizeMovieTitle(personName);
   const personTokens = normPerson.split(/\s+/).filter((t) => t.length >= 3);
 
-  const normalizedFilms = filmTitles
+  // Filter out noisy, too short, or meaningless titles
+  const validFilmTitles = filmTitles
     .map((f) => extractCleanMovieTitle(f))
-    .filter((f) => f.length >= 2);
+    .filter((f) => f && f.length >= 3 && !GENERIC_TITLE_WORDS.has(f));
 
   const matched = new Map<string, Channel>();
 
@@ -835,41 +847,31 @@ export function matchMoviesInPlaylist(
     const chClean = extractCleanMovieTitle(ch.name);
     const chRawNorm = normalizeMovieTitle(ch.name);
 
-    // 1. Direct match if the movie title mentions the actor/director explicitly
+    // 1. Direct match if the movie title mentions the actor/director explicitly (e.g. "Hommage Alain Delon - Le Samourai")
     if (personTokens.length >= 2 && personTokens.every((t) => chRawNorm.includes(t))) {
       matched.set(ch.id, ch);
       continue;
     }
 
-    // 2. Match against official filmography with strict word boundaries
-    for (const f of normalizedFilms) {
-      if (f.length < 2) continue;
-
-      // Exact title match (e.g. "asterix aux jeux olympiques" === "asterix aux jeux olympiques")
+    // 2. Strict title matching against filmography
+    for (const f of validFilmTitles) {
+      // A. Exact title match (e.g. "inception" === "inception", "le gitan" === "le gitan")
       if (chClean === f) {
         matched.set(ch.id, ch);
         break;
       }
 
+      // B. Sequels & Subtitles: e.g. "Mission Impossible 2", "Asterix : Mission Cleopatre"
+      // Only allowed if the title is at least 2 words and 5 characters
       const fWords = f.split(' ');
-      // Multi-word title (2+ words, e.g. "le gitan", "mort d un pourri")
-      if (fWords.length >= 2 && f.length >= 5) {
-        if (
-          chClean.startsWith(`${f} `) ||
-          chClean.endsWith(` ${f}`) ||
-          chClean.includes(` ${f} `)
-        ) {
+      if (fWords.length >= 2 && f.length >= 6) {
+        // e.g. chClean is "mission impossible 2" and f is "mission impossible"
+        if (chClean.startsWith(`${f} `) || chClean.startsWith(`${f}:`) || chClean.startsWith(`${f} -`)) {
           matched.set(ch.id, ch);
           break;
         }
-      } else if (f.length >= 7) {
-        // Single distinct word of at least 7 characters (e.g. "armaguedon", "carambolages", "inception")
-        if (
-          chClean === f ||
-          chClean.startsWith(`${f} `) ||
-          chClean.endsWith(` ${f}`) ||
-          chClean.includes(` ${f} `)
-        ) {
+        // e.g. official Wikidata title is "Asterix aux Jeux Olympiques : Le Film" and chClean is "Asterix aux Jeux Olympiques"
+        if (f.startsWith(`${chClean} `) || f.startsWith(`${chClean}:`) || f.startsWith(`${chClean} -`)) {
           matched.set(ch.id, ch);
           break;
         }
