@@ -1137,6 +1137,7 @@ export default function KeoTVHome() {
 
         // Repair category stream type tags if needed (grp_vod_ -> vod, grp_series_ -> series, grp_live_ -> live)
         const allDbCats = await db.categories.toArray();
+        const catsToUpdate: Category[] = [];
         for (const c of allDbCats) {
           const expected = c.id.startsWith('grp_vod_')
             ? 'vod'
@@ -1146,9 +1147,12 @@ export default function KeoTVHome() {
             ? 'live'
             : null;
           if (expected && c.type !== expected) {
-            await db.categories.update(c.id, { type: expected });
+            catsToUpdate.push({ ...c, type: expected });
             c.type = expected;
           }
+        }
+        if (catsToUpdate.length > 0) {
+          await db.categories.bulkPut(catsToUpdate);
         }
 
         // Check if user has non-demo categories
