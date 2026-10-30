@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { db, getSetting, setSetting, getFavoriteChannelIds, saveFavoriteChannelId } from '@/lib/db';
+import { db, getSetting, setSetting, getFavoriteChannelIds, saveFavoriteChannelId, saveFavoriteChannelIds } from '@/lib/db';
 import { INITIAL_CATEGORIES, INITIAL_CHANNELS, getMockEpgForChannel } from '@/lib/mock-data';
 import { Channel, Category, EpgProgram, NavigationPane, PlaylistConfig } from '@/types/iptv';
 import { useTVNavigation } from '@/lib/use-tv-navigation';
@@ -3062,11 +3062,11 @@ export default function KeoTVHome() {
 
       // 2. Restore user favorites
       if (account.favorites && account.favorites.length > 0) {
-        await db.channels.toCollection().modify({ is_favorite: false });
-        for (const favId of account.favorites) {
-          await db.channels.update(favId, { is_favorite: true });
-          await saveFavoriteChannelId(favId, true);
-        }
+        await db.transaction('rw', db.channels, db.settings, async () => {
+          await db.channels.toCollection().modify({ is_favorite: false });
+          await Promise.all(account.favorites.map((favId: string) => db.channels.update(favId, { is_favorite: true })));
+          await saveFavoriteChannelIds(account.favorites, true);
+        });
         if (selectedCategory) {
           await loadCategoryChannels(selectedCategory, channelSort);
         }
@@ -3131,11 +3131,11 @@ export default function KeoTVHome() {
     if (!data) return false;
 
     if (data.favorites && data.favorites.length > 0) {
-      await db.channels.toCollection().modify({ is_favorite: false });
-      for (const favId of data.favorites) {
-        await db.channels.update(favId, { is_favorite: true });
-        await saveFavoriteChannelId(favId, true);
-      }
+      await db.transaction('rw', db.channels, db.settings, async () => {
+        await db.channels.toCollection().modify({ is_favorite: false });
+        await Promise.all(data.favorites.map((favId: string) => db.channels.update(favId, { is_favorite: true })));
+        await saveFavoriteChannelIds(data.favorites, true);
+      });
       if (selectedCategory) {
         await loadCategoryChannels(selectedCategory, channelSort);
       }

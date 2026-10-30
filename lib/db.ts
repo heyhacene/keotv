@@ -93,3 +93,20 @@ export async function saveFavoriteChannelId(id: string, isFav: boolean): Promise
   }
 }
 
+
+export async function saveFavoriteChannelIds(idsToUpdate: string[], isFav: boolean): Promise<void> {
+  try {
+    const ids = await getSetting<string[]>('favorite_channel_ids', []);
+    const set = new Set(Array.isArray(ids) ? ids : []);
+    for (const id of idsToUpdate) {
+      if (isFav) {
+        set.add(id);
+      } else {
+        set.delete(id);
+      }
+    }
+    await setSetting('favorite_channel_ids', Array.from(set));
+  } catch (err) {
+    console.warn('Failed to persist favorite channel ids:', err);
+  }
+}
