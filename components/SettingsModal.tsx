@@ -26,6 +26,7 @@ import { submitAppFeedback, getActiveKeoUser, logoutKeoUser, KeoUserAccount } fr
 import { ParentalPinModal } from "./ParentalPinModal";
 import { checkForAppUpdate, AppUpdateInfo, CURRENT_BUILD_NUMBER, DOWNLOADER_CODE, DIRECT_APK_URL } from '@/lib/update-service';
 import { db } from '@/lib/db';
+import { Capacitor } from '@capacitor/core';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -1602,85 +1603,106 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* ============================================================== */}
           {/* TAB 4: MISES À JOUR                                            */}
           {/* ============================================================== */}
-          {activeTab === 'update' && (
-            <div className="space-y-4">
-              <div>
-                <h3 className="text-sm font-bold text-white">Mise à jour de l&apos;application</h3>
-                <p className="text-xs text-slate-400">
-                  Vérifiez et installez les dernières améliorations sans désinstaller l&apos;appli.
-                </p>
-              </div>
+          {activeTab === 'update' && (() => {
+            const isNative = typeof window !== 'undefined' ? Capacitor.isNativePlatform() : false;
 
-              <div className="bg-tv-card/80 border border-tv-border p-4 rounded-xl space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-slate-300">Version installée</span>
-                  <span className="text-xs font-mono font-bold text-tv-accent">
-                    v1.3.{currentBuildNumber} (Build {currentBuildNumber})
-                  </span>
+            return (
+              <div className="space-y-4">
+                <div>
+                  <h3 className="text-sm font-bold text-white">
+                    {isNative ? "Mise à jour de l'application" : "Application & Mises à jour"}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    {isNative
+                      ? "Vérifiez et installez les dernières améliorations sans désinstaller l'appli."
+                      : "Informations sur votre version de KeoTV et téléchargement de l'application Android."}
+                  </p>
                 </div>
 
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-medium text-slate-300">Signature officielle</span>
-                  <span className="text-xs font-medium text-emerald-400 flex items-center">
-                    <ShieldCheck className="w-4 h-4 mr-1" /> Certifié KeoTV • by HO
-                  </span>
-                </div>
-
-                {updateInfo?.hasUpdate && (
-                  <div className="p-3 bg-amber-500/15 border border-amber-500/40 rounded-xl space-y-2 text-center animate-fade-in">
-                    <span className="text-xs font-bold text-amber-300 block">
-                      🎉 Mise à jour disponible : {updateInfo.latestVersionName}
+                <div className="bg-tv-card/80 border border-tv-border p-4 rounded-xl space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-300">Version</span>
+                    <span className="text-xs font-mono font-bold text-tv-accent">
+                      {isNative ? `v1.3.${currentBuildNumber} (Build ${currentBuildNumber})` : 'KeoTV Web (Toujours à jour)'}
                     </span>
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-300">Signature officielle</span>
+                    <span className="text-xs font-medium text-emerald-400 flex items-center">
+                      <ShieldCheck className="w-4 h-4 mr-1" /> Certifié KeoTV • by HO
+                    </span>
+                  </div>
+
+                  {!isNative && (
+                    <div className="p-3 bg-sky-950/40 border border-sky-500/20 rounded-xl space-y-2 text-slate-300 text-xs">
+                      <p className="leading-relaxed">
+                        ✨ Vous utilisez actuellement l&apos;interface <strong className="text-white">Web de KeoTV</strong>. Cette version est hébergée sur le cloud et bénéficie toujours des dernières fonctionnalités et correctifs en direct.
+                      </p>
+                      <p className="text-[11px] text-slate-400 leading-relaxed">
+                        Pour vos téléviseurs Android TV, Fire TV ou smartphones Android, installez l&apos;application native APK pour profiter du lecteur matériel ultra-rapide.
+                      </p>
+                    </div>
+                  )}
+
+                  {isNative && updateInfo?.hasUpdate && (
+                    <div className="p-3 bg-amber-500/15 border border-amber-500/40 rounded-xl space-y-2 text-center animate-fade-in">
+                      <span className="text-xs font-bold text-amber-300 block">
+                        🎉 Mise à jour disponible : {updateInfo.latestVersionName}
+                      </span>
+                      <p className="text-[11px] text-slate-300">
+                        Une nouvelle version est prête. Vous pouvez l&apos;installer directement depuis Downloader.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="pt-2 flex flex-col sm:flex-row gap-2">
+                    {isNative && (
+                      <button
+                        onClick={handleCheckUpdate}
+                        disabled={checkingUpdate}
+                        className="flex-1 py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                      >
+                        <RefreshCw className={`w-4 h-4 ${checkingUpdate ? 'animate-spin' : ''}`} />
+                        <span>{checkingUpdate ? 'Vérification...' : 'Vérifier les mises à jour'}</span>
+                      </button>
+                    )}
+
+                    <a
+                      href="https://tinyurl.com/keo-apk"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>{isNative ? "Télécharger l'APK" : "Télécharger l'application Android (APK)"}</span>
+                    </a>
+                  </div>
+
+                  <div className="p-3 bg-sky-950/40 rounded-xl text-xs text-slate-300 border border-sky-500/20 space-y-1.5">
+                    <p className="font-semibold text-tv-accent">📺 Installation rapide sur Android TV / Fire TV :</p>
                     <p className="text-[11px] text-slate-300">
-                      Une nouvelle version est prête. Vous pouvez l&apos;installer directement depuis Downloader.
+                      Ouvrez l&apos;application <strong className="text-white">Downloader</strong> sur votre téléviseur et tapez le code court :
+                    </p>
+                    <div className="flex items-center justify-center space-x-2 py-1">
+                      <span className="font-mono text-base sm:text-lg bg-black/60 px-4 py-1 rounded-xl text-amber-300 font-black tracking-widest border border-amber-500/30 shadow-inner">
+                        4317787
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 text-center">
+                      Ou l&apos;adresse URL directe : <span className="text-slate-200 font-mono">tinyurl.com/keo-apk</span>
                     </p>
                   </div>
-                )}
 
-                <div className="pt-2 flex flex-col sm:flex-row gap-2">
-                  <button
-                    onClick={handleCheckUpdate}
-                    disabled={checkingUpdate}
-                    className="flex-1 py-2.5 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
-                  >
-                    <RefreshCw className={`w-4 h-4 ${checkingUpdate ? 'animate-spin' : ''}`} />
-                    <span>{checkingUpdate ? 'Vérification...' : 'Vérifier les mises à jour'}</span>
-                  </button>
-
-                  <a
-                    href="https://tinyurl.com/keo-apk"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 text-center focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Télécharger l&apos;APK ({updateInfo?.hasUpdate ? `Build ${updateInfo.latestBuild}` : `Build ${currentBuildNumber}`})</span>
-                  </a>
+                  {isNative && updateStatus && (
+                    <div className={`p-3 rounded-xl text-xs text-center border ${updateInfo?.hasUpdate ? 'bg-amber-950/40 text-amber-200 border-amber-500/30' : 'bg-black/40 text-slate-300 border-white/5'}`}>
+                      {updateStatus}
+                    </div>
+                  )}
                 </div>
-
-                <div className="p-3 bg-sky-950/40 rounded-xl text-xs text-slate-300 border border-sky-500/20 space-y-1.5">
-                  <p className="font-semibold text-tv-accent">📺 Installation rapide sur Android TV / Fire TV :</p>
-                  <p className="text-[11px] text-slate-300">
-                    Ouvrez l&apos;application <strong className="text-white">Downloader</strong> sur votre téléviseur et tapez le code court :
-                  </p>
-                  <div className="flex items-center justify-center space-x-2 py-1">
-                    <span className="font-mono text-base sm:text-lg bg-black/60 px-4 py-1 rounded-xl text-amber-300 font-black tracking-widest border border-amber-500/30 shadow-inner">
-                      4317787
-                    </span>
-                  </div>
-                  <p className="text-[10px] text-slate-400 text-center">
-                    Ou l&apos;adresse URL directe : <span className="text-slate-200 font-mono">tinyurl.com/keo-apk</span>
-                  </p>
-                </div>
-
-                {updateStatus && (
-                  <div className={`p-3 rounded-xl text-xs text-center border ${updateInfo?.hasUpdate ? 'bg-amber-950/40 text-amber-200 border-amber-500/30' : 'bg-black/40 text-slate-300 border-white/5'}`}>
-                    {updateStatus}
-                  </div>
-                )}
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ============================================================== */}
           {/* TAB 4: AFFICHAGE ET TRI                                        */}

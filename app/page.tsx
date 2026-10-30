@@ -322,11 +322,13 @@ export default function KeoTVHome() {
   const [appUpdateInfo, setAppUpdateInfo] = useState<AppUpdateInfo | null>(null);
 
   useEffect(() => {
-    checkForAppUpdate(CURRENT_BUILD_NUMBER).then((info) => {
-      if (info && info.hasUpdate) {
-        setAppUpdateInfo(info);
-      }
-    });
+    if (Capacitor.isNativePlatform()) {
+      checkForAppUpdate(CURRENT_BUILD_NUMBER).then((info) => {
+        if (info && info.hasUpdate) {
+          setAppUpdateInfo(info);
+        }
+      });
+    }
 
     getSetting('parental_pin', '0000').then((pin) => setParentalPin(pin || '0000'));
     getSetting('parental_enabled', false).then((en) => setParentalEnabled(Boolean(en)));

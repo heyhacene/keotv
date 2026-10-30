@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { CURRENT_BUILD_NUMBER } from '@/lib/update-service';
+import { Capacitor } from '@capacitor/core';
 
 interface SplashScreenProps {
   isVisible: boolean;
@@ -11,6 +12,7 @@ interface SplashScreenProps {
 export const SplashScreen: React.FC<SplashScreenProps> = ({ isVisible, isFading }) => {
   if (!isVisible) return null;
 
+  const isNative = typeof window !== 'undefined' ? Capacitor.isNativePlatform() : false;
   const buildNumber =
     typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_BUILD_NUMBER
       ? process.env.NEXT_PUBLIC_BUILD_NUMBER
@@ -131,10 +133,10 @@ export const SplashScreen: React.FC<SplashScreenProps> = ({ isVisible, isFading 
         </div>
       </div>
 
-      {/* Build Number Watermark at the bottom */}
+      {/* Watermark at the bottom */}
       <div className="absolute bottom-6 left-0 right-0 text-center pointer-events-none">
         <span className="text-[11px] font-mono font-medium text-slate-500/80 tracking-widest uppercase">
-          KeoTV v1.3.{buildNumber} • Build {buildNumber} • by HO
+          {isNative ? `KeoTV v1.3.${buildNumber} • Build ${buildNumber} • by HO` : 'KeoTV Web • by HO'}
         </span>
       </div>
     </div>

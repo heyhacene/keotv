@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Download, Sparkles, X, ArrowRight, ShieldCheck } from 'lucide-react';
 import { AppUpdateInfo } from '@/lib/update-service';
+import { Capacitor } from '@capacitor/core';
 
 interface UpdatePopupModalProps {
   updateInfo: AppUpdateInfo | null;
@@ -14,8 +15,11 @@ export const UpdatePopupModal: React.FC<UpdatePopupModalProps> = ({ updateInfo, 
   const updateBtnRef = useRef<HTMLAnchorElement>(null);
   const laterBtnRef = useRef<HTMLButtonElement>(null);
 
+  // Never render on web browsers (desktop / mobile web)
+  const isNative = typeof window !== 'undefined' ? Capacitor.isNativePlatform() : false;
+
   useEffect(() => {
-    if (!updateInfo || !updateInfo.hasUpdate) return;
+    if (!isNative || !updateInfo || !updateInfo.hasUpdate) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       const isLeft = e.key === 'ArrowLeft' || (e as any).keyCode === 37;
@@ -62,9 +66,9 @@ export const UpdatePopupModal: React.FC<UpdatePopupModalProps> = ({ updateInfo, 
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [updateInfo, focusedIndex, onClose]);
+  }, [isNative, updateInfo, focusedIndex, onClose]);
 
-  if (!updateInfo || !updateInfo.hasUpdate) return null;
+  if (!isNative || !updateInfo || !updateInfo.hasUpdate) return null;
 
   return (
     <div className="fixed inset-0 z-[100] bg-black/85 flex items-center justify-center p-4 animate-fade-in">

@@ -1,3 +1,5 @@
+import { Capacitor } from '@capacitor/core';
+
 export interface AppUpdateInfo {
   hasUpdate: boolean;
   currentBuild: number;
@@ -19,8 +21,11 @@ export const DIRECT_APK_URL = 'https://tinyurl.com/keo-apk';
 /**
  * Checks GitHub Releases for a newer build of KeoTV.
  * Compares current build number with release tag or title.
+ * IMPORTANT: Only native Android builds receive update alerts; web clients never report hasUpdate: true.
  */
 export async function checkForAppUpdate(currentBuild: number = CURRENT_BUILD_NUMBER): Promise<AppUpdateInfo> {
+  const isNative = typeof window !== 'undefined' ? Capacitor.isNativePlatform() : false;
+
   try {
     const res = await fetch('https://api.github.com/repos/heyhacene/keotv/releases/latest', {
       headers: { Accept: 'application/vnd.github.v3+json' },
@@ -38,7 +43,8 @@ export async function checkForAppUpdate(currentBuild: number = CURRENT_BUILD_NUM
     const matchName = name.match(/build\s*(\d+)/i);
     const extractedBuild = matchTag ? parseInt(matchTag[1], 10) : (matchName ? parseInt(matchName[1], 10) : 0);
 
-    const hasUpdate = extractedBuild > currentBuild;
+    // Only flag hasUpdate if running inside native Android application
+    const hasUpdate = isNative && extractedBuild > currentBuild;
 
     return {
       hasUpdate,
