@@ -168,7 +168,7 @@ export function isAdultCategoryName(name: string): boolean {
  * IPTV providers commonly insert decorative entries like "--- FRANCE ---", "=== CINEMA ===", "-----------------",
  * "*** VOD 4K ***", or items with dummy URLs (empty, localhost, #) to divide categories into sub-blocks.
  */
-export function isSeparatorChannel(ch?: Channel | null): boolean {
+export function isSeparatorChannel(ch?: Partial<Channel> | null): boolean {
   if (!ch) return false;
   const name = (ch.name || '').trim();
   if (!name) return true;
@@ -1031,7 +1031,7 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
       is_hidden: false,
       custom_order: chNum,
       resolution: detectResolution(itemName),
-      is_separator: isSeparatorChannel({ name: itemName, stream_url: streamUrl } as any),
+      is_separator: isSeparatorChannel({ name: itemName, stream_url: streamUrl }),
       stream_id: streamId,
       has_archive: hasArchive,
       archive_days: archiveDays,
@@ -1968,7 +1968,7 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
         is_hidden: false,
         custom_order: channels.length + 1, // Strict M3U appearance order
         resolution: detectResolution(currentExtInf.name),
-        is_separator: isSeparatorChannel({ name: currentExtInf.name, stream_url: streamUrl } as any),
+        is_separator: isSeparatorChannel({ name: currentExtInf.name, stream_url: streamUrl }),
         has_archive: streamType === 'live' ? Boolean(currentExtInf.hasArchive) : false,
         archive_days: streamType === 'live' ? (currentExtInf.archiveDays || 0) : 0,
       });
