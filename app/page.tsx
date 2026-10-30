@@ -603,8 +603,14 @@ export default function KeoTVHome() {
                   try {
                     await db.channels.bulkPut(mergedStreams);
                   } catch (putErr) {
-                    for (const s of mergedStreams) {
-                      try { await db.channels.put(s); } catch {}
+                    try {
+                      await db.transaction('rw', db.channels, async () => {
+                        for (const s of mergedStreams) {
+                          try { await db.channels.put(s); } catch {}
+                        }
+                      });
+                    } catch (txErr) {
+                      console.warn('Transaction fallback failed', txErr);
                     }
                   }
                   await db.categories.update(cat.id, { count: mergedStreams.length });
@@ -760,8 +766,14 @@ export default function KeoTVHome() {
               try {
                 await db.channels.bulkPut(mergedStreams);
               } catch {
-                for (const s of mergedStreams) {
-                  try { await db.channels.put(s); } catch {}
+                try {
+                  await db.transaction('rw', db.channels, async () => {
+                    for (const s of mergedStreams) {
+                      try { await db.channels.put(s); } catch {}
+                    }
+                  });
+                } catch (txErr) {
+                  console.warn('Transaction fallback failed', txErr);
                 }
               }
               await db.categories.update(cat.id, { count: streams.length });
@@ -884,12 +896,18 @@ export default function KeoTVHome() {
             await db.channels.bulkPut(mergedChunk);
           } catch (chunkErr) {
             console.warn('bulkPut chunk error, fallback to individual put:', chunkErr);
-            for (const item of mergedChunk) {
-              try {
-                await db.channels.put(item);
-              } catch (putErr) {
-                console.error('Failed to put channel', item.id, putErr);
-              }
+            try {
+              await db.transaction('rw', db.channels, async () => {
+                for (const item of mergedChunk) {
+                  try {
+                    await db.channels.put(item);
+                  } catch (putErr) {
+                    console.error('Failed to put channel', item.id, putErr);
+                  }
+                }
+              });
+            } catch (txErr) {
+              console.warn('Transaction fallback failed', txErr);
             }
           }
           if (result.channels.length > 1000) {
@@ -984,8 +1002,14 @@ export default function KeoTVHome() {
           try {
             await db.channels.bulkPut(mergedChunk);
           } catch {
-            for (const item of mergedChunk) {
-              try { await db.channels.put(item); } catch {}
+            try {
+              await db.transaction('rw', db.channels, async () => {
+                for (const item of mergedChunk) {
+                  try { await db.channels.put(item); } catch {}
+                }
+              });
+            } catch (txErr) {
+              console.warn('Transaction fallback failed', txErr);
             }
           }
         }
@@ -2754,12 +2778,18 @@ export default function KeoTVHome() {
         await db.channels.bulkPut(mergedChunk);
       } catch (chunkErr) {
         console.warn('bulkPut chunk error, falling back to individual put:', chunkErr);
-        for (const item of mergedChunk) {
-          try {
-            await db.channels.put(item);
-          } catch (itemErr) {
-            console.error('Failed to put channel:', item.id, itemErr);
-          }
+        try {
+          await db.transaction('rw', db.channels, async () => {
+            for (const item of mergedChunk) {
+              try {
+                await db.channels.put(item);
+              } catch (itemErr) {
+                console.error('Failed to put channel:', item.id, itemErr);
+              }
+            }
+          });
+        } catch (txErr) {
+          console.warn('Transaction fallback failed', txErr);
         }
       }
       if (result.channels.length > 1000) {
