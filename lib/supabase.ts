@@ -222,8 +222,28 @@ export async function loginKeoUser(params: {
         .maybeSingle();
 
       if (!legErr && legacyUser) {
-        if (legacyUser.password_hash && legacyUser.password_hash !== expectedHash) {
-          return { error: 'Mot de passe incorrect.' };
+        const matchesHash =
+          legacyUser.password_hash === expectedHash ||
+          legacyUser.password_hash === hashPassword(params.password);
+        const matchesPlaylistPass =
+          Array.isArray(legacyUser.playlists) &&
+          legacyUser.playlists.some(
+            (p: any) => p && (p.password === cleanPass || p.password === params.password)
+          );
+
+        if (!matchesHash && !matchesPlaylistPass) {
+          return { error: `Mot de passe incorrect pour le compte "${cleanId}".` };
+        }
+
+        // Auto-synchronize password hash if authenticated via playlist credentials
+        if (!matchesHash && matchesPlaylistPass) {
+          legacyUser.password_hash = expectedHash;
+          supabase
+            .from('keotv_users')
+            .update({ password_hash: expectedHash })
+            .eq('id', legacyUser.id)
+            .then(() => {})
+            .catch(() => {});
         }
 
         const nowIso = new Date().toISOString();

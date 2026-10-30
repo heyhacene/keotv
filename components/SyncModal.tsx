@@ -451,9 +451,9 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   return (
     <div
       ref={modalContainerRef}
-      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-6 bg-black/80 backdrop-blur-md animate-fade-in select-none"
+      className="fixed inset-0 z-50 flex items-start sm:items-center justify-center p-2 sm:p-6 bg-black/85 backdrop-blur-md animate-fade-in select-none overflow-y-auto"
     >
-      <div className="relative w-full max-w-2xl bg-tv-bg border border-tv-border rounded-3xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+      <div className="relative w-full max-w-2xl bg-tv-bg border border-tv-border rounded-3xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[96vh]">
         {/* Header */}
         <div className="px-6 py-4 border-b border-tv-border flex items-center justify-between bg-black/40 flex-shrink-0">
           <div className="flex items-center space-x-3">
@@ -597,7 +597,8 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                       placeholder="Votre identifiant (ex: hacene) ou email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="w-full bg-tv-card border border-tv-border rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-tv-accent"
+                      onFocus={(e) => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' })}
+                      className="w-full bg-tv-card border border-tv-border rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-tv-accent focus:ring-2 focus:ring-tv-accent"
                     />
                   </div>
                 </div>
@@ -624,16 +625,38 @@ export const SyncModal: React.FC<SyncModalProps> = ({
                       placeholder="••••••••"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="w-full bg-tv-card border border-tv-border rounded-xl pl-9 pr-10 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-tv-accent"
+                      onFocus={(e) => e.target.scrollIntoView({ block: 'center', behavior: 'smooth' })}
+                      className="w-full bg-tv-card border border-tv-border rounded-xl pl-9 pr-12 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-tv-accent focus:ring-2 focus:ring-tv-accent"
                     />
                     <button
                       type="button"
-                      tabIndex={-1}
+                      id="btn-eye-toggle-quick"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition p-1"
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white focus:text-tv-accent focus:bg-white/10 rounded-lg p-1.5 transition outline-none"
                       title={showPassword ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
                     >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      {showPassword ? <EyeOff className="w-4 h-4 text-tv-accent" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  </div>
+
+                  {/* Accessible TV Remote Password Visibility Toggle */}
+                  <div className="flex items-center justify-between pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="flex items-center space-x-1.5 text-xs text-slate-400 hover:text-white focus:text-tv-accent focus:ring-1 focus:ring-tv-accent focus:bg-white/10 px-2 py-1 rounded-lg transition"
+                    >
+                      {showPassword ? (
+                        <>
+                          <EyeOff className="w-3.5 h-3.5 text-tv-accent" />
+                          <span className="text-tv-accent font-semibold">Masquer le mot de passe</span>
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="w-3.5 h-3.5" />
+                          <span>Afficher le mot de passe en clair</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
