@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import { PlaylistConfig } from '../types/iptv';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://qvfmfstwrkcerzlbemzb.supabase.co';
 const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs';
@@ -29,7 +30,7 @@ export interface CloudDeviceSync {
   hidden_channels?: string[];
   excluded_prefixes?: string[];
   watched_positions?: WatchedItem[];
-  playlists: any[];
+  playlists: PlaylistConfig[];
   updated_at: string;
 }
 
@@ -37,7 +38,7 @@ export interface KeoUserAccount {
   id: string; // The UUID from auth.users
   email: string; // Email is the primary identifier
   user_label?: string;
-  playlists: any[];
+  playlists: PlaylistConfig[];
   favorites: string[];
   hidden_groups: string[];
   hidden_channels?: string[];
