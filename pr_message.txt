@@ -1,0 +1,11 @@
+🧪 Ajout de tests pour la fonction isFilmCategory
+
+🎯 **What:** La fonction `isFilmCategory` dans `lib/iptv-service.ts` manquait de couverture de tests. Cette PR configure l'environnement de test avec Jest (`jest`, `@types/jest`, `ts-jest`) et ajoute des tests unitaires pour cette fonction pure.
+
+📊 **Coverage:** Les scénarios suivants sont désormais testés :
+*   Reconnaissance des mots-clés liés aux films (FILM, MOVIE, CINEMA, etc.) au sein de chaînes plus longues.
+*   L'insensibilité à la casse (traitement correct des majuscules et minuscules).
+*   Rejet correct des catégories non liées aux films (Séries, Sport, Info, etc.).
+*   Gestion propre des cas limites et des valeurs nulles/indéfinies (chaînes vides, `null`, `undefined`).
+
+✨ **Result:** Amélioration de la fiabilité du code en garantissant que la détection des catégories de films fonctionne correctement et ne plantera pas sur des entrées inattendues.
