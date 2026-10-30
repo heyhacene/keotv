@@ -1,10 +1,28 @@
-'use client';
+"use client";
 
-import React, { useEffect, useRef, useState } from 'react';
-import Hls from 'hls.js';
-import { Channel, EpgProgram } from '@/types/iptv';
-import { Maximize2, Minimize2, Volume2, VolumeX, Radio, Clock, Sparkles, Square, Play, FastForward, Rewind, SkipBack, SkipForward } from 'lucide-react';
-import { NativePlayer, isNativePlayerAvailable, NATIVE_PLAYER_USER_AGENT } from '@/lib/native-player';
+import React, { useEffect, useRef, useState } from "react";
+import Hls from "hls.js";
+import { Channel, EpgProgram } from "@/types/iptv";
+import {
+  Maximize2,
+  Minimize2,
+  Volume2,
+  VolumeX,
+  Radio,
+  Clock,
+  Sparkles,
+  Square,
+  Play,
+  FastForward,
+  Rewind,
+  SkipBack,
+  SkipForward,
+} from "lucide-react";
+import {
+  NativePlayer,
+  isNativePlayerAvailable,
+  NATIVE_PLAYER_USER_AGENT,
+} from "@/lib/native-player";
 
 interface LiveVideoPlayerProps {
   channel: Channel | null;
@@ -21,7 +39,7 @@ interface LiveVideoPlayerProps {
   singleStreamMode?: boolean;
   channelEpgMap?: Record<string, EpgProgram[]>;
   osdTimeoutMs?: number;
-  epgOverlayPosition?: 'bottom' | 'top';
+  epgOverlayPosition?: "bottom" | "top";
 }
 
 export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
@@ -39,13 +57,14 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   singleStreamMode = false,
   channelEpgMap,
   osdTimeoutMs = 5000,
-  epgOverlayPosition = 'bottom',
+  epgOverlayPosition = "bottom",
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const hlsRef = useRef<Hls | null>(null);
   const [internalIsStopped, setInternalIsStopped] = useState<boolean>(false);
-  const isStopped = externalIsStopped !== undefined ? externalIsStopped : internalIsStopped;
+  const isStopped =
+    externalIsStopped !== undefined ? externalIsStopped : internalIsStopped;
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -74,7 +93,12 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
   };
 
   const handleTouchEnd = (e: React.TouchEvent) => {
-    if (touchStartY.current === null || touchStartX.current === null || e.changedTouches.length === 0) return;
+    if (
+      touchStartY.current === null ||
+      touchStartX.current === null ||
+      e.changedTouches.length === 0
+    )
+      return;
     const deltaY = e.changedTouches[0].clientY - touchStartY.current;
     const deltaX = e.changedTouches[0].clientX - touchStartX.current;
 
@@ -83,12 +107,12 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       if (deltaY < 0) {
         if (onNextChannel) {
           onNextChannel();
-          showZapFeedback('▲ Chaîne suivante');
+          showZapFeedback("▲ Chaîne suivante");
         }
       } else {
         if (onPreviousChannel) {
           onPreviousChannel();
-          showZapFeedback('▼ Chaîne précédente');
+          showZapFeedback("▼ Chaîne précédente");
         }
       }
     }
@@ -132,18 +156,26 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
           cur = currentEpg;
           nxt = nextEpg || undefined;
         }
-        let timeStr = '';
+        let timeStr = "";
         if (cur?.start && cur?.end) {
           try {
-            const s = new Date(cur.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-            const e = new Date(cur.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            const s = new Date(cur.start).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
+            const e = new Date(cur.end).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            });
             timeStr = `${s} - ${e}`;
-          } catch {}
+          } catch (err) {
+            console.warn("Failed to parse EPG time:", err);
+          }
         }
-        epgTitles.push(cur?.title || '');
-        epgDescs.push(cur?.description || '');
+        epgTitles.push(cur?.title || "");
+        epgDescs.push(cur?.description || "");
         epgTimes.push(timeStr);
-        epgNextTitles.push(nxt?.title || '');
+        epgNextTitles.push(nxt?.title || "");
       }
     }
 
@@ -152,7 +184,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       titles,
       index,
       userAgent: NATIVE_PLAYER_USER_AGENT,
-      isLive: channel.stream_type === 'live',
+      isLive: channel.stream_type === "live",
       singleStreamMode,
       currentProgramTitle: currentEpg?.title,
       currentProgramDesc: currentEpg?.description,
@@ -164,7 +196,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       epgNextTitles,
       osdTimeoutMs,
       epgOverlayPosition,
-    }).catch((err: any) => alert(`Lecture impossible : ${err?.message || err}`));
+    }).catch((err: any) =>
+      alert(`Lecture impossible : ${err?.message || err}`),
+    );
   };
 
   // Listen for taps on the native ExoPlayer preview view to open full-screen PlayerActivity
@@ -172,27 +206,47 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
     if (!nativeMode) return;
     let subPromise: any = null;
     try {
-      subPromise = (NativePlayer as any).addListener('previewClicked', () => {
+      subPromise = (NativePlayer as any).addListener("previewClicked", () => {
         openNativePlayer();
       });
-    } catch {}
+    } catch (err) {
+      console.warn("Failed to add NativePlayer previewClicked listener:", err);
+    }
     return () => {
       subPromise?.then?.((s: any) => s?.remove?.());
     };
-  }, [nativeMode, channel, playlist, currentEpg, nextEpg, channelEpgMap, singleStreamMode, osdTimeoutMs, epgOverlayPosition]);
+  }, [
+    nativeMode,
+    channel,
+    playlist,
+    currentEpg,
+    nextEpg,
+    channelEpgMap,
+    singleStreamMode,
+    osdTimeoutMs,
+    epgOverlayPosition,
+  ]);
 
   // Embedded Native ExoPlayer Mini Preview Window (TiviMate top-left 16:9 box on Android TV)
   useEffect(() => {
     if (!nativeMode) return;
 
-    if (!channel || !channel.stream_url || isStopped || isFullscreen || isModalCovering) {
+    if (
+      !channel ||
+      !channel.stream_url ||
+      isStopped ||
+      isFullscreen ||
+      isModalCovering
+    ) {
       NativePlayer.updatePreviewRect({
         x: 0,
         y: 0,
         width: 0,
         height: 0,
         visible: false,
-      }).catch(() => {});
+      }).catch((err) => {
+        console.warn("NativePlayer updatePreviewRect failed:", err);
+      });
       return;
     }
 
@@ -211,7 +265,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
           height: rect.height,
           muted: isMuted,
           userAgent: NATIVE_PLAYER_USER_AGENT,
-        }).catch(() => {});
+        }).catch((err) => {
+          console.warn("NativePlayer updatePreviewRect startNew failed:", err);
+        });
       } else {
         NativePlayer.updatePreviewRect({
           x: rect.left,
@@ -220,26 +276,41 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
           height: rect.height,
           visible: true,
           muted: isMuted,
-        }).catch(() => {});
+        }).catch((err) => {
+          console.warn(
+            "NativePlayer updatePreviewRect startNew failed (unmuted):",
+            err,
+          );
+        });
       }
     };
 
     const timer = setTimeout(() => syncPreview(true), 60);
 
     const onResize = () => syncPreview(false);
-    window.addEventListener('resize', onResize);
+    window.addEventListener("resize", onResize);
 
     return () => {
       clearTimeout(timer);
-      window.removeEventListener('resize', onResize);
+      window.removeEventListener("resize", onResize);
     };
-  }, [nativeMode, channel?.id, channel?.stream_url, isStopped, isFullscreen, isModalCovering, isMuted]);
+  }, [
+    nativeMode,
+    channel?.id,
+    channel?.stream_url,
+    isStopped,
+    isFullscreen,
+    isModalCovering,
+    isMuted,
+  ]);
 
   // Ensure embedded native preview stops cleanly when LiveVideoPlayer unmounts (e.g. switching to VOD/Series)
   useEffect(() => {
     return () => {
       if (isNativePlayerAvailable()) {
-        NativePlayer.stopPreview().catch(() => {});
+        NativePlayer.stopPreview().catch((err) => {
+          console.warn("NativePlayer stopPreview failed:", err);
+        });
       }
     };
   }, []);
@@ -256,7 +327,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       }
       if (videoRef.current) {
         videoRef.current.pause();
-        videoRef.current.removeAttribute('src');
+        videoRef.current.removeAttribute("src");
         videoRef.current.load();
       }
       setIsPlaying(false);
@@ -269,7 +340,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
     const video = videoRef.current;
     const rawUrl = channel.stream_url;
     // If Web player receives a .ts Xtream stream URL, try the .m3u8 HLS variant first so hls.js can play it
-    const streamUrl = rawUrl.endsWith('.ts') ? rawUrl.replace(/\.ts$/, '.m3u8') : rawUrl;
+    const streamUrl = rawUrl.endsWith(".ts")
+      ? rawUrl.replace(/\.ts$/, ".m3u8")
+      : rawUrl;
 
     // Reset previous HLS instance
     if (hlsRef.current) {
@@ -277,7 +350,8 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       hlsRef.current = null;
     }
 
-    const isDirectMp4 = streamUrl.endsWith('.mp4') || streamUrl.includes('.mp4?');
+    const isDirectMp4 =
+      streamUrl.endsWith(".mp4") || streamUrl.includes(".mp4?");
 
     if (Hls.isSupported() && !isDirectMp4) {
       const hls = new Hls({
@@ -291,10 +365,11 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       hls.attachMedia(video);
 
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
-        video.play().catch(() => {
+        video.play().catch((err) => {
+          console.warn("Initial video play failed:", err);
           video.muted = true;
           setIsMuted(true);
-          video.play().catch((e) => console.warn('Autoplay failed:', e));
+          video.play().catch((e) => console.warn("Autoplay failed:", e));
         });
         setIsPlaying(true);
       });
@@ -303,15 +378,19 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
         if (data.fatal) {
           switch (data.type) {
             case Hls.ErrorTypes.NETWORK_ERROR:
-              if (streamUrl.endsWith('.m3u8')) {
-                const tsUrl = streamUrl.replace(/\.m3u8$/, '.ts');
-                console.warn('HLS network error, attempting MPEG-TS fallback:', tsUrl);
+              if (streamUrl.endsWith(".m3u8")) {
+                const tsUrl = streamUrl.replace(/\.m3u8$/, ".ts");
+                console.warn(
+                  "HLS network error, attempting MPEG-TS fallback:",
+                  tsUrl,
+                );
                 hls.destroy();
                 hlsRef.current = null;
                 if (video) {
                   video.src = tsUrl;
-                  video.play().catch(() => {
-                    setStreamError('Flux temporairement indisponible.');
+                  video.play().catch((err) => {
+                    console.warn("Fallback to TS URL play failed:", err);
+                    setStreamError("Flux temporairement indisponible.");
                   });
                 }
               } else {
@@ -322,30 +401,42 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
               hls.recoverMediaError();
               break;
             default:
-              console.warn('HLS fatal, fallbacking to native HTML5 video element:', data);
+              console.warn(
+                "HLS fatal, fallbacking to native HTML5 video element:",
+                data,
+              );
               hls.destroy();
               hlsRef.current = null;
               if (video) {
                 video.src = rawUrl;
-                video.play().catch(() => {
-                  setStreamError('Flux temporairement indisponible.');
+                video.play().catch((err) => {
+                  console.warn("Native HTML5 video fallback play failed:", err);
+                  setStreamError("Flux temporairement indisponible.");
                 });
               }
               break;
           }
         }
       });
-    } else if (video.canPlayType('application/vnd.apple.mpegurl') || isDirectMp4) {
+    } else if (
+      video.canPlayType("application/vnd.apple.mpegurl") ||
+      isDirectMp4
+    ) {
       video.src = streamUrl;
-      video.play().catch(() => {
+      video.play().catch((err) => {
+        console.warn("Direct Apple/MP4 video play failed:", err);
         video.muted = true;
         setIsMuted(true);
-        video.play().catch(() => {});
+        video.play().catch((err) => {
+          console.warn("Autoplay failed:", err);
+        });
       });
       setIsPlaying(true);
     } else {
       video.src = rawUrl;
-      video.play().catch(() => {});
+      video.play().catch((err) => {
+        console.warn("Direct fallback raw URL video play failed:", err);
+      });
     }
 
     triggerOsd();
@@ -379,11 +470,14 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
     setShowOsd(true);
     if (osdTimerRef.current) clearTimeout(osdTimerRef.current);
     if (osdTimeoutMs === 0) return; // Permanent / manual mode: stays visible until Back or OK
-    osdTimerRef.current = setTimeout(() => {
-      if (isFullscreen) {
-        setShowOsd(false);
-      }
-    }, osdTimeoutMs > 0 ? osdTimeoutMs : 5000);
+    osdTimerRef.current = setTimeout(
+      () => {
+        if (isFullscreen) {
+          setShowOsd(false);
+        }
+      },
+      osdTimeoutMs > 0 ? osdTimeoutMs : 5000,
+    );
   };
 
   // Capture DPAD & Back keys in fullscreen web player when OSD controls are visible:
@@ -394,28 +488,41 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
 
     const onKeyDown = (e: KeyboardEvent) => {
       const keyCode = (e as any).keyCode || 0;
-      const key = e.key || '';
+      const key = e.key || "";
 
       const isBack =
-        key === 'Escape' ||
-        key === 'Backspace' ||
-        key === 'GoBack' ||
-        key === 'Back' ||
+        key === "Escape" ||
+        key === "Backspace" ||
+        key === "GoBack" ||
+        key === "Back" ||
         keyCode === 27 ||
         keyCode === 4;
 
       const isEnter =
-        key === 'Enter' ||
-        key === 'Select' ||
-        key === 'Ok' ||
+        key === "Enter" ||
+        key === "Select" ||
+        key === "Ok" ||
         keyCode === 13 ||
         keyCode === 23 ||
         keyCode === 66;
 
-      const isUp = key === 'ArrowUp' || key === 'Up' || keyCode === 38 || keyCode === 19;
-      const isDown = key === 'ArrowDown' || key === 'Down' || keyCode === 40 || keyCode === 20;
-      const isLeft = key === 'ArrowLeft' || key === 'Left' || keyCode === 37 || keyCode === 21;
-      const isRight = key === 'ArrowRight' || key === 'Right' || keyCode === 39 || keyCode === 22;
+      const isUp =
+        key === "ArrowUp" || key === "Up" || keyCode === 38 || keyCode === 19;
+      const isDown =
+        key === "ArrowDown" ||
+        key === "Down" ||
+        keyCode === 40 ||
+        keyCode === 20;
+      const isLeft =
+        key === "ArrowLeft" ||
+        key === "Left" ||
+        keyCode === 37 ||
+        keyCode === 21;
+      const isRight =
+        key === "ArrowRight" ||
+        key === "Right" ||
+        keyCode === 39 ||
+        keyCode === 22;
 
       if (showOsd) {
         if (isBack) {
@@ -432,13 +539,13 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
           triggerOsd();
           return;
         }
-        if (isLeft && channel?.stream_type !== 'live') {
+        if (isLeft && channel?.stream_type !== "live") {
           e.preventDefault();
           e.stopPropagation();
           skipTime(-10);
           return;
         }
-        if (isRight && channel?.stream_type !== 'live') {
+        if (isRight && channel?.stream_type !== "live") {
           e.preventDefault();
           e.stopPropagation();
           skipTime(10);
@@ -462,8 +569,8 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       }
     };
 
-    window.addEventListener('keydown', onKeyDown, true);
-    return () => window.removeEventListener('keydown', onKeyDown, true);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [isFullscreen, showOsd, channel]);
 
   const toggleMute = (e: React.MouseEvent) => {
@@ -499,14 +606,14 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       onTouchEnd={handleTouchEnd}
       className={`relative overflow-hidden bg-black transition-transform duration-300 ${
         isFullscreen
-          ? 'fixed inset-0 z-50 w-screen h-screen'
-          : 'w-full h-full rounded-xl border border-tv-border shadow-2xl'
+          ? "fixed inset-0 z-50 w-screen h-screen"
+          : "w-full h-full rounded-xl border border-tv-border shadow-2xl"
       }`}
     >
       {/* HTML5 Video element (used on Web; on Android the native ExoPlayer preview renders over this box) */}
       <video
         ref={videoRef}
-        className={`w-full h-full object-contain ${isStopped || nativeMode ? 'hidden' : 'block'}`}
+        className={`w-full h-full object-contain ${isStopped || nativeMode ? "hidden" : "block"}`}
         playsInline
         autoPlay
         muted={isMuted}
@@ -519,7 +626,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
             <Radio className="w-7 h-7 text-tv-accent" />
           </div>
           <h3 className="text-base font-bold text-white mb-0.5">
-            {channel?.name || 'Lecture arrêtée'}
+            {channel?.name || "Lecture arrêtée"}
           </h3>
           <p className="text-xs text-slate-400 mb-4">
             Le flux vidéo et la bande passante sont suspendus.
@@ -540,7 +647,9 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
           <Radio className="w-12 h-12 text-rose-500 mb-3 animate-pulse" />
           <p className="text-lg font-medium text-slate-200">{channel?.name}</p>
           <p className="text-sm text-rose-400 mt-1">{streamError}</p>
-          <p className="text-xs text-slate-400 mt-3">Reconnexion automatique au flux en cours...</p>
+          <p className="text-xs text-slate-400 mt-3">
+            Reconnexion automatique au flux en cours...
+          </p>
         </div>
       )}
 
@@ -552,10 +661,12 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
             onClick={toggleStopPlay}
             className={`p-1.5 rounded transition ${
               isStopped
-                ? 'text-emerald-400 hover:bg-emerald-500/20'
-                : 'text-slate-300 hover:text-rose-400 hover:bg-white/10'
+                ? "text-emerald-400 hover:bg-emerald-500/20"
+                : "text-slate-300 hover:text-rose-400 hover:bg-white/10"
             }`}
-            title={isStopped ? 'Reprendre la lecture' : 'Arrêter le flux (Stop)'}
+            title={
+              isStopped ? "Reprendre la lecture" : "Arrêter le flux (Stop)"
+            }
           >
             {isStopped ? (
               <Play className="w-4 h-4 fill-current" />
@@ -565,7 +676,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
           </button>
 
           {/* Rewind Button (VOD/Series only) */}
-          {!isStopped && channel?.stream_type !== 'live' && (
+          {!isStopped && channel?.stream_type !== "live" && (
             <button
               onClick={(e) => skipTime(-10, e)}
               className="p-1.5 text-slate-200 hover:text-white hover:bg-white/10 rounded transition"
@@ -576,7 +687,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
           )}
 
           {/* Fast Forward Button (VOD/Series only) */}
-          {!isStopped && channel?.stream_type !== 'live' && (
+          {!isStopped && channel?.stream_type !== "live" && (
             <button
               onClick={(e) => skipTime(10, e)}
               className="p-1.5 text-slate-200 hover:text-white hover:bg-white/10 rounded transition"
@@ -591,9 +702,13 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
             <button
               onClick={toggleMute}
               className="p-1.5 text-slate-200 hover:text-white hover:bg-white/10 rounded transition"
-              title={isMuted ? 'Activer le son' : 'Couper le son'}
+              title={isMuted ? "Activer le son" : "Couper le son"}
             >
-              {isMuted ? <VolumeX className="w-4 h-4 text-rose-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
+              {isMuted ? (
+                <VolumeX className="w-4 h-4 text-rose-400" />
+              ) : (
+                <Volume2 className="w-4 h-4 text-emerald-400" />
+              )}
             </button>
           )}
 
@@ -619,7 +734,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
       {isFullscreen && (
         <div
           className={`absolute inset-0 pointer-events-none transition-opacity duration-300 ${
-            showOsd ? 'opacity-100' : 'opacity-0'
+            showOsd ? "opacity-100" : "opacity-0"
           }`}
         >
           {/* Top Bar info */}
@@ -629,13 +744,16 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
                 Direct
               </span>
               <span className="text-slate-300 text-sm font-medium">
-                {channel?.group_name || 'IPTV Direct'}
+                {channel?.group_name || "IPTV Direct"}
               </span>
             </div>
             <div className="flex items-center space-x-3">
               <span className="text-slate-400 text-sm font-mono flex items-center">
                 <Clock className="w-4 h-4 mr-1.5 text-tv-accent" />
-                {new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                {new Date().toLocaleTimeString("fr-FR", {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
               </span>
 
               {/* Previous Channel Button */}
@@ -644,7 +762,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
                   onClick={(e) => {
                     e.stopPropagation();
                     onPreviousChannel();
-                    showZapFeedback('▼ Chaîne précédente');
+                    showZapFeedback("▼ Chaîne précédente");
                   }}
                   className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition active:scale-95"
                   title="Chaîne précédente (Glisser bas)"
@@ -659,7 +777,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
                   onClick={(e) => {
                     e.stopPropagation();
                     onNextChannel();
-                    showZapFeedback('▲ Chaîne suivante');
+                    showZapFeedback("▲ Chaîne suivante");
                   }}
                   className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white transition active:scale-95"
                   title="Chaîne suivante (Glisser haut)"
@@ -669,7 +787,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
               )}
 
               {/* Rewind Button in fullscreen (VOD/Series only) */}
-              {!isStopped && channel?.stream_type !== 'live' && (
+              {!isStopped && channel?.stream_type !== "live" && (
                 <button
                   onClick={(e) => skipTime(-10, e)}
                   className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"
@@ -683,13 +801,17 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
               <button
                 onClick={toggleStopPlay}
                 className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"
-                title={isStopped ? 'Reprendre' : 'Arrêter (Stop)'}
+                title={isStopped ? "Reprendre" : "Arrêter (Stop)"}
               >
-                {isStopped ? <Play className="w-5 h-5 fill-white" /> : <Square className="w-5 h-5 fill-rose-400 text-rose-400" />}
+                {isStopped ? (
+                  <Play className="w-5 h-5 fill-white" />
+                ) : (
+                  <Square className="w-5 h-5 fill-rose-400 text-rose-400" />
+                )}
               </button>
 
               {/* Fast Forward Button in fullscreen (VOD/Series only) */}
-              {!isStopped && channel?.stream_type !== 'live' && (
+              {!isStopped && channel?.stream_type !== "live" && (
                 <button
                   onClick={(e) => skipTime(10, e)}
                   className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"
@@ -703,9 +825,13 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
               <button
                 onClick={toggleMute}
                 className="pointer-events-auto p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white"
-                title={isMuted ? 'Activer le son' : 'Couper le son'}
+                title={isMuted ? "Activer le son" : "Couper le son"}
               >
-                {isMuted ? <VolumeX className="w-5 h-5 text-rose-400" /> : <Volume2 className="w-5 h-5 text-emerald-400" />}
+                {isMuted ? (
+                  <VolumeX className="w-5 h-5 text-rose-400" />
+                ) : (
+                  <Volume2 className="w-5 h-5 text-emerald-400" />
+                )}
               </button>
 
               <button
@@ -722,8 +848,12 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
           {zapNotice && (
             <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-40">
               <div className="bg-black/90 border border-tv-accent/50 rounded-2xl px-6 py-3 shadow-2xl flex flex-col items-center">
-                <span className="text-tv-accent text-sm font-bold tracking-wider">{zapNotice}</span>
-                <span className="text-white text-base font-bold mt-0.5">{channel?.name}</span>
+                <span className="text-tv-accent text-sm font-bold tracking-wider">
+                  {zapNotice}
+                </span>
+                <span className="text-white text-base font-bold mt-0.5">
+                  {channel?.name}
+                </span>
               </div>
             </div>
           )}
@@ -745,7 +875,7 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center space-x-3 mb-1">
                   <h2 className="text-xl font-bold text-white truncate">
-                    {currentEpg?.title || 'Programme en direct'}
+                    {currentEpg?.title || "Programme en direct"}
                   </h2>
                   {channel?.resolution && (
                     <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-xs px-2 py-0.5 rounded font-medium flex items-center">
@@ -757,7 +887,12 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
 
                 <div className="flex items-center space-x-3 my-2">
                   <span className="text-xs text-slate-400 font-mono">
-                    {currentEpg ? new Date(currentEpg.start).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '20:00'}
+                    {currentEpg
+                      ? new Date(currentEpg.start).toLocaleTimeString("fr-FR", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : "20:00"}
                   </span>
                   <div className="flex-1 h-1.5 bg-slate-700/60 rounded-full overflow-hidden">
                     <div
@@ -766,13 +901,22 @@ export const LiveVideoPlayer: React.FC<LiveVideoPlayerProps> = ({
                     />
                   </div>
                   <span className="text-xs text-slate-400 font-mono">
-                    {currentEpg ? new Date(currentEpg.end).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '21:30'}
+                    {currentEpg
+                      ? new Date(currentEpg.end).toLocaleTimeString("fr-FR", {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : "21:30"}
                   </span>
                 </div>
 
                 <div className="text-xs text-slate-400 truncate flex items-center">
-                  <span className="text-slate-500 mr-2 uppercase tracking-wide">Suivant :</span>
-                  <span className="text-slate-300 font-medium">{nextEpg?.title || 'Journal de la nuit'}</span>
+                  <span className="text-slate-500 mr-2 uppercase tracking-wide">
+                    Suivant :
+                  </span>
+                  <span className="text-slate-300 font-medium">
+                    {nextEpg?.title || "Journal de la nuit"}
+                  </span>
                 </div>
               </div>
 
