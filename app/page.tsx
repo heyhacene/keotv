@@ -1198,11 +1198,10 @@ export default function KeoTVHome() {
         // Ensure saved favorite channel IDs are marked in db.channels
         const favIds = await getFavoriteChannelIds();
         if (favIds.size > 0) {
-          for (const fId of favIds) {
-            try {
-              await db.channels.update(fId, { is_favorite: true });
-            } catch {}
-          }
+          await db.transaction('rw', db.channels, async () => {
+            const promises = Array.from(favIds).map(fId => db.channels.update(fId, { is_favorite: true }).catch(() => {}));
+            await Promise.all(promises);
+          });
         }
         await updateFavoriteCounts();
 
@@ -3063,10 +3062,13 @@ export default function KeoTVHome() {
       // 2. Restore user favorites
       if (account.favorites && account.favorites.length > 0) {
         await db.channels.toCollection().modify({ is_favorite: false });
-        for (const favId of account.favorites) {
-          await db.channels.update(favId, { is_favorite: true });
-          await saveFavoriteChannelId(favId, true);
-        }
+        await db.transaction('rw', db.channels, async () => {
+          const promises = account.favorites.map((favId: string) => db.channels.update(favId, { is_favorite: true }).catch(() => {}));
+          await Promise.all(promises);
+        });
+        // Update the set of favorites in one go in settings
+        await setSetting('favorite_channel_ids', account.favorites);
+
         if (selectedCategory) {
           await loadCategoryChannels(selectedCategory, channelSort);
         }
@@ -3132,10 +3134,13 @@ export default function KeoTVHome() {
 
     if (data.favorites && data.favorites.length > 0) {
       await db.channels.toCollection().modify({ is_favorite: false });
-      for (const favId of data.favorites) {
-        await db.channels.update(favId, { is_favorite: true });
-        await saveFavoriteChannelId(favId, true);
-      }
+      await db.transaction('rw', db.channels, async () => {
+        const promises = data.favorites.map((favId: string) => db.channels.update(favId, { is_favorite: true }).catch(() => {}));
+        await Promise.all(promises);
+      });
+      // Update the set of favorites in one go in settings
+      await setSetting('favorite_channel_ids', data.favorites);
+
       if (selectedCategory) {
         await loadCategoryChannels(selectedCategory, channelSort);
       }
