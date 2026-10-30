@@ -2276,9 +2276,7 @@ export default function KeoTVHome() {
   };
 
   const handleReorderCategories = async (reordered: Category[]) => {
-    for (const c of reordered) {
-      await db.categories.update(c.id, { custom_order: c.custom_order });
-    }
+    await db.categories.bulkPut(reordered);
     setCategories(reordered);
     showToast('Ordre des bouquets enregistré');
   };
@@ -2288,9 +2286,7 @@ export default function KeoTVHome() {
     all.forEach((c, idx) => {
       c.custom_order = idx;
     });
-    for (const c of all) {
-      await db.categories.update(c.id, { custom_order: c.custom_order });
-    }
+    await db.categories.bulkPut(all);
     setCategories(all);
     showToast('Ordre d’origine réinitialisé');
   };
