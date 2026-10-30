@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  X,
+  LucideIcon, X,
   Settings as SettingsIcon,
   Server,
   RefreshCw,
@@ -70,7 +70,7 @@ interface SettingsModalProps {
   onUpdateExcludedPrefixes?: (prefixes: string[]) => void;
 }
 
-const TABS: Array<{ id: 'playlists' | 'controls' | 'categories' | 'parental' | 'player' | 'sync' | 'update' | 'feedback'; label: string; icon: any }> = [
+const TABS: Array<{ id: 'playlists' | 'controls' | 'categories' | 'parental' | 'player' | 'sync' | 'update' | 'feedback'; label: string; icon: LucideIcon }> = [
   { id: 'playlists', label: 'Playlists & Abonnements', icon: Server },
   { id: 'categories', label: 'Ordre & Bouquets', icon: Sliders },
   { id: 'parental', label: 'Contrôle Parental', icon: ShieldCheck },
