@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Channel, Category } from '@/types/iptv';
-import { Star, Play, Info, Lock, Unlock, X, EyeOff, RotateCcw } from 'lucide-react';
+import { LucideIcon, Star, Play, Info, Lock, Unlock, X, EyeOff, RotateCcw } from 'lucide-react';
 
 interface ContextMenuModalProps {
   isOpen: boolean;
@@ -22,7 +22,7 @@ interface ContextMenuModalProps {
 interface ContextOption {
   id: string;
   label: string;
-  icon: any;
+  icon: LucideIcon;
   color?: string;
   action: () => void;
 }
