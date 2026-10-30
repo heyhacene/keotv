@@ -695,9 +695,9 @@ export default function KeoTVHome() {
             for (const s of allLive) {
               countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
-            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
-              await db.categories.update(gid, { count: cnt });
-            }
+            await db.transaction('rw', db.categories, () =>
+              Promise.all(Array.from(countsByGroup.entries()).map(([gid, cnt]) => db.categories.update(gid, { count: cnt })))
+            );
             setCategories((prev) =>
               prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
             );
@@ -734,9 +734,9 @@ export default function KeoTVHome() {
             for (const s of allVod) {
               countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
-            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
-              await db.categories.update(gid, { count: cnt });
-            }
+            await db.transaction('rw', db.categories, () =>
+              Promise.all(Array.from(countsByGroup.entries()).map(([gid, cnt]) => db.categories.update(gid, { count: cnt })))
+            );
             setCategories((prev) =>
               prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
             );
@@ -802,9 +802,9 @@ export default function KeoTVHome() {
             for (const s of allSeries) {
               countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
-            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
-              await db.categories.update(gid, { count: cnt });
-            }
+            await db.transaction('rw', db.categories, () =>
+              Promise.all(Array.from(countsByGroup.entries()).map(([gid, cnt]) => db.categories.update(gid, { count: cnt })))
+            );
             setCategories((prev) =>
               prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
             );
@@ -1376,11 +1376,9 @@ export default function KeoTVHome() {
       });
       if (cancelled || changed.length === 0) return;
       setCategories(next);
-      for (const c of changed) {
-        try {
-          await db.categories.update(c.id, { is_adult: c.is_adult });
-        } catch {}
-      }
+      await db.transaction('rw', db.categories, () =>
+        Promise.all(changed.map(c => db.categories.update(c.id, { is_adult: c.is_adult })))
+      ).catch(() => {});
     })();
     return () => {
       cancelled = true;
@@ -2276,9 +2274,9 @@ export default function KeoTVHome() {
   };
 
   const handleReorderCategories = async (reordered: Category[]) => {
-    for (const c of reordered) {
-      await db.categories.update(c.id, { custom_order: c.custom_order });
-    }
+    await db.transaction('rw', db.categories, () =>
+      Promise.all(reordered.map(c => db.categories.update(c.id, { custom_order: c.custom_order })))
+    );
     setCategories(reordered);
     showToast('Ordre des bouquets enregistré');
   };
@@ -2288,9 +2286,9 @@ export default function KeoTVHome() {
     all.forEach((c, idx) => {
       c.custom_order = idx;
     });
-    for (const c of all) {
-      await db.categories.update(c.id, { custom_order: c.custom_order });
-    }
+    await db.transaction('rw', db.categories, () =>
+      Promise.all(all.map(c => db.categories.update(c.id, { custom_order: c.custom_order })))
+    );
     setCategories(all);
     showToast('Ordre d’origine réinitialisé');
   };
