@@ -44,6 +44,7 @@ import {
   fetchAllVodStreamsBulk,
   fetchRecentlyAddedVod,
   refreshXtreamAccountInfo,
+  fetchVodAndSeriesCategoryCounts,
   SeriesEpisode,
   isSeparatorChannel,
   isAdultCategoryName,
@@ -57,6 +58,54 @@ import { CatchupService } from '@/lib/catchup-service';
 import { Capacitor } from '@capacitor/core';
 import { App as CapApp } from '@capacitor/app';
 import { Star, Tv, Film, Clapperboard, Settings, RefreshCw, Trophy, Globe, Compass, ChevronDown, Layers, Sparkles, Play, Square, ArrowUpDown, AlertCircle, Loader2, Search, Sliders, Maximize, Smartphone, RotateCw, RotateCcw } from 'lucide-react';
+
+export const DEMO_CATEGORY_IDS = new Set([
+  'france_direct',
+  'sport',
+  'regions',
+  'films_vod',
+  'series_vod',
+  'tnt',
+  'cinema',
+  'news',
+  'doc',
+]);
+
+const DEMO_CHANNEL_IDS = new Set([
+  'ch_bfm',
+  'ch_arte',
+  'ch_cstar',
+  'ch_bfmbiz',
+  'ch_euronews',
+  'ch_africanews',
+  'ch_20min',
+  'ch_equidia',
+  'ch_cannes',
+  'vod_bbb',
+  'vod_tos',
+  'vod_elephants',
+  'series_cosmos_e01',
+  'series_cosmos_e02',
+  'series_bipbop_e01',
+  'series_bipbop_e02',
+]);
+
+export async function purgeDemoData() {
+  try {
+    await db.playlists.delete('pl_demo_default');
+    await db.playlists.delete('pl_demo_france');
+    await db.categories.where('id').anyOf(Array.from(DEMO_CATEGORY_IDS)).delete();
+    await db.channels.filter((c) =>
+      DEMO_CATEGORY_IDS.has(c.group_id) ||
+      DEMO_CHANNEL_IDS.has(c.id) ||
+      c.id.startsWith('ch_demo_') ||
+      c.id.startsWith('vod_') ||
+      c.id.startsWith('series_')
+    ).delete();
+  } catch (err) {
+    console.warn('Error purging demo data:', err);
+  }
+}
 
 export default function KeoTVHome() {
   const [categories, setCategories] = useState<Category[]>([]);
@@ -234,7 +283,6 @@ export default function KeoTVHome() {
   const [syncCode, setSyncCode] = useState<string>('');
   const [isLoadingCategory, setIsLoadingCategory] = useState<boolean>(false);
   const [categoryError, setCategoryError] = useState<string | null>(null);
-  const [bgLoadStatus, setBgLoadStatus] = useState<string | null>(null);
   const bgLoadTokenRef = useRef<number>(0);
 
   // App Launch Splash Screen states
@@ -668,95 +716,43 @@ export default function KeoTVHome() {
     [channelSort]
   );
 
-  // Background download of ALL live bouquets (fast parallel requests) so the full playlist is local
+  // Background download of live channels in bulk if database is fresh / empty
   const startBackgroundLiveLoad = useCallback(async (pl: PlaylistConfig, cats: Category[]) => {
     if (pl.type !== 'xtream' || !pl.server_url || !pl.username || !pl.password) return;
     const token = ++bgLoadTokenRef.current;
 
     try {
-      // 1. LIVE CHANNELS (High priority: 1 single bulk HTTP request like TiviMate, with fast parallel category fallback)
       const localLiveCount = await db.channels.where('stream_type').equals('live').count();
-      const liveCats = cats.filter((c) => c.type === 'live' && c.id !== 'fav');
+      // If channels are already cached on device, do NOT hit network or crawl in background!
+      if (localLiveCount > 0) return;
 
-      if (pl.server_url && pl.username && pl.password) {
-        let allLive: Channel[] = [];
+      const allLive = await fetchAllLiveStreamsBulk({
+        serverUrl: pl.server_url,
+        username: pl.username,
+        password: pl.password,
+        categories: cats,
+      });
 
-        if (localLiveCount === 0) {
-          if (bgLoadTokenRef.current === token) {
-            setBgLoadStatus('Synchronisation rapide du direct TV...');
-          }
-          try {
-            allLive = await fetchAllLiveStreamsBulk({
-              serverUrl: pl.server_url,
-              username: pl.username,
-              password: pl.password,
-              categories: cats,
-            });
-          } catch (bulkLiveErr) {
-            console.warn('Bulk live stream background fetch notice:', bulkLiveErr);
-          }
+      if (allLive.length > 0 && bgLoadTokenRef.current === token) {
+        const favIds = await getFavoriteChannelIds();
+        const CHUNK = 500;
+        for (let i = 0; i < allLive.length; i += CHUNK) {
+          if (bgLoadTokenRef.current !== token) return;
+          const chunk = allLive.slice(i, i + CHUNK).map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
+          await db.channels.bulkPut(chunk);
+          await new Promise((r) => setTimeout(r, 10));
         }
 
-        // Parallel category sync for any empty bouquets (fallback if bulk failed, or repair incomplete cache)
-        if (allLive.length === 0 && bgLoadTokenRef.current === token) {
-          const countsMap = new Map<string, number>();
-          await db.channels.where('stream_type').equals('live').each((ch) => {
-            if (ch.group_id) countsMap.set(ch.group_id, (countsMap.get(ch.group_id) || 0) + 1);
-          });
-          const targetsToLoad = liveCats.filter((c) => (countsMap.get(c.id) || 0) === 0);
-
-          if (targetsToLoad.length > 0) {
-            if (bgLoadTokenRef.current === token) {
-              setBgLoadStatus(`Chargement des bouquets (${targetsToLoad.length} restants)...`);
-            }
-            let cursor = 0;
-            const CONCURRENCY = 4;
-            const workers = Array.from({ length: CONCURRENCY }, async () => {
-              while (cursor < targetsToLoad.length) {
-                if (bgLoadTokenRef.current !== token) break;
-                const cat = targetsToLoad[cursor++];
-                if (!cat) break;
-                const rawCatId = cat.id.replace(/^grp_live_/, '');
-                try {
-                  const streams = await fetchCategoryStreamsOnDemand({
-                    serverUrl: pl.server_url!,
-                    username: pl.username!,
-                    password: pl.password!,
-                    categoryId: rawCatId,
-                    categoryName: cat.name,
-                    streamType: 'live',
-                  });
-                  if (streams.length > 0) {
-                    allLive.push(...streams);
-                  }
-                } catch {}
-              }
-            });
-            await Promise.all(workers);
-          }
+        const countsByGroup = new Map<string, number>();
+        for (const s of allLive) {
+          countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
         }
-
-        if (allLive.length > 0 && bgLoadTokenRef.current === token) {
-          const favIds = await getFavoriteChannelIds();
-          const CHUNK = 500;
-          for (let i = 0; i < allLive.length; i += CHUNK) {
-            if (bgLoadTokenRef.current !== token) return;
-            const chunk = allLive.slice(i, i + CHUNK).map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
-            await db.channels.bulkPut(chunk);
-            await new Promise((r) => setTimeout(r, 10));
-          }
-
-          const countsByGroup = new Map<string, number>();
-          for (const s of allLive) {
-            countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
-          }
-          await db.transaction('rw', db.categories, () =>
-            Promise.all(Array.from(countsByGroup.entries()).map(([gid, cnt]) => db.categories.update(gid, { count: cnt })))
-          );
-          setCategories((prev) =>
-            prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
-          );
-        }
+        await db.transaction('rw', db.categories, () =>
+          Promise.all(Array.from(countsByGroup.entries()).map(([gid, cnt]) => db.categories.update(gid, { count: cnt })))
+        );
+        setCategories((prev) =>
+          prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
+        );
       }
 
       await updateFavoriteCounts();
@@ -777,11 +773,39 @@ export default function KeoTVHome() {
         setPlaylists(await db.playlists.toArray());
       }
     } catch (err) {
-      console.warn('Background live load error:', err);
-    } finally {
-      if (bgLoadTokenRef.current === token) {
-        setBgLoadStatus(null);
+      console.warn('Background live load notice:', err);
+    }
+  }, []);
+
+  // Silent background indexing of VOD & Series category counts if needed
+  const syncVodAndSeriesCounts = useCallback(async (pl: PlaylistConfig) => {
+    if (pl.type !== 'xtream' || !pl.server_url || !pl.username || !pl.password) return;
+    try {
+      const { vodCounts, seriesCounts, totalVod, totalSeries } = await fetchVodAndSeriesCategoryCounts({
+        serverUrl: pl.server_url,
+        username: pl.username,
+        password: pl.password,
+      });
+
+      if (vodCounts.size > 0 || seriesCounts.size > 0) {
+        await db.transaction('rw', db.categories, db.playlists, async () => {
+          for (const [catId, count] of vodCounts.entries()) {
+            await db.categories.update(catId, { count });
+          }
+          for (const [catId, count] of seriesCounts.entries()) {
+            await db.categories.update(catId, { count });
+          }
+          await db.playlists.update(pl.id, {
+            vod_count: totalVod,
+            series_count: totalSeries,
+          });
+        });
+
+        const refreshedCats = await db.categories.orderBy('custom_order').toArray();
+        setCategories(refreshedCats);
       }
+    } catch (err) {
+      console.warn('Silent sync of VOD/series counts error:', err);
     }
   }, []);
 
@@ -1180,15 +1204,14 @@ export default function KeoTVHome() {
           }
         }
 
-        // Check if user has non-demo categories
-        const demoCatIds = new Set(['fav', 'france_direct', 'sport', 'regions', 'films_vod', 'series_vod', 'tnt', 'cinema', 'news', 'doc']);
+        // Check if user has non-demo categories or real playlists
         const hasRealCats = allDbCats.some(
-          (c) => !demoCatIds.has(c.id)
+          (c) => !DEMO_CATEGORY_IDS.has(c.id) && c.id !== 'fav'
         );
+        const hasRealPl = activePlaylists.some((p) => !p.id.startsWith('pl_demo_'));
 
-        if (hasRealCats) {
-          await db.playlists.delete('pl_demo_default');
-          await db.playlists.delete('pl_demo_france');
+        if (hasRealCats || hasRealPl) {
+          await purgeDemoData();
         }
 
         // Only install demo channels on fresh first-time installation (NEVER overwrite user setup!)
@@ -1326,9 +1349,18 @@ export default function KeoTVHome() {
           );
           if (xtreamPl) {
             refreshXtreamAccountInfo(xtreamPl).catch(() => {});
-            setTimeout(() => {
+            // If local live channels are missing, fetch them in background
+            const localLiveCount = await db.channels.where('stream_type').equals('live').count();
+            if (localLiveCount === 0) {
               startBackgroundLiveLoad(xtreamPl, loadedCats);
-            }, 1200);
+            }
+            // If VOD categories have 0 counts, update them silently in background
+            const zeroVodCats = loadedCats.filter((c) => c.type === 'vod' && (c.count || 0) === 0);
+            if (zeroVodCats.length > 5) {
+              setTimeout(() => {
+                syncVodAndSeriesCounts(xtreamPl);
+              }, 1200);
+            }
           }
 
           if (!savedLastRefresh) {
@@ -2980,14 +3012,31 @@ export default function KeoTVHome() {
   // Delete playlist handler
   const handleDeletePlaylist = async (id: string) => {
     bgLoadTokenRef.current++;
-    setBgLoadStatus(null);
     await db.playlists.delete(id);
     const remainingPlaylists = await db.playlists.toArray();
     setPlaylists(remainingPlaylists);
 
-    if (id.startsWith('pl_demo_') || remainingPlaylists.length === 0) {
+    // If deleting demo playlist
+    if (id.startsWith('pl_demo_') || id === 'pl_demo_france' || id === 'pl_demo_default') {
+      await purgeDemoData();
+    }
+
+    // Sync deletion to cloud account so it doesn't resurrect on next sync
+    if (activeUser && activeUser.playlists) {
+      const updatedAccountPlaylists = activeUser.playlists.filter((p) => p.id !== id);
+      const updatedUser = { ...activeUser, playlists: updatedAccountPlaylists };
+      setActiveUser(updatedUser);
+      saveUserCloudSync(updatedUser).catch(() => {});
+    }
+
+    if (remainingPlaylists.length === 0) {
       await setSetting('user_deleted_all_playlists', true);
       await setSetting('last_xtream_config', null);
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('keotv_saved_xtream_creds');
+        localStorage.removeItem('keotv_saved_playlist_v1');
+        localStorage.removeItem('keotv_has_configured_playlist');
+      }
       await db.categories.clear();
       await db.channels.clear();
       setCategories([]);
@@ -3064,11 +3113,21 @@ export default function KeoTVHome() {
     try {
       // 1. If account has playlists, deduplicate and import configurations safely
       if (account.playlists && account.playlists.length > 0) {
+        // Purge demo playlists and demo channels if account contains real playlists
+        const hasRealPl = account.playlists.some((p: any) => p && (p.type === 'xtream' || (!p.id?.startsWith('pl_demo_') && p.id !== 'pl_demo_france')));
+        const candidatePlaylists = hasRealPl
+          ? account.playlists.filter((p: any) => p && !p.id?.startsWith('pl_demo_') && p.id !== 'pl_demo_france')
+          : account.playlists;
+
+        if (hasRealPl) {
+          await purgeDemoData();
+        }
+
         const existingPls = await db.playlists.toArray();
         const seenSignatures = new Set<string>();
         const cleanAccountPlaylists: PlaylistConfig[] = [];
 
-        for (const pl of account.playlists) {
+        for (const pl of candidatePlaylists) {
           if (!pl) continue;
           const sig = pl.type === 'xtream'
             ? `xtream:${(pl.server_url || '').trim().toLowerCase().replace(/\/+$/, '')}:${(pl.username || '').trim().toLowerCase()}`
@@ -4446,12 +4505,7 @@ export default function KeoTVHome() {
         </div>
       )}
 
-      {!syncStatusBanner && bgLoadStatus && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-emerald-950/95 text-emerald-200 border border-emerald-500/50 px-4 py-2 rounded-xl text-[11px] font-semibold shadow-2xl flex items-center space-x-2 animate-fade-in pointer-events-none">
-          <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-400" />
-          <span>{bgLoadStatus}</span>
-        </div>
-      )}
+
 
       {backToastVisible && (
         <div className="fixed bottom-16 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white text-xs font-semibold px-4 py-2 rounded-full border border-tv-border shadow-2xl animate-fade-in pointer-events-none">

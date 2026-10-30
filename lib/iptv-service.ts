@@ -1816,20 +1816,30 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
   pushCategories(rawVodCategories, 'vod', 'Films', 10000);
   pushCategories(rawSeriesCategories, 'series', 'Séries', 20000);
 
-  // 4. Pre-fetch ALL live channels immediately in bulk so all bouquets are pre-loaded
-  onProgress?.('Étape 3/3 : Téléchargement de toutes les chaînes TV en direct...');
+  // 4. Pre-fetch ALL live channels + index VOD and Series counts in parallel
+  onProgress?.('Étape 3/3 : Téléchargement des chaînes TV et indexation des bouquets...');
   let channels: Channel[] = [];
-  const firstLiveCategory = categories.find((c) => c.type === 'live' && c.id !== 'fav');
+  let totalVodCount = 0;
+  let totalSeriesCount = 0;
 
-  try {
-    channels = await fetchAllLiveStreamsBulk({
+  const credKey = `${server}_${cleanUsername}`;
+  const now = Date.now();
+
+  const [liveRes, vodRes, seriesRes] = await Promise.allSettled([
+    fetchAllLiveStreamsBulk({
       serverUrl: server,
       username: cleanUsername,
       password: cleanPassword,
       categories,
-    });
-  } catch (bulkErr) {
-    console.warn('Bulk live stream fetch failed during sync, fallback to first category:', bulkErr);
+    }),
+    fetchHttp<any[]>(`${server}/player_api.php?username=${username}&password=${password}&action=get_vod_streams`, 'json'),
+    fetchHttp<any[]>(`${server}/player_api.php?username=${username}&password=${password}&action=get_series`, 'json'),
+  ]);
+
+  if (liveRes.status === 'fulfilled') {
+    channels = liveRes.value;
+  } else {
+    console.warn('Bulk live stream fetch failed during sync, fallback to first category:', liveRes.reason);
   }
 
   // Fallback: If bulk fetch failed (common on some Xtream panels), download live categories in parallel!
@@ -1868,8 +1878,46 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     countsByGroup.set(ch.group_id, (countsByGroup.get(ch.group_id) || 0) + 1);
   }
   for (const c of categories) {
-    if (countsByGroup.has(c.id)) {
+    if (c.type === 'live' && countsByGroup.has(c.id)) {
       c.count = countsByGroup.get(c.id)!;
+    }
+  }
+
+  // Update counts on VOD categories
+  if (vodRes.status === 'fulfilled') {
+    const rawVod = toArray(vodRes.value);
+    totalVodCount = rawVod.length;
+    xtreamVodCache = { credKey, data: rawVod, timestamp: now };
+    const vodCounts = new Map<string, number>();
+    for (const v of rawVod) {
+      if (v?.category_id !== undefined && v?.category_id !== null) {
+        const key = `grp_vod_${String(v.category_id).trim()}`;
+        vodCounts.set(key, (vodCounts.get(key) || 0) + 1);
+      }
+    }
+    for (const c of categories) {
+      if (c.type === 'vod' && vodCounts.has(c.id)) {
+        c.count = vodCounts.get(c.id)!;
+      }
+    }
+  }
+
+  // Update counts on Series categories
+  if (seriesRes.status === 'fulfilled') {
+    const rawSeries = toArray(seriesRes.value);
+    totalSeriesCount = rawSeries.length;
+    xtreamSeriesCache = { credKey, data: rawSeries, timestamp: now };
+    const seriesCounts = new Map<string, number>();
+    for (const s of rawSeries) {
+      if (s?.category_id !== undefined && s?.category_id !== null) {
+        const key = `grp_series_${String(s.category_id).trim()}`;
+        seriesCounts.set(key, (seriesCounts.get(key) || 0) + 1);
+      }
+    }
+    for (const c of categories) {
+      if (c.type === 'series' && seriesCounts.has(c.id)) {
+        c.count = seriesCounts.get(c.id)!;
+      }
     }
   }
 
@@ -1900,6 +1948,8 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     status: 'active',
     channel_count: channels.length,
     live_count: channels.length,
+    vod_count: totalVodCount,
+    series_count: totalSeriesCount,
     exp_date: expDateStr,
     max_connections: userInfo?.max_connections ? String(userInfo.max_connections) : undefined,
     account_status: userInfo?.status ? String(userInfo.status) : undefined,
@@ -1945,6 +1995,66 @@ export async function refreshXtreamAccountInfo(pl: PlaylistConfig): Promise<Part
     console.warn('refreshXtreamAccountInfo error:', err);
     return null;
   }
+}
+
+/**
+ * Fast silent fetch of VOD and Series catalog counts to populate category badges
+ * without inserting thousands of stream objects into IndexedDB at once.
+ */
+export async function fetchVodAndSeriesCategoryCounts(params: {
+  serverUrl: string;
+  username: string;
+  password: string;
+}): Promise<{
+  vodCounts: Map<string, number>;
+  seriesCounts: Map<string, number>;
+  totalVod: number;
+  totalSeries: number;
+}> {
+  let server = params.serverUrl.trim().replace(/\/+$/, '');
+  if (!server.startsWith('http://') && !server.startsWith('https://')) server = 'http://' + server;
+  const cleanUser = decodeURIComponent(params.username.trim());
+  const cleanPass = decodeURIComponent(params.password.trim());
+  const username = encodeURIComponent(cleanUser);
+  const password = encodeURIComponent(cleanPass);
+  const credKey = `${server}_${cleanUser}`;
+  const now = Date.now();
+
+  const vodCounts = new Map<string, number>();
+  const seriesCounts = new Map<string, number>();
+  let totalVod = 0;
+  let totalSeries = 0;
+
+  const [vodRes, seriesRes] = await Promise.allSettled([
+    fetchHttp<any[]>(`${server}/player_api.php?username=${username}&password=${password}&action=get_vod_streams`, 'json'),
+    fetchHttp<any[]>(`${server}/player_api.php?username=${username}&password=${password}&action=get_series`, 'json'),
+  ]);
+
+  if (vodRes.status === 'fulfilled') {
+    const rawVod = toArray(vodRes.value);
+    totalVod = rawVod.length;
+    xtreamVodCache = { credKey, data: rawVod, timestamp: now };
+    for (const v of rawVod) {
+      if (v?.category_id !== undefined && v?.category_id !== null) {
+        const key = `grp_vod_${String(v.category_id).trim()}`;
+        vodCounts.set(key, (vodCounts.get(key) || 0) + 1);
+      }
+    }
+  }
+
+  if (seriesRes.status === 'fulfilled') {
+    const rawSeries = toArray(seriesRes.value);
+    totalSeries = rawSeries.length;
+    xtreamSeriesCache = { credKey, data: rawSeries, timestamp: now };
+    for (const s of rawSeries) {
+      if (s?.category_id !== undefined && s?.category_id !== null) {
+        const key = `grp_series_${String(s.category_id).trim()}`;
+        seriesCounts.set(key, (seriesCounts.get(key) || 0) + 1);
+      }
+    }
+  }
+
+  return { vodCounts, seriesCounts, totalVod, totalSeries };
 }
 
 
