@@ -71,7 +71,7 @@ export default function WebSyncDashboard() {
   const handleAuthSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!authEmail.trim() || !authPassword.trim()) {
-      setStatusMessage({ type: 'error', text: 'Veuillez saisir votre email et votre mot de passe.' });
+      setStatusMessage({ type: 'error', text: 'Veuillez saisir votre identifiant ou email et votre mot de passe.' });
       return;
     }
 
@@ -79,7 +79,7 @@ export default function WebSyncDashboard() {
     setStatusMessage(null);
 
     if (authMode === 'login') {
-      const res = await loginKeoUser({ email: authEmail, password: authPassword });
+      const res = await loginKeoUser({ identifier: authEmail, password: authPassword });
       setIsLoading(false);
       if (res.user) {
         setCurrentUser(res.user);
@@ -90,13 +90,13 @@ export default function WebSyncDashboard() {
           setPassword(firstPl.password || '');
           setPlaylistName(firstPl.name || 'Mon Abonnement IPTV');
         }
-        setStatusMessage({ type: 'success', text: `Connecté avec succès en tant que ${res.user.email} !` });
+        setStatusMessage({ type: 'success', text: `Connecté avec succès en tant que ${res.user.user_label || res.user.email || res.user.username} !` });
       } else {
         setStatusMessage({ type: 'error', text: res.error || 'Erreur lors de la connexion.' });
       }
     } else {
       const res = await registerKeoUser({
-        email: authEmail,
+        identifier: authEmail,
         password: authPassword,
         data: {
           user_label: authEmail.split('@')[0],
@@ -314,10 +314,12 @@ export default function WebSyncDashboard() {
 
             <form onSubmit={handleAuthSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Email</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">Identifiant ou Email</label>
                 <input
-                  type="email"
-                  placeholder="votre_email@exemple.com"
+                  type="text"
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  placeholder="Votre identifiant (ex: hacene) ou email"
                   value={authEmail}
                   onChange={(e) => setAuthEmail(e.target.value)}
                   className="w-full bg-black/60 border border-white/10 focus:border-sky-400 text-white px-4 py-2.5 rounded-xl text-sm focus:outline-none"

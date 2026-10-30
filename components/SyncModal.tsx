@@ -291,7 +291,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email.trim() || !password.trim()) {
-      setStatusMessage({ type: 'error', text: 'Veuillez saisir votre email et votre mot de passe.' });
+      setStatusMessage({ type: 'error', text: 'Veuillez saisir votre identifiant (ou email) et votre mot de passe.' });
       return;
     }
 
@@ -299,7 +299,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
     setStatusMessage(null);
 
     if (mode === 'login') {
-      const res = await loginKeoUser({ email, password });
+      const res = await loginKeoUser({ identifier: email, password });
       setIsLoading(false);
       if (res.user) {
         setActiveUser(res.user);
@@ -333,7 +333,7 @@ export const SyncModal: React.FC<SyncModalProps> = ({
         }));
 
       const res = await registerKeoUser({
-        email,
+        identifier: email,
         password,
         data: {
           user_label: email.split('@')[0],
@@ -585,14 +585,16 @@ export const SyncModal: React.FC<SyncModalProps> = ({
               <form onSubmit={handleSubmit} className="space-y-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Adresse Email
+                    Identifiant ou Adresse Email
                   </label>
                   <div className="relative">
                     <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
                     <input
                       ref={emailInputRef}
-                      type="email"
-                      placeholder="votre_email@exemple.com"
+                      type="text"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      placeholder="Votre identifiant (ex: hacene) ou email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full bg-tv-card border border-tv-border rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-tv-accent"

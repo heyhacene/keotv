@@ -35,8 +35,9 @@ export interface CloudDeviceSync {
 }
 
 export interface KeoUserAccount {
-  id: string; // The UUID from auth.users
-  email: string; // Email is the primary identifier
+  id: string; // The UUID from auth.users or usr_<username>
+  email?: string; // Optional email
+  username?: string; // Identifier
   user_label?: string;
   playlists: PlaylistConfig[];
   favorites: string[];
@@ -48,42 +49,82 @@ export interface KeoUserAccount {
   updated_at: string;
 }
 
-// Register new user with email and password via Supabase Auth
+// Simple deterministic password hash for backwards compatibility with identifier accounts
+export function hashPassword(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    const char = str.charCodeAt(i);
+    hash = (hash << 5) - hash + char;
+    hash |= 0;
+  }
+  return `h_${Math.abs(hash).toString(36)}_${str.length}`;
+}
+
+// Register new user with email or identifier
 export async function registerKeoUser(params: {
-  email: string;
+  email?: string;
+  username?: string;
+  identifier?: string;
   password: string;
   data?: Partial<KeoUserAccount>;
 }): Promise<{ user?: KeoUserAccount; error?: string }> {
   try {
-    const cleanEmail = params.email.trim().toLowerCase();
+    const rawId = (params.identifier || params.email || params.username || '').trim();
     const cleanPass = params.password.trim();
 
-    if (!cleanEmail || !cleanEmail.includes('@')) {
-      return { error: 'Veuillez fournir une adresse email valide.' };
+    if (!rawId || rawId.length < 3) {
+      return { error: "L'identifiant doit comporter au moins 3 caractères." };
     }
-    if (!cleanPass || cleanPass.length < 6) {
-      return { error: 'Le mot de passe doit comporter au moins 6 caractères.' };
-    }
-
-    const { data: authData, error: authError } = await supabase.auth.signUp({
-      email: cleanEmail,
-      password: cleanPass,
-    });
-
-    if (authError) {
-      return { error: authError.message };
+    if (!cleanPass || cleanPass.length < 4) {
+      return { error: 'Le mot de passe doit comporter au moins 4 caractères.' };
     }
 
-    if (!authData.user) {
-      return { error: 'Erreur lors de la création du compte.' };
-    }
-
+    const isEmail = rawId.includes('@');
+    const cleanEmail = isEmail ? rawId.toLowerCase() : undefined;
+    const cleanUsername = rawId.toLowerCase();
     const nowIso = new Date().toISOString();
 
-    const account: KeoUserAccount = {
-      id: authData.user.id,
+    // If email provided and password >= 6, try Supabase Auth
+    if (isEmail && cleanPass.length >= 6) {
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: cleanEmail!,
+        password: cleanPass,
+      });
+
+      if (!authError && authData.user) {
+        const account: KeoUserAccount = {
+          id: authData.user.id,
+          email: cleanEmail,
+          username: cleanEmail.split('@')[0],
+          user_label: params.data?.user_label || cleanEmail.split('@')[0],
+          playlists: params.data?.playlists || [],
+          favorites: params.data?.favorites || [],
+          hidden_groups: params.data?.hidden_groups || [],
+          hidden_channels: params.data?.hidden_channels || [],
+          excluded_prefixes: params.data?.excluded_prefixes || [],
+          watched_positions: params.data?.watched_positions || [],
+          created_at: nowIso,
+          updated_at: nowIso,
+        };
+
+        await supabase.from('keotv_users').upsert(account, { onConflict: 'id' });
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(`keotv_account_${cleanEmail}`, JSON.stringify(account));
+          localStorage.setItem('keotv_active_user', JSON.stringify(account));
+        }
+        return { user: account };
+      }
+    }
+
+    // Otherwise, create direct identifier account
+    const hashed = hashPassword(cleanPass);
+    const account: KeoUserAccount & { password_hash?: string } = {
+      id: `usr_${cleanUsername}`,
+      username: cleanUsername,
       email: cleanEmail,
-      user_label: params.data?.user_label || cleanEmail.split('@')[0],
+      password_hash: hashed,
+      user_label: params.data?.user_label || cleanUsername,
       playlists: params.data?.playlists || [],
       favorites: params.data?.favorites || [],
       hidden_groups: params.data?.hidden_groups || [],
@@ -94,7 +135,6 @@ export async function registerKeoUser(params: {
       updated_at: nowIso,
     };
 
-    // Store profile in public.keotv_users
     const { error: dbError } = await supabase
       .from('keotv_users')
       .upsert(account, { onConflict: 'id' });
@@ -103,9 +143,8 @@ export async function registerKeoUser(params: {
       console.warn('Error saving profile to keotv_users:', dbError);
     }
 
-    // Cache locally
     if (typeof window !== 'undefined') {
-      localStorage.setItem(`keotv_account_${cleanEmail}`, JSON.stringify(account));
+      localStorage.setItem(`keotv_account_${cleanUsername}`, JSON.stringify(account));
       localStorage.setItem('keotv_active_user', JSON.stringify(account));
     }
 
@@ -115,64 +154,116 @@ export async function registerKeoUser(params: {
   }
 }
 
-// Log in with email and password via Supabase Auth
+// Log in with email OR identifier and password (supports both Supabase Auth and legacy identifier accounts)
 export async function loginKeoUser(params: {
-  email: string;
+  email?: string;
+  username?: string;
+  identifier?: string;
   password: string;
 }): Promise<{ user?: KeoUserAccount; error?: string }> {
   try {
-    const cleanEmail = params.email.trim().toLowerCase();
+    const rawId = (params.identifier || params.email || params.username || '').trim();
+    const cleanId = rawId.toLowerCase();
     const cleanPass = params.password.trim();
 
-    const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
-      password: cleanPass,
-    });
-
-    if (authError) {
-      return { error: authError.message };
+    if (!cleanId || !cleanPass) {
+      return { error: 'Veuillez saisir votre identifiant et mot de passe.' };
     }
 
-    if (!authData.user) {
-      return { error: 'Identifiants invalides.' };
+    // A. If input looks like an email, try Supabase Auth first
+    if (cleanId.includes('@')) {
+      try {
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email: cleanId,
+          password: cleanPass,
+        });
+
+        if (!authError && authData?.user) {
+          const { data: profile } = await supabase
+            .from('keotv_users')
+            .select('*')
+            .eq('id', authData.user.id)
+            .maybeSingle();
+
+          const nowIso = new Date().toISOString();
+          const account: KeoUserAccount = (profile as KeoUserAccount) || {
+            id: authData.user.id,
+            email: cleanId,
+            user_label: cleanId.split('@')[0],
+            playlists: [],
+            favorites: [],
+            hidden_groups: [],
+            hidden_channels: [],
+            excluded_prefixes: [],
+            watched_positions: [],
+            created_at: nowIso,
+            updated_at: nowIso,
+          };
+
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(`keotv_account_${cleanId}`, JSON.stringify(account));
+            localStorage.setItem('keotv_active_user', JSON.stringify(account));
+          }
+          return { user: account };
+        }
+      } catch (authErr) {
+        console.warn('Supabase auth attempt error:', authErr);
+      }
     }
 
-    // Fetch user profile from public.keotv_users
-    const { data: profile, error: profileError } = await supabase
-      .from('keotv_users')
-      .select('*')
-      .eq('id', authData.user.id)
-      .single();
+    // B. Check keotv_users table for identifier or username accounts (e.g. "hacene")
+    const expectedHash = hashPassword(cleanPass);
+    try {
+      const { data: legacyUser, error: legErr } = await supabase
+        .from('keotv_users')
+        .select('*')
+        .or(`username.eq.${cleanId},email.eq.${cleanId},id.eq.usr_${cleanId}`)
+        .maybeSingle();
 
-    let account: KeoUserAccount;
+      if (!legErr && legacyUser) {
+        if (legacyUser.password_hash && legacyUser.password_hash !== expectedHash) {
+          return { error: 'Mot de passe incorrect.' };
+        }
 
-    if (!profileError && profile) {
-      account = profile as KeoUserAccount;
-    } else {
-      // First login or missing profile record -> initialize profile
-      const nowIso = new Date().toISOString();
-      account = {
-        id: authData.user.id,
-        email: cleanEmail,
-        user_label: cleanEmail.split('@')[0],
-        playlists: [],
-        favorites: [],
-        hidden_groups: [],
-        hidden_channels: [],
-        excluded_prefixes: [],
-        watched_positions: [],
-        created_at: nowIso,
-        updated_at: nowIso,
-      };
-      await supabase.from('keotv_users').upsert(account, { onConflict: 'id' });
+        const nowIso = new Date().toISOString();
+        const account: KeoUserAccount = {
+          id: legacyUser.id,
+          email: legacyUser.email || legacyUser.username || cleanId,
+          user_label: legacyUser.user_label || legacyUser.username || cleanId,
+          username: legacyUser.username || cleanId,
+          playlists: legacyUser.playlists || [],
+          favorites: legacyUser.favorites || [],
+          hidden_groups: legacyUser.hidden_groups || [],
+          hidden_channels: legacyUser.hidden_channels || [],
+          excluded_prefixes: legacyUser.excluded_prefixes || [],
+          watched_positions: legacyUser.watched_positions || [],
+          created_at: legacyUser.created_at || nowIso,
+          updated_at: nowIso,
+        };
+
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(`keotv_account_${cleanId}`, JSON.stringify(account));
+          localStorage.setItem('keotv_active_user', JSON.stringify(account));
+        }
+        return { user: account };
+      }
+    } catch (legEx) {
+      console.warn('Legacy login check notice:', legEx);
     }
 
+    // C. Check local storage if offline
     if (typeof window !== 'undefined') {
-      localStorage.setItem(`keotv_account_${cleanEmail}`, JSON.stringify(account));
-      localStorage.setItem('keotv_active_user', JSON.stringify(account));
+      const localStr = localStorage.getItem(`keotv_account_${cleanId}`);
+      if (localStr) {
+        try {
+          const parsed = JSON.parse(localStr);
+          localStorage.setItem('keotv_active_user', localStr);
+          return { user: parsed };
+        } catch {}
+      }
     }
 
-    return { user: account };
+    return { error: 'Compte introuvable ou mot de passe incorrect. Vérifiez vos identifiants.' };
   } catch (err: any) {
     return { error: err?.message || 'Erreur de connexion.' };
   }
@@ -200,7 +291,8 @@ export async function saveUserCloudSync(account: KeoUserAccount): Promise<boolea
   };
 
   if (typeof window !== 'undefined') {
-    localStorage.setItem(`keotv_account_${account.email}`, JSON.stringify(updated));
+    if (account.email) localStorage.setItem(`keotv_account_${account.email.toLowerCase()}`, JSON.stringify(updated));
+    if (account.username) localStorage.setItem(`keotv_account_${account.username.toLowerCase()}`, JSON.stringify(updated));
     localStorage.setItem('keotv_active_user', JSON.stringify(updated));
   }
 
@@ -225,8 +317,8 @@ export function getActiveKeoUser(): KeoUserAccount | null {
   }
 }
 
-// Fetch freshest account data directly from cloud
-export async function fetchLatestKeoUser(email?: string): Promise<KeoUserAccount | null> {
+// Fetch freshest account data directly from cloud (supports both Supabase auth session and legacy username)
+export async function fetchLatestKeoUser(identifier?: string): Promise<KeoUserAccount | null> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
     
@@ -239,10 +331,29 @@ export async function fetchLatestKeoUser(email?: string): Promise<KeoUserAccount
 
       if (!error && data) {
         if (typeof window !== 'undefined') {
-          if (email) localStorage.setItem(`keotv_account_${email.toLowerCase()}`, JSON.stringify(data));
+          if (identifier) localStorage.setItem(`keotv_account_${identifier.toLowerCase()}`, JSON.stringify(data));
           localStorage.setItem('keotv_active_user', JSON.stringify(data));
         }
         return data as KeoUserAccount;
+      }
+    } else {
+      const active = getActiveKeoUser();
+      const targetId = identifier || active?.username || active?.email || active?.id;
+      if (targetId) {
+        const cleanId = targetId.trim().toLowerCase();
+        const { data, error } = await supabase
+          .from('keotv_users')
+          .select('*')
+          .or(`username.eq.${cleanId},email.eq.${cleanId},id.eq.usr_${cleanId}`)
+          .maybeSingle();
+
+        if (!error && data) {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(`keotv_account_${cleanId}`, JSON.stringify(data));
+            localStorage.setItem('keotv_active_user', JSON.stringify(data));
+          }
+          return data as KeoUserAccount;
+        }
       }
     }
   } catch (err) {
