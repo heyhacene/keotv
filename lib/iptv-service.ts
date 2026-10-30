@@ -3,7 +3,7 @@ import { Channel, Category, PlaylistConfig } from '@/types/iptv';
 import { db } from './db';
 
 // Safe helper to convert any response (array, stringified JSON, or PHP associative object) into an array
-export function toArray<T = any>(data: any): T[] {
+export function toArray<T = any>(data: T | T[] | unknown): T[] {
   if (!data) return [];
   if (Array.isArray(data)) return data;
   if (typeof data === 'string') {
