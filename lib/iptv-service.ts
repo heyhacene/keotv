@@ -203,7 +203,8 @@ export function cleanSeparatorName(name: string): string {
  * Checks if a channel should be excluded based on configured prefixes (case-insensitive)
  */
 export function shouldExcludeChannelByPrefix(channelName: string, excludedPrefixes: string[]): boolean {
-  if (!channelName || !excludedPrefixes || excludedPrefixes.length === 0) return false;
+  if (typeof channelName !== 'string' || !Array.isArray(excludedPrefixes) || excludedPrefixes.length === 0) return false;
+  if (!channelName) return false;
   const rawLower = channelName.trim().toLowerCase();
   const normalizedChannel = rawLower
     .normalize('NFD')
