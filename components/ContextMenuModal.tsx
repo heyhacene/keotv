@@ -22,7 +22,7 @@ interface ContextMenuModalProps {
 interface ContextOption {
   id: string;
   label: string;
-  icon: any;
+  icon: React.ElementType;
   color?: string;
   action: () => void;
 }
