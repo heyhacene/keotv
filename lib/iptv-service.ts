@@ -24,15 +24,16 @@ export function toArray<T = any>(data: any): T[] {
 // Standard IPTV Player User-Agent accepted by all IPTV providers & CDNs
 const IPTV_USER_AGENT = 'IPTVSmartersPro/3.1.5 (Linux; Android 12)';
 
-// Universal HTTP fetcher that bypasses CORS on Android TV / Mobile using Capacitor Native HTTP
-export async function fetchHttp<T = any>(url: string, responseType: 'json' | 'text' = 'json'): Promise<T> {
+// Universal HTTP fetcher with strict 10s timeout that bypasses CORS on Android TV / Mobile using Capacitor Native HTTP
+export async function fetchHttp<T = any>(
+  url: string,
+  responseType: 'json' | 'text' = 'json',
+  timeoutMs: number = 10000
+): Promise<T> {
   const cleanUrl = url.trim();
 
   if (Capacitor.isNativePlatform()) {
     try {
-      // NOTE: Always request 'text' from CapacitorHttp on Android!
-      // Android's native org.json parser blows up memory (OutOfMemoryError) or hangs for 30s on 10MB+ JSON payloads.
-      // Passing raw text directly to V8 allows JavaScript's C++ SIMD parser (JSON.parse) to parse 50MB in <100ms!
       const response = await CapacitorHttp.get({
         url: cleanUrl,
         headers: {
@@ -43,8 +44,8 @@ export async function fetchHttp<T = any>(url: string, responseType: 'json' | 'te
           'Connection': 'keep-alive',
         },
         responseType: 'text',
-        connectTimeout: 30000,
-        readTimeout: 90000,
+        connectTimeout: 5000,
+        readTimeout: timeoutMs,
       });
 
       if (response.status >= 400) {
@@ -71,21 +72,29 @@ export async function fetchHttp<T = any>(url: string, responseType: 'json' | 'te
     }
   }
 
-  // Webview / Browser fallback
-  const res = await fetch(cleanUrl, {
-    headers: {
-      'Accept': responseType === 'json' ? 'application/json, text/plain, */*' : '*/*',
-    },
-  });
+  // Webview / Browser fallback WITH STRICT TIMEOUT (AbortController)
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (!res.ok) {
-    throw new Error(`Erreur réseau (${res.status} ${res.statusText})`);
-  }
+  try {
+    const res = await fetch(cleanUrl, {
+      signal: controller.signal,
+      headers: {
+        'Accept': responseType === 'json' ? 'application/json, text/plain, */*' : '*/*',
+      },
+    });
 
-  if (responseType === 'json') {
-    return await res.json();
+    if (!res.ok) {
+      throw new Error(`Erreur réseau (${res.status} ${res.statusText})`);
+    }
+
+    if (responseType === 'json') {
+      return await res.json();
+    }
+    return (await res.text()) as unknown as T;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return (await res.text()) as unknown as T;
 }
 
 // Category classification helpers to guarantee 100% strict separation between Films and Séries
@@ -1823,25 +1832,34 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     console.warn('Bulk live stream fetch failed during sync, fallback to first category:', bulkErr);
   }
 
-  // Emergency single category fallback if bulk fetch failed (fast, instant fallback to first bouquet)
-  if (channels.length === 0 && firstLiveCategory) {
-    const rawCatId = firstLiveCategory.id.replace(/^grp_live_/, '');
-    try {
-      const firstStreams = await fetchCategoryStreamsOnDemand({
-        serverUrl: server,
-        username: cleanUsername,
-        password: cleanPassword,
-        categoryId: rawCatId,
-        categoryName: firstLiveCategory.name,
-        streamType: 'live',
-      });
-      if (firstStreams.length > 0) {
-        channels.push(...firstStreams);
-        firstLiveCategory.count = firstStreams.length;
+  // Fallback: If bulk fetch failed (common on some Xtream panels), download live categories in parallel!
+  if (channels.length === 0) {
+    onProgress?.('Téléchargement rapide des bouquets TV...');
+    const liveCats = categories.filter((c) => c.type === 'live' && c.id !== 'fav');
+    let cursor = 0;
+    const CONCURRENCY = 4;
+    const workers = Array.from({ length: CONCURRENCY }, async () => {
+      while (cursor < liveCats.length) {
+        const cat = liveCats[cursor++];
+        if (!cat) break;
+        const rawCatId = cat.id.replace(/^grp_live_/, '');
+        try {
+          const streams = await fetchCategoryStreamsOnDemand({
+            serverUrl: server,
+            username: cleanUsername,
+            password: cleanPassword,
+            categoryId: rawCatId,
+            categoryName: cat.name,
+            streamType: 'live',
+          });
+          if (streams.length > 0) {
+            channels.push(...streams);
+            cat.count = streams.length;
+          }
+        } catch {}
       }
-    } catch (err) {
-      console.warn('Emergency category pre-fetch fallback:', err);
-    }
+    });
+    await Promise.all(workers);
   }
 
   // Update counts on live categories from downloaded channels

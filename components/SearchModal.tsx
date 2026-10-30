@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { Search, X, Film, Clapperboard, Tv, Loader2, Star, Mic, LucideIcon } from 'lucide-react';
 import { Channel } from '@/types/iptv';
 import { db } from '@/lib/db';
-import { fetchAllVodStreamsBulk } from '@/lib/iptv-service';
 import { ContextMenuModal } from './ContextMenuModal';
 
 interface SearchModalProps {
@@ -104,39 +103,15 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   }[] | null>(null);
   const cacheLoadedAtRef = useRef<number>(0);
 
-  // Pre-load / refresh search pool when modal opens (Live channels + remote VOD catalog)
+  // Pre-load / refresh search pool when modal opens from local Dexie database
   useEffect(() => {
     if (!isOpen) return;
     const now = Date.now();
     if (!cacheRef.current || now - cacheLoadedAtRef.current > 30000) {
       db.channels
         .toArray()
-        .then(async (all) => {
-          let vodList: Channel[] = [];
-          if (serverCreds?.serverUrl && serverCreds.username && serverCreds.password) {
-            try {
-              vodList = await fetchAllVodStreamsBulk({
-                serverUrl: serverCreds.serverUrl,
-                username: serverCreds.username,
-                password: serverCreds.password,
-              });
-            } catch {}
-          }
-
-          const seenIds = new Set<string>();
-          const combined: Channel[] = [];
-          for (const c of all) {
-            seenIds.add(c.id);
-            combined.push(c);
-          }
-          for (const v of vodList) {
-            if (!seenIds.has(v.id)) {
-              seenIds.add(v.id);
-              combined.push(v);
-            }
-          }
-
-          cacheRef.current = combined.map((c) => ({
+        .then((all) => {
+          cacheRef.current = all.map((c) => ({
             channel: c,
             normName: (c.name || '')
               .normalize('NFD')
@@ -152,7 +127,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         })
         .catch((err) => console.warn('Search pre-index load notice:', err));
     }
-  }, [isOpen, serverCreds]);
+  }, [isOpen]);
 
   // Lightning-fast in-memory multi-word search (<2ms, smart ranking, channel number support)
   useEffect(() => {

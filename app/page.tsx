@@ -668,131 +668,79 @@ export default function KeoTVHome() {
     [channelSort]
   );
 
-  // Background download of ALL live bouquets (small requests, 3 at a time) so the full playlist is local
+  // Background download of ALL live bouquets (fast parallel requests) so the full playlist is local
   const startBackgroundLiveLoad = useCallback(async (pl: PlaylistConfig, cats: Category[]) => {
     if (pl.type !== 'xtream' || !pl.server_url || !pl.username || !pl.password) return;
     const token = ++bgLoadTokenRef.current;
 
     try {
-      // 1. LIVE CHANNELS (High priority: 1 single bulk HTTP request like TiviMate)
+      // 1. LIVE CHANNELS (High priority: 1 single bulk HTTP request like TiviMate, with fast parallel category fallback)
       const localLiveCount = await db.channels.where('stream_type').equals('live').count();
       if (localLiveCount === 0 && pl.server_url && pl.username && pl.password) {
         if (bgLoadTokenRef.current === token) {
           setBgLoadStatus('Synchronisation rapide du direct TV...');
         }
+        let allLive: Channel[] = [];
         try {
-          const allLive = await fetchAllLiveStreamsBulk({
+          allLive = await fetchAllLiveStreamsBulk({
             serverUrl: pl.server_url,
             username: pl.username,
             password: pl.password,
             categories: cats,
           });
-
-          if (allLive.length > 0 && bgLoadTokenRef.current === token) {
-            const favIds = await getFavoriteChannelIds();
-            const CHUNK = 500;
-            for (let i = 0; i < allLive.length; i += CHUNK) {
-              if (bgLoadTokenRef.current !== token) return;
-              const chunk = allLive.slice(i, i + CHUNK).map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
-              await db.channels.bulkPut(chunk);
-              await new Promise((r) => setTimeout(r, 15));
-            }
-
-            const countsByGroup = new Map<string, number>();
-            for (const s of allLive) {
-              countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
-            }
-            await db.transaction('rw', db.categories, () =>
-              Promise.all(Array.from(countsByGroup.entries()).map(([gid, cnt]) => db.categories.update(gid, { count: cnt })))
-            );
-            setCategories((prev) =>
-              prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
-            );
-          }
         } catch (bulkLiveErr) {
           console.warn('Bulk live stream background fetch notice:', bulkLiveErr);
         }
-      }
 
-      // 2. VOD MOVIES (Medium priority: load all movies if not yet stored in Dexie)
-      const localVodCount = await db.channels.where('stream_type').equals('vod').count();
-      if (localVodCount === 0 && pl.server_url && pl.username && pl.password) {
-        if (bgLoadTokenRef.current === token) {
-          setBgLoadStatus('Synchronisation du catalogue de films (VOD)...');
-        }
-        let bulkVodSuccess = false;
-        try {
-          const allVod = await fetchAllVodStreamsBulk({
-            serverUrl: pl.server_url,
-            username: pl.username,
-            password: pl.password,
+        // Parallel fallback if provider panel rejects bulk live streams
+        if (allLive.length === 0 && bgLoadTokenRef.current === token) {
+          const liveCats = cats.filter((c) => c.type === 'live' && c.id !== 'fav');
+          let cursor = 0;
+          const CONCURRENCY = 4;
+          const workers = Array.from({ length: CONCURRENCY }, async () => {
+            while (cursor < liveCats.length) {
+              if (bgLoadTokenRef.current !== token) break;
+              const cat = liveCats[cursor++];
+              if (!cat) break;
+              const rawCatId = cat.id.replace(/^grp_live_/, '');
+              try {
+                const streams = await fetchCategoryStreamsOnDemand({
+                  serverUrl: pl.server_url!,
+                  username: pl.username!,
+                  password: pl.password!,
+                  categoryId: rawCatId,
+                  categoryName: cat.name,
+                  streamType: 'live',
+                });
+                if (streams.length > 0) {
+                  allLive.push(...streams);
+                }
+              } catch {}
+            }
           });
-          if (allVod.length > 0 && bgLoadTokenRef.current === token) {
-            const favIds = await getFavoriteChannelIds();
-            const CHUNK = 500;
-            for (let i = 0; i < allVod.length; i += CHUNK) {
-              if (bgLoadTokenRef.current !== token) return;
-              const chunk = allVod.slice(i, i + CHUNK).map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
-              await db.channels.bulkPut(chunk);
-              await new Promise((r) => setTimeout(r, 15));
-            }
+          await Promise.all(workers);
+        }
 
-            const countsByGroup = new Map<string, number>();
-            for (const s of allVod) {
-              countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
-            }
-            await db.transaction('rw', db.categories, () =>
-              Promise.all(Array.from(countsByGroup.entries()).map(([gid, cnt]) => db.categories.update(gid, { count: cnt })))
-            );
-            setCategories((prev) =>
-              prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
-            );
-            bulkVodSuccess = true;
+        if (allLive.length > 0 && bgLoadTokenRef.current === token) {
+          const favIds = await getFavoriteChannelIds();
+          const CHUNK = 500;
+          for (let i = 0; i < allLive.length; i += CHUNK) {
+            if (bgLoadTokenRef.current !== token) return;
+            const chunk = allLive.slice(i, i + CHUNK).map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
+            await db.channels.bulkPut(chunk);
+            await new Promise((r) => setTimeout(r, 10));
           }
-        } catch (bulkVodErr) {
-          console.warn('BulkVOD fetch notice, fallback to progressive:', bulkVodErr);
-        }
 
-        if (!bulkVodSuccess && bgLoadTokenRef.current === token) {
-          console.info('Bulk VOD streams skipped; VOD categories will load instantly on-demand when clicked.');
-        }
-      }
-
-      // 3. TV SERIES (load all series catalog if not yet stored in Dexie)
-      const localSeriesCount = await db.channels.where('stream_type').equals('series').count();
-      if (localSeriesCount === 0 && pl.server_url && pl.username && pl.password) {
-        if (bgLoadTokenRef.current === token) {
-          setBgLoadStatus('Synchronisation du catalogue de séries...');
-        }
-        try {
-          const allSeries = await fetchAllSeriesCatalog({
-            serverUrl: pl.server_url,
-            username: pl.username,
-            password: pl.password,
-          });
-          if (allSeries.length > 0 && bgLoadTokenRef.current === token) {
-            const favIds = await getFavoriteChannelIds();
-            const CHUNK = 500;
-            for (let i = 0; i < allSeries.length; i += CHUNK) {
-              if (bgLoadTokenRef.current !== token) return;
-              const chunk = allSeries.slice(i, i + CHUNK).map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
-              await db.channels.bulkPut(chunk);
-              await new Promise((r) => setTimeout(r, 15));
-            }
-
-            const countsByGroup = new Map<string, number>();
-            for (const s of allSeries) {
-              countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
-            }
-            await db.transaction('rw', db.categories, () =>
-              Promise.all(Array.from(countsByGroup.entries()).map(([gid, cnt]) => db.categories.update(gid, { count: cnt })))
-            );
-            setCategories((prev) =>
-              prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
-            );
+          const countsByGroup = new Map<string, number>();
+          for (const s of allLive) {
+            countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
           }
-        } catch (seriesErr) {
-          console.warn('Background series fetch notice:', seriesErr);
+          await db.transaction('rw', db.categories, () =>
+            Promise.all(Array.from(countsByGroup.entries()).map(([gid, cnt]) => db.categories.update(gid, { count: cnt })))
+          );
+          setCategories((prev) =>
+            prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
+          );
         }
       }
 
