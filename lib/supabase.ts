@@ -135,9 +135,10 @@ export async function registerKeoUser(params: {
       updated_at: nowIso,
     };
 
+    const { email: _unusedEmail, ...dbPayload } = account;
     const { error: dbError } = await supabase
       .from('keotv_users')
-      .upsert(account, { onConflict: 'id' });
+      .upsert(dbPayload, { onConflict: 'id' });
 
     if (dbError) {
       console.warn('Error saving profile to keotv_users:', dbError);
@@ -217,7 +218,7 @@ export async function loginKeoUser(params: {
       const { data: legacyUser, error: legErr } = await supabase
         .from('keotv_users')
         .select('*')
-        .or(`username.eq.${cleanId},email.eq.${cleanId},id.eq.usr_${cleanId}`)
+        .or(`username.eq.${cleanId},id.eq.usr_${cleanId},id.eq.${cleanId}`)
         .maybeSingle();
 
       if (!legErr && legacyUser) {
@@ -296,10 +297,16 @@ export async function saveUserCloudSync(account: KeoUserAccount): Promise<boolea
     localStorage.setItem('keotv_active_user', JSON.stringify(updated));
   }
 
+  // Strip email from payload since remote table keotv_users doesn't have an email column
+  const { email: _unusedEmail, ...dbPayload } = updated as any;
+  if (!dbPayload.username && updated.email) {
+    dbPayload.username = updated.email.split('@')[0];
+  }
+
   try {
     const { error } = await supabase
       .from('keotv_users')
-      .upsert(updated, { onConflict: 'id' });
+      .upsert(dbPayload, { onConflict: 'id' });
     return !error;
   } catch {
     return false;
@@ -344,7 +351,7 @@ export async function fetchLatestKeoUser(identifier?: string): Promise<KeoUserAc
         const { data, error } = await supabase
           .from('keotv_users')
           .select('*')
-          .or(`username.eq.${cleanId},email.eq.${cleanId},id.eq.usr_${cleanId}`)
+          .or(`username.eq.${cleanId},id.eq.usr_${cleanId},id.eq.${cleanId}`)
           .maybeSingle();
 
         if (!error && data) {
