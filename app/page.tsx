@@ -695,9 +695,13 @@ export default function KeoTVHome() {
             for (const s of allLive) {
               countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
-            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
-              await db.categories.update(gid, { count: cnt });
-            }
+            await db.transaction('rw', db.categories, async () => {
+              const promises = [];
+              for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
+                promises.push(db.categories.update(gid, { count: cnt }));
+              }
+              await Promise.all(promises);
+            });
             setCategories((prev) =>
               prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
             );
@@ -734,9 +738,13 @@ export default function KeoTVHome() {
             for (const s of allVod) {
               countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
-            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
-              await db.categories.update(gid, { count: cnt });
-            }
+            await db.transaction('rw', db.categories, async () => {
+              const promises = [];
+              for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
+                promises.push(db.categories.update(gid, { count: cnt }));
+              }
+              await Promise.all(promises);
+            });
             setCategories((prev) =>
               prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
             );
@@ -802,9 +810,13 @@ export default function KeoTVHome() {
             for (const s of allSeries) {
               countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
-            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
-              await db.categories.update(gid, { count: cnt });
-            }
+            await db.transaction('rw', db.categories, async () => {
+              const promises = [];
+              for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
+                promises.push(db.categories.update(gid, { count: cnt }));
+              }
+              await Promise.all(promises);
+            });
             setCategories((prev) =>
               prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
             );
