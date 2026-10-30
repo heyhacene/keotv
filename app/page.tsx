@@ -676,49 +676,64 @@ export default function KeoTVHome() {
     try {
       // 1. LIVE CHANNELS (High priority: 1 single bulk HTTP request like TiviMate, with fast parallel category fallback)
       const localLiveCount = await db.channels.where('stream_type').equals('live').count();
-      if (localLiveCount === 0 && pl.server_url && pl.username && pl.password) {
-        if (bgLoadTokenRef.current === token) {
-          setBgLoadStatus('Synchronisation rapide du direct TV...');
-        }
+      const liveCats = cats.filter((c) => c.type === 'live' && c.id !== 'fav');
+
+      if (pl.server_url && pl.username && pl.password) {
         let allLive: Channel[] = [];
-        try {
-          allLive = await fetchAllLiveStreamsBulk({
-            serverUrl: pl.server_url,
-            username: pl.username,
-            password: pl.password,
-            categories: cats,
-          });
-        } catch (bulkLiveErr) {
-          console.warn('Bulk live stream background fetch notice:', bulkLiveErr);
+
+        if (localLiveCount === 0) {
+          if (bgLoadTokenRef.current === token) {
+            setBgLoadStatus('Synchronisation rapide du direct TV...');
+          }
+          try {
+            allLive = await fetchAllLiveStreamsBulk({
+              serverUrl: pl.server_url,
+              username: pl.username,
+              password: pl.password,
+              categories: cats,
+            });
+          } catch (bulkLiveErr) {
+            console.warn('Bulk live stream background fetch notice:', bulkLiveErr);
+          }
         }
 
-        // Parallel fallback if provider panel rejects bulk live streams
+        // Parallel category sync for any empty bouquets (fallback if bulk failed, or repair incomplete cache)
         if (allLive.length === 0 && bgLoadTokenRef.current === token) {
-          const liveCats = cats.filter((c) => c.type === 'live' && c.id !== 'fav');
-          let cursor = 0;
-          const CONCURRENCY = 4;
-          const workers = Array.from({ length: CONCURRENCY }, async () => {
-            while (cursor < liveCats.length) {
-              if (bgLoadTokenRef.current !== token) break;
-              const cat = liveCats[cursor++];
-              if (!cat) break;
-              const rawCatId = cat.id.replace(/^grp_live_/, '');
-              try {
-                const streams = await fetchCategoryStreamsOnDemand({
-                  serverUrl: pl.server_url!,
-                  username: pl.username!,
-                  password: pl.password!,
-                  categoryId: rawCatId,
-                  categoryName: cat.name,
-                  streamType: 'live',
-                });
-                if (streams.length > 0) {
-                  allLive.push(...streams);
-                }
-              } catch {}
-            }
+          const countsMap = new Map<string, number>();
+          await db.channels.where('stream_type').equals('live').each((ch) => {
+            if (ch.group_id) countsMap.set(ch.group_id, (countsMap.get(ch.group_id) || 0) + 1);
           });
-          await Promise.all(workers);
+          const targetsToLoad = liveCats.filter((c) => (countsMap.get(c.id) || 0) === 0);
+
+          if (targetsToLoad.length > 0) {
+            if (bgLoadTokenRef.current === token) {
+              setBgLoadStatus(`Chargement des bouquets (${targetsToLoad.length} restants)...`);
+            }
+            let cursor = 0;
+            const CONCURRENCY = 4;
+            const workers = Array.from({ length: CONCURRENCY }, async () => {
+              while (cursor < targetsToLoad.length) {
+                if (bgLoadTokenRef.current !== token) break;
+                const cat = targetsToLoad[cursor++];
+                if (!cat) break;
+                const rawCatId = cat.id.replace(/^grp_live_/, '');
+                try {
+                  const streams = await fetchCategoryStreamsOnDemand({
+                    serverUrl: pl.server_url!,
+                    username: pl.username!,
+                    password: pl.password!,
+                    categoryId: rawCatId,
+                    categoryName: cat.name,
+                    streamType: 'live',
+                  });
+                  if (streams.length > 0) {
+                    allLive.push(...streams);
+                  }
+                } catch {}
+              }
+            });
+            await Promise.all(workers);
+          }
         }
 
         if (allLive.length > 0 && bgLoadTokenRef.current === token) {
@@ -1311,12 +1326,9 @@ export default function KeoTVHome() {
           );
           if (xtreamPl) {
             refreshXtreamAccountInfo(xtreamPl).catch(() => {});
-            const totalChannelsInDb = await db.channels.count();
-            if (totalChannelsInDb === 0) {
-              setTimeout(() => {
-                startBackgroundLiveLoad(xtreamPl, loadedCats);
-              }, 1200);
-            }
+            setTimeout(() => {
+              startBackgroundLiveLoad(xtreamPl, loadedCats);
+            }, 1200);
           }
 
           if (!savedLastRefresh) {

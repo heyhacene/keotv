@@ -24,11 +24,11 @@ export function toArray<T = any>(data: any): T[] {
 // Standard IPTV Player User-Agent accepted by all IPTV providers & CDNs
 const IPTV_USER_AGENT = 'IPTVSmartersPro/3.1.5 (Linux; Android 12)';
 
-// Universal HTTP fetcher with strict 10s timeout that bypasses CORS on Android TV / Mobile using Capacitor Native HTTP
+// Universal HTTP fetcher with 20s timeout that bypasses CORS on Android TV / Mobile using Capacitor Native HTTP
 export async function fetchHttp<T = any>(
   url: string,
   responseType: 'json' | 'text' = 'json',
-  timeoutMs: number = 10000
+  timeoutMs: number = 20000
 ): Promise<T> {
   const cleanUrl = url.trim();
 
@@ -44,7 +44,7 @@ export async function fetchHttp<T = any>(
           'Connection': 'keep-alive',
         },
         responseType: 'text',
-        connectTimeout: 5000,
+        connectTimeout: 15000,
         readTimeout: timeoutMs,
       });
 
