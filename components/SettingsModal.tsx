@@ -400,7 +400,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const target = e.target as HTMLElement | null;
       const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
 
-      // If user is editing text in an input or textarea, allow Backspace for deletion without closing modal
+      /* If user is editing text in an input or textarea, allow Backspace for deletion without closing modal */
       if (e.key === 'Backspace' && isInputFocused) {
         return;
       }

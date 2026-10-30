@@ -83,7 +83,7 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
-      // If user is editing text in an input field, allow Backspace for deletion without closing modal
+      /* If user is editing text in an input field, allow Backspace for deletion without closing modal */
       const target = e.target as HTMLElement | null;
       const isInputFocused = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA');
 
