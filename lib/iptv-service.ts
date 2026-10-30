@@ -1417,6 +1417,89 @@ export async function fetchAllLiveStreamsBulk(params: {
   return channels;
 }
 
+// Fetch all VOD Movie streams in catalog in one single bulk call (~2-4MB JSON)
+export async function fetchAllVodStreamsBulk(params: {
+  serverUrl: string;
+  username: string;
+  password: string;
+  categories?: Category[];
+}): Promise<Channel[]> {
+  let server = params.serverUrl.trim().replace(/\/+$/, '');
+  if (!server.startsWith('http://') && !server.startsWith('https://')) {
+    server = 'http://' + server;
+  }
+  const cleanUser = decodeURIComponent(params.username.trim());
+  const cleanPass = decodeURIComponent(params.password.trim());
+  const encUser = encodeURIComponent(cleanUser);
+  const encPass = encodeURIComponent(cleanPass);
+  const credKey = `${server}_${cleanUser}`;
+  const now = Date.now();
+
+  let vodList =
+    xtreamVodCache &&
+    xtreamVodCache.credKey === credKey &&
+    now - xtreamVodCache.timestamp < 600000
+      ? xtreamVodCache.data
+      : null;
+
+  if (!vodList) {
+    const url = `${server}/player_api.php?username=${encUser}&password=${encPass}&action=get_vod_streams`;
+    const res = await fetchHttp(url, 'json');
+    vodList = toArray(res);
+    xtreamVodCache = { credKey, data: vodList, timestamp: now };
+  }
+
+  let catNames = new Map<string, string>();
+  if (params.categories && params.categories.length > 0) {
+    for (const c of params.categories) {
+      catNames.set(c.id, c.name);
+    }
+  } else {
+    try {
+      const cats = await db.categories.where('type').equals('vod').toArray();
+      catNames = new Map(cats.map((c) => [c.id, c.name]));
+    } catch {}
+  }
+
+  const favIds = new Set<string>();
+  try {
+    const favs = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
+    favs.forEach((c) => favIds.add(c.id));
+  } catch {}
+
+  const channels: Channel[] = [];
+  for (let i = 0; i < vodList.length; i++) {
+    const m = vodList[i];
+    if (!m) continue;
+    const streamId = m.stream_id || m.id || i + 1;
+    const ext = m.container_extension || 'mp4';
+    const mName = String(m.name || `Film ${i + 1}`).trim();
+    const rawCat = m.category_id ? String(m.category_id).trim() : 'all';
+    const groupId = `grp_vod_${rawCat}`;
+    const id = `ch_xtream_vod_${streamId}`;
+
+    channels.push({
+      id,
+      num: typeof m.num === 'number' && m.num > 0 ? m.num : i + 1,
+      name: mName,
+      logo: m.stream_icon || m.cover || '',
+      stream_url: `${server}/movie/${encUser}/${encPass}/${streamId}.${ext}`,
+      stream_type: 'vod',
+      group_id: groupId,
+      group_name: catNames.get(groupId) || 'Films VOD',
+      epg_id: String(streamId),
+      is_favorite: favIds.has(id),
+      is_hidden: false,
+      custom_order: i + 1,
+      resolution: detectResolution(mName),
+      is_separator: false,
+      added: Number(m.added) > 0 ? Number(m.added) : undefined,
+    });
+  }
+
+  return channels;
+}
+
 export async function getAllVodChannels(
   serverUrl: string,
   username: string,

@@ -559,6 +559,13 @@ export default function KeoTVHome() {
           // Tier 1: exact group_id indexed match (e.g. grp_live_123, grp_vod_456, grp_series_789)
           rawList = await db.channels.where('group_id').equals(cat.id).toArray();
 
+          // Sync real local count to category badge if out of date
+          if (rawList.length > 0 && cat.count !== rawList.length) {
+            cat.count = rawList.length;
+            db.categories.update(cat.id, { count: rawList.length }).catch(() => {});
+            setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, count: rawList.length } : c)));
+          }
+
           // NOTE: no fuzzy fallbacks here on purpose. Matching by numeric id or by name across
           // stream types mixed Films / Séries / TV together. The group_id is the single source of truth.
 
@@ -670,12 +677,7 @@ export default function KeoTVHome() {
     try {
       // 1. LIVE CHANNELS (High priority: 1 single bulk HTTP request like TiviMate)
       const localLiveCount = await db.channels.where('stream_type').equals('live').count();
-      const liveCats = cats.filter((c) => c.type === 'live' && c.id !== 'fav' && !c.id.startsWith('fav_'));
-      const loadedGroupKeys = (await db.channels.where('stream_type').equals('live').uniqueKeys('group_id')) as string[];
-      const loadedGroupSet = new Set<string>(loadedGroupKeys.map(String));
-      const hasMissingLiveCats = liveCats.some((c) => !loadedGroupSet.has(c.id));
-
-      if ((localLiveCount === 0 || hasMissingLiveCats) && pl.server_url && pl.username && pl.password) {
+      if (localLiveCount === 0 && pl.server_url && pl.username && pl.password) {
         if (bgLoadTokenRef.current === token) {
           setBgLoadStatus('Synchronisation rapide du direct TV...');
         }
@@ -918,6 +920,35 @@ export default function KeoTVHome() {
 
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
         const loadedPlaylists = await db.playlists.toArray();
+        // Auto-repair category counts from locally stored channels if any are 0
+        const chTotal = await db.channels.count();
+        if (chTotal > 0) {
+          const hasZeroCounts = loadedCats.some((c) => !c.id.startsWith('fav') && (!c.count || c.count === 0));
+          if (hasZeroCounts) {
+            const countsMap = new Map<string, number>();
+            await db.channels.each((ch) => {
+              if (ch.group_id) {
+                countsMap.set(ch.group_id, (countsMap.get(ch.group_id) || 0) + 1);
+              }
+            });
+            let didChange = false;
+            await db.transaction('rw', db.categories, async () => {
+              for (const c of loadedCats) {
+                if (c.id.startsWith('fav')) continue;
+                const realCount = countsMap.get(c.id) || 0;
+                if (c.count !== realCount) {
+                  c.count = realCount;
+                  didChange = true;
+                  await db.categories.update(c.id, { count: realCount });
+                }
+              }
+            });
+            if (didChange) {
+              setCategories([...loadedCats]);
+            }
+          }
+        }
+
         setCategories(loadedCats);
         setPlaylists(loadedPlaylists);
         await updateFavoriteCounts();
@@ -1015,6 +1046,35 @@ export default function KeoTVHome() {
         }
 
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
+        // Auto-repair category counts from locally stored channels if any are 0
+        const chTotal = await db.channels.count();
+        if (chTotal > 0) {
+          const hasZeroCounts = loadedCats.some((c) => !c.id.startsWith('fav') && (!c.count || c.count === 0));
+          if (hasZeroCounts) {
+            const countsMap = new Map<string, number>();
+            await db.channels.each((ch) => {
+              if (ch.group_id) {
+                countsMap.set(ch.group_id, (countsMap.get(ch.group_id) || 0) + 1);
+              }
+            });
+            let didChange = false;
+            await db.transaction('rw', db.categories, async () => {
+              for (const c of loadedCats) {
+                if (c.id.startsWith('fav')) continue;
+                const realCount = countsMap.get(c.id) || 0;
+                if (c.count !== realCount) {
+                  c.count = realCount;
+                  didChange = true;
+                  await db.categories.update(c.id, { count: realCount });
+                }
+              }
+            });
+            if (didChange) {
+              setCategories([...loadedCats]);
+            }
+          }
+        }
+
         setCategories(loadedCats);
         setPlaylists(await db.playlists.toArray());
         await updateFavoriteCounts();
@@ -1231,6 +1291,35 @@ export default function KeoTVHome() {
         }
         await updateFavoriteCounts();
 
+        // Auto-repair category counts from locally stored channels if any are 0
+        const chTotal = await db.channels.count();
+        if (chTotal > 0) {
+          const hasZeroCounts = loadedCats.some((c) => !c.id.startsWith('fav') && (!c.count || c.count === 0));
+          if (hasZeroCounts) {
+            const countsMap = new Map<string, number>();
+            await db.channels.each((ch) => {
+              if (ch.group_id) {
+                countsMap.set(ch.group_id, (countsMap.get(ch.group_id) || 0) + 1);
+              }
+            });
+            let didChange = false;
+            await db.transaction('rw', db.categories, async () => {
+              for (const c of loadedCats) {
+                if (c.id.startsWith('fav')) continue;
+                const realCount = countsMap.get(c.id) || 0;
+                if (c.count !== realCount) {
+                  c.count = realCount;
+                  didChange = true;
+                  await db.categories.update(c.id, { count: realCount });
+                }
+              }
+            });
+            if (didChange) {
+              setCategories([...loadedCats]);
+            }
+          }
+        }
+
         setCategories(loadedCats);
         setPlaylists(loadedPlaylists);
 
@@ -1292,10 +1381,8 @@ export default function KeoTVHome() {
           );
           if (xtreamPl) {
             refreshXtreamAccountInfo(xtreamPl).catch(() => {});
-            const liveInDb = await db.channels.where('stream_type').equals('live').count();
-            const vodInDb = await db.channels.where('stream_type').equals('vod').count();
-            const seriesInDb = await db.channels.where('stream_type').equals('series').count();
-            if (liveInDb < 500 || vodInDb === 0 || seriesInDb === 0) {
+            const totalChannelsInDb = await db.channels.count();
+            if (totalChannelsInDb === 0) {
               setTimeout(() => {
                 startBackgroundLiveLoad(xtreamPl, loadedCats);
               }, 1200);
