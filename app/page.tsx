@@ -3567,13 +3567,6 @@ export default function KeoTVHome() {
         <div className="flex h-full w-full bg-tv-bg overflow-hidden select-none">
           {/* A. Ultra-compact TV-style Sidebar (48px) */}
           <div className="w-12 bg-tv-surface border-r border-tv-border flex flex-col items-center py-2 justify-between flex-shrink-0 z-20">
-            {/* KeoTV mini logo */}
-            <div className="flex flex-col items-center mb-1">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-sky-600 to-tv-accent flex items-center justify-center shadow-md shadow-sky-500/20">
-                <Tv className="w-4 h-4 text-white" />
-              </div>
-            </div>
-
             {/* Navigation Icons (Direct, Films, Séries, Favoris, Recherche) */}
             <div className="flex-1 flex flex-col items-center space-y-1.5 w-full px-1 justify-center">
               <button

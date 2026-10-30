@@ -58,12 +58,9 @@ export const NavigationSidebar: React.FC<NavigationSidebarProps> = ({
         activePane === 'menu' ? 'bg-tv-surface' : 'bg-tv-bg'
       }`}
     >
-      {/* Brand logo */}
-      <div className="flex flex-col items-center mb-3 flex-shrink-0">
-        <div className="w-8 h-8 md:w-9 md:h-9 rounded-xl bg-gradient-to-tr from-sky-600 to-tv-accent flex items-center justify-center shadow-lg shadow-sky-500/20">
-          <Tv className="w-4 h-4 md:w-5 md:h-5 text-white" />
-        </div>
-        <span className="text-[9px] font-black tracking-widest text-tv-accent mt-0.5 uppercase">
+      {/* Brand text */}
+      <div className="flex flex-col items-center mb-2.5 pt-1 flex-shrink-0">
+        <span className="text-[10px] md:text-xs font-black tracking-widest text-tv-accent uppercase">
           KeoTV
         </span>
       </div>
