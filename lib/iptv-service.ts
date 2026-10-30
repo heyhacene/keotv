@@ -186,7 +186,7 @@ export function isSeparatorChannel(ch?: Channel | null): boolean {
   if (/^[-=*#_~]{2,}\s*.+\s*[-=*#_~]{2,}$/.test(name)) return true;
 
   // Common IPTV header prefixes: "---", "***", "===", "###", ">>>", "<<<", "|||"
-  if (/^[-=*#_~|]{3,}/.test(name)) return true;
+  if (/^[-=*#_~|><]{3,}/.test(name)) return true;
 
   return false;
 }
