@@ -603,9 +603,11 @@ export default function KeoTVHome() {
                   try {
                     await db.channels.bulkPut(mergedStreams);
                   } catch (putErr) {
-                    for (const s of mergedStreams) {
-                      try { await db.channels.put(s); } catch {}
-                    }
+                    await db.transaction('rw', db.channels, async () => {
+                      for (const s of mergedStreams) {
+                        try { await db.channels.put(s); } catch {}
+                      }
+                    });
                   }
                   await db.categories.update(cat.id, { count: mergedStreams.length });
                   setCategories((prev) =>
@@ -760,9 +762,11 @@ export default function KeoTVHome() {
               try {
                 await db.channels.bulkPut(mergedStreams);
               } catch {
-                for (const s of mergedStreams) {
-                  try { await db.channels.put(s); } catch {}
-                }
+                await db.transaction('rw', db.channels, async () => {
+                  for (const s of mergedStreams) {
+                    try { await db.channels.put(s); } catch {}
+                  }
+                });
               }
               await db.categories.update(cat.id, { count: streams.length });
               setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, count: streams.length } : c)));
@@ -884,13 +888,15 @@ export default function KeoTVHome() {
             await db.channels.bulkPut(mergedChunk);
           } catch (chunkErr) {
             console.warn('bulkPut chunk error, fallback to individual put:', chunkErr);
-            for (const item of mergedChunk) {
-              try {
-                await db.channels.put(item);
-              } catch (putErr) {
-                console.error('Failed to put channel', item.id, putErr);
+            await db.transaction('rw', db.channels, async () => {
+              for (const item of mergedChunk) {
+                try {
+                  await db.channels.put(item);
+                } catch (putErr) {
+                  console.error('Failed to put channel', item.id, putErr);
+                }
               }
-            }
+            });
           }
           if (result.channels.length > 1000) {
             const percent = Math.min(100, Math.round(((i + chunk.length) / result.channels.length) * 100));
@@ -984,9 +990,11 @@ export default function KeoTVHome() {
           try {
             await db.channels.bulkPut(mergedChunk);
           } catch {
-            for (const item of mergedChunk) {
-              try { await db.channels.put(item); } catch {}
-            }
+            await db.transaction('rw', db.channels, async () => {
+              for (const item of mergedChunk) {
+                try { await db.channels.put(item); } catch {}
+              }
+            });
           }
         }
 
@@ -2754,13 +2762,15 @@ export default function KeoTVHome() {
         await db.channels.bulkPut(mergedChunk);
       } catch (chunkErr) {
         console.warn('bulkPut chunk error, falling back to individual put:', chunkErr);
-        for (const item of mergedChunk) {
-          try {
-            await db.channels.put(item);
-          } catch (itemErr) {
-            console.error('Failed to put channel:', item.id, itemErr);
+        await db.transaction('rw', db.channels, async () => {
+          for (const item of mergedChunk) {
+            try {
+              await db.channels.put(item);
+            } catch (itemErr) {
+              console.error('Failed to put channel:', item.id, itemErr);
+            }
           }
-        }
+        });
       }
       if (result.channels.length > 1000) {
         const percent = Math.min(100, Math.round(((i + chunk.length) / result.channels.length) * 100));
