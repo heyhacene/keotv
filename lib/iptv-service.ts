@@ -196,7 +196,7 @@ export function isSeparatorChannel(ch?: Channel | null): boolean {
  */
 export function cleanSeparatorName(name: string): string {
   if (!name) return '';
-  return name.replace(/^[-=*#_~|.\s/\\+]+|[-=*#_~|.\s/\\+]+$/g, '').trim() || name;
+  return name.replace(/^[-=*#_~|.\s/\\<>]+|[-=*#_~|.\s/\\<>]+$/g, '').trim() || name;
 }
 
 /**
