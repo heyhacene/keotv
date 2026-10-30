@@ -1376,10 +1376,14 @@ export default function KeoTVHome() {
       });
       if (cancelled || changed.length === 0) return;
       setCategories(next);
-      for (const c of changed) {
+      if (changed.length > 0) {
         try {
-          await db.categories.update(c.id, { is_adult: c.is_adult });
-        } catch {}
+          await db.categories.bulkUpdate(
+            changed.map((c) => ({ key: c.id, changes: { is_adult: c.is_adult } }))
+          );
+        } catch (err) {
+          console.error("Failed to bulk update categories:", err);
+        }
       }
     })();
     return () => {
