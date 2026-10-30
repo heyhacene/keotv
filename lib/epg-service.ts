@@ -8,7 +8,7 @@ import { CatchupService } from './catchup-service';
  * Handles Xtream Codes Short EPG, Full Simple Data Table, and XMLTV sources.
  */
 export class EPGService {
-  private static decodeBase64IfNeeded(raw: any): string {
+  private static decodeBase64IfNeeded(raw: string | unknown): string {
     if (!raw || typeof raw !== 'string') return '';
     const trimmed = raw.trim();
     // Xtream panels almost always Base64-encode EPG titles and descriptions
