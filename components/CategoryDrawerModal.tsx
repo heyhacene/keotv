@@ -133,18 +133,18 @@ export const CategoryDrawerModal: React.FC<CategoryDrawerModalProps> = ({
                       {cat.name}
                     </span>
                     <span className="text-xs text-slate-400 block">
-                      {cat.count} chaînes disponibles
+                      {cat.count > 0 ? `${cat.count} chaînes disponibles` : 'Disponible'}
                     </span>
                   </div>
                 </div>
 
                 {isSelected ? (
                   <Check className="w-5 h-5 text-white flex-shrink-0" />
-                ) : (
+                ) : cat.count > 0 ? (
                   <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-mono">
                     {cat.count}
                   </span>
-                )}
+                ) : null}
               </button>
             );
           })}

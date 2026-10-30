@@ -278,17 +278,25 @@ const CategoryRow = React.memo<CategoryRowProps>(
             </span>
           )}
         </div>
-        <span
-          className={`text-[11px] px-1.5 py-0.5 rounded-full font-mono flex-shrink-0 ${
-            isFocused
-              ? 'bg-black/30 text-white font-bold'
-              : isSelected
-              ? 'bg-tv-accent/20 text-tv-accent font-bold'
-              : 'bg-slate-800/80 text-slate-400'
-          }`}
-        >
-          {category.count}
-        </span>
+        {typeof category.count === 'number' && category.count > 0 ? (
+          <span
+            className={`text-[11px] px-1.5 py-0.5 rounded-full font-mono flex-shrink-0 ${
+              isFocused
+                ? 'bg-black/30 text-white font-bold'
+                : isSelected
+                ? 'bg-tv-accent/20 text-tv-accent font-bold'
+                : 'bg-slate-800/80 text-slate-400'
+            }`}
+          >
+            {category.count}
+          </span>
+        ) : (
+          category.type !== 'live' && (
+            <span className="text-[10px] text-slate-500 font-mono px-1 flex-shrink-0">
+              •
+            </span>
+          )
+        )}
       </button>
     );
   },

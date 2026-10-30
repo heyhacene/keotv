@@ -178,8 +178,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   // Query actual channel and stream count in Dexie when modal is open
   useEffect(() => {
     if (isOpen) {
-      db.playlists.toArray().then((pls) => {
-        if (pls.length > 0) setLocalPlaylists(pls);
+      db.playlists.toArray().then(async (pls) => {
+        if (pls.length > 0) {
+          const seen = new Set<string>();
+          const uniquePls: PlaylistConfig[] = [];
+          for (const p of pls) {
+            const sig = p.type === 'xtream'
+              ? `xtream:${(p.server_url || '').trim().toLowerCase().replace(/\/+$/, '')}:${(p.username || '').trim().toLowerCase()}`
+              : `m3u:${(p.m3u_url || p.server_url || '').trim().toLowerCase()}`;
+            if (seen.has(sig)) {
+              await db.playlists.delete(p.id).catch(() => {});
+            } else {
+              seen.add(sig);
+              uniquePls.push(p);
+            }
+          }
+          setLocalPlaylists(uniquePls);
+        } else {
+          setLocalPlaylists([]);
+        }
       }).catch(() => {});
       db.channels.count().then((cnt) => setTotalLoadedStreams(cnt)).catch(() => {});
       Promise.all([

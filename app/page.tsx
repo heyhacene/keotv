@@ -39,7 +39,6 @@ import {
   fetchCategoryStreamsOnDemand,
   resolveSeriesEpisodes,
   loadAllLiveCategories,
-  loadAllVodCategories,
   fetchAllSeriesCatalog,
   fetchAllLiveStreamsBulk,
   fetchAllVodStreamsBulk,
@@ -755,38 +754,7 @@ export default function KeoTVHome() {
         }
 
         if (!bulkVodSuccess && bgLoadTokenRef.current === token) {
-          await loadAllVodCategories({
-            serverUrl: pl.server_url,
-            username: pl.username,
-            password: pl.password,
-            categories: cats,
-            shouldAbort: () => bgLoadTokenRef.current !== token,
-            onCategoryLoaded: async (cat, streams) => {
-              if (streams.length === 0) return;
-              const favIds = await getFavoriteChannelIds();
-              const mergedStreams = streams.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
-              try {
-                await db.channels.bulkPut(mergedStreams);
-              } catch {
-                try {
-                  await db.transaction('rw', db.channels, async () => {
-                    for (const s of mergedStreams) {
-                      try { await db.channels.put(s); } catch {}
-                    }
-                  });
-                } catch (txErr) {
-                  console.warn('Transaction fallback failed', txErr);
-                }
-              }
-              await db.categories.update(cat.id, { count: streams.length });
-              setCategories((prev) => prev.map((c) => (c.id === cat.id ? { ...c, count: streams.length } : c)));
-            },
-            onProgress: (done, total) => {
-              if (bgLoadTokenRef.current === token) {
-                setBgLoadStatus(`Synchronisation films : ${done}/${total} catégories VOD`);
-              }
-            },
-          });
+          console.info('Bulk VOD streams skipped; VOD categories will load instantly on-demand when clicked.');
         }
       }
 
@@ -1155,6 +1123,20 @@ export default function KeoTVHome() {
         }
 
         // 1. Permanent Playlist Persistence: Check Dexie, LocalStorage, and DB Settings
+        // Prune and clean up any ghost duplicate playlists in db.playlists right away
+        const rawDbPls = await db.playlists.toArray();
+        const seenInitSigs = new Set<string>();
+        for (const p of rawDbPls) {
+          const sig = p.type === 'xtream'
+            ? `xtream:${(p.server_url || '').trim().toLowerCase().replace(/\/+$/, '')}:${(p.username || '').trim().toLowerCase()}`
+            : `m3u:${(p.m3u_url || p.server_url || '').trim().toLowerCase()}`;
+          if (seenInitSigs.has(sig)) {
+            await db.playlists.delete(p.id).catch(() => {});
+          } else {
+            seenInitSigs.add(sig);
+          }
+        }
+
         const backupPlJson = typeof window !== 'undefined' ? localStorage.getItem('keotv_saved_playlist_v1') : null;
         const backupXtreamJson = typeof window !== 'undefined' ? localStorage.getItem('keotv_saved_xtream_creds') : null;
         const savedXtreamConfig = await getSetting<any>('last_xtream_config', null);
@@ -3126,23 +3108,45 @@ export default function KeoTVHome() {
     setActiveUser(account);
 
     try {
-      // 1. If account has playlists, import credentials and configurations directly WITHOUT attempting to connect/fetch streams
+      // 1. If account has playlists, deduplicate and import configurations safely
       if (account.playlists && account.playlists.length > 0) {
+        const existingPls = await db.playlists.toArray();
+        const seenSignatures = new Set<string>();
+        const cleanAccountPlaylists: PlaylistConfig[] = [];
+
         for (const pl of account.playlists) {
+          if (!pl) continue;
+          const sig = pl.type === 'xtream'
+            ? `xtream:${(pl.server_url || '').trim().toLowerCase().replace(/\/+$/, '')}:${(pl.username || '').trim().toLowerCase()}`
+            : `m3u:${(pl.m3u_url || pl.server_url || '').trim().toLowerCase()}`;
+
+          if (seenSignatures.has(sig)) continue;
+          seenSignatures.add(sig);
+
+          // Find if there is an existing playlist in db with same signature
+          const match = existingPls.find((ep) => {
+            const epSig = ep.type === 'xtream'
+              ? `xtream:${(ep.server_url || '').trim().toLowerCase().replace(/\/+$/, '')}:${(ep.username || '').trim().toLowerCase()}`
+              : `m3u:${(ep.m3u_url || ep.server_url || '').trim().toLowerCase()}`;
+            return epSig === sig;
+          });
+
+          const finalId = match ? match.id : (pl.id || 'pl_' + Date.now());
           const playlistConfig: PlaylistConfig = {
-            id: pl.id || 'pl_' + Date.now(),
-            name: pl.name || 'Playlist Cloud',
+            id: finalId,
+            name: pl.name || match?.name || 'Mon Abonnement IPTV',
             type: pl.type || 'xtream',
             server_url: pl.server_url || '',
             username: pl.username || '',
             password: pl.password || '',
             m3u_url: pl.m3u_url || '',
-            status: 'idle',
-            channel_count: pl.channel_count || 0,
-            last_sync_at: pl.last_sync_at || new Date().toISOString(),
+            status: 'active',
+            channel_count: pl.channel_count || match?.channel_count || 0,
+            last_sync_at: pl.last_sync_at || match?.last_sync_at || new Date().toISOString(),
           };
 
           await db.playlists.put(playlistConfig);
+          cleanAccountPlaylists.push(playlistConfig);
 
           if (pl.type === 'xtream') {
             await setSetting('last_xtream_config', {
@@ -3164,14 +3168,35 @@ export default function KeoTVHome() {
           }
         }
 
-        const allPls = await db.playlists.toArray();
-        setPlaylists(allPls);
+        // Delete any ghost duplicates from db.playlists sharing the same signature
+        const allDbPls = await db.playlists.toArray();
+        const retainedSignatures = new Set<string>();
+        for (const p of allDbPls) {
+          const sig = p.type === 'xtream'
+            ? `xtream:${(p.server_url || '').trim().toLowerCase().replace(/\/+$/, '')}:${(p.username || '').trim().toLowerCase()}`
+            : `m3u:${(p.m3u_url || p.server_url || '').trim().toLowerCase()}`;
+          if (retainedSignatures.has(sig)) {
+            await db.playlists.delete(p.id).catch(() => {});
+          } else {
+            retainedSignatures.add(sig);
+          }
+        }
 
-        const primaryPl = allPls[0];
-        if (primaryPl) {
-          // Trigger automatic channel loading in background or directly
-          handleResyncPlaylist(primaryPl).catch((resyncErr) => {
-            console.warn('Auto-resync on account sync failed:', resyncErr);
+        const freshPls = await db.playlists.toArray();
+        setPlaylists(freshPls);
+
+        // Update activeUser in memory and cloud so duplicates are pruned in Supabase too
+        if (cleanAccountPlaylists.length !== account.playlists.length) {
+          const cleanUser = { ...account, playlists: cleanAccountPlaylists };
+          setActiveUser(cleanUser);
+          saveUserCloudSync(cleanUser).catch(() => {});
+        }
+
+        // ONLY trigger resync on brand new first-time setup (local DB has 0 channels)!
+        const totalLocalChannels = await db.channels.count();
+        if (totalLocalChannels === 0 && freshPls[0]) {
+          handleResyncPlaylist(freshPls[0]).catch((resyncErr) => {
+            console.warn('Auto-resync on fresh account setup:', resyncErr);
           });
         }
       }
