@@ -884,12 +884,18 @@ export default function KeoTVHome() {
             await db.channels.bulkPut(mergedChunk);
           } catch (chunkErr) {
             console.warn('bulkPut chunk error, fallback to individual put:', chunkErr);
-            for (const item of mergedChunk) {
-              try {
-                await db.channels.put(item);
-              } catch (putErr) {
-                console.error('Failed to put channel', item.id, putErr);
-              }
+            try {
+              await db.transaction('rw', db.channels, async () => {
+                for (const item of mergedChunk) {
+                  try {
+                    await db.channels.put(item);
+                  } catch (putErr) {
+                    console.error('Failed to put channel', item.id, putErr);
+                  }
+                }
+              });
+            } catch (txErr) {
+              console.error('Fallback transaction failed:', txErr);
             }
           }
           if (result.channels.length > 1000) {
