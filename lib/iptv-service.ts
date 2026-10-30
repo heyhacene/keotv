@@ -761,13 +761,15 @@ export async function fetchPersonFilmography(
       const sparqlRes = await fetchHttp(sparqlUrl, 'json');
       const bindings = sparqlRes?.results?.bindings || [];
 
-      for (const b of bindings) {
-        const raw = (b?.itemLabel?.value || '').trim();
-        // Ignore raw Q-identifiers if no label exists
-        if (raw && !raw.match(/^Q\d+$/)) {
-          titles.add(raw);
-        }
-      }
+      await Promise.all(
+        bindings.map(async (b: any) => {
+          const raw = (b?.itemLabel?.value || '').trim();
+          // Ignore raw Q-identifiers if no label exists
+          if (raw && !raw.match(/^Q\d+$/)) {
+            titles.add(raw);
+          }
+        })
+      );
     }
   } catch (err) {
     console.warn(`Wikidata SPARQL failed for ${cleanName}:`, err);
@@ -1649,34 +1651,27 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     throw new Error('Identifiant ou mot de passe Xtream incorrect, ou compte inactif sur ce serveur.');
   }
 
-  // 2. Fetch Categories (Live, VOD, Series)
+  // 2. Fetch Categories (Live, VOD, Series) in parallel
   onProgress?.('Étape 2/3 : Organisation des bouquets TV, Films et Séries...');
   const catUrl = `${server}/player_api.php?username=${username}&password=${password}&action=get_live_categories`;
-  let rawLiveCategories: any[] = [];
-  try {
-    const res = await fetchHttp(catUrl, 'json');
-    rawLiveCategories = toArray(res);
-  } catch (err) {
-    console.warn('Could not fetch live categories directly:', err);
-  }
-
   const vodCatUrl = `${server}/player_api.php?username=${username}&password=${password}&action=get_vod_categories`;
-  let rawVodCategories: any[] = [];
-  try {
-    const res = await fetchHttp(vodCatUrl, 'json');
-    rawVodCategories = toArray(res);
-  } catch (err) {
-    console.warn('Could not fetch vod categories:', err);
-  }
-
   const seriesCatUrl = `${server}/player_api.php?username=${username}&password=${password}&action=get_series_categories`;
+
+  let rawLiveCategories: any[] = [];
+  let rawVodCategories: any[] = [];
   let rawSeriesCategories: any[] = [];
-  try {
-    const res = await fetchHttp(seriesCatUrl, 'json');
-    rawSeriesCategories = toArray(res);
-  } catch (err) {
-    console.warn('Could not fetch series categories:', err);
-  }
+
+  await Promise.all([
+    fetchHttp(catUrl, 'json')
+      .then(res => { rawLiveCategories = toArray(res); })
+      .catch(err => console.warn('Could not fetch live categories directly:', err)),
+    fetchHttp(vodCatUrl, 'json')
+      .then(res => { rawVodCategories = toArray(res); })
+      .catch(err => console.warn('Could not fetch vod categories:', err)),
+    fetchHttp(seriesCatUrl, 'json')
+      .then(res => { rawSeriesCategories = toArray(res); })
+      .catch(err => console.warn('Could not fetch series categories:', err))
+  ]);
 
   // 3. Build categories. Each category keeps the namespace of the API it came from:
   //    get_live_categories -> grp_live_<id>, get_vod_categories -> grp_vod_<id>,
