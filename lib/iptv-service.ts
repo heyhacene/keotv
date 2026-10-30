@@ -761,13 +761,13 @@ export async function fetchPersonFilmography(
       const sparqlRes = await fetchHttp(sparqlUrl, 'json');
       const bindings = sparqlRes?.results?.bindings || [];
 
-      for (const b of bindings) {
+      await Promise.all(bindings.map(async (b: any) => {
         const raw = (b?.itemLabel?.value || '').trim();
         // Ignore raw Q-identifiers if no label exists
         if (raw && !raw.match(/^Q\d+$/)) {
           titles.add(raw);
         }
-      }
+      }));
     }
   } catch (err) {
     console.warn(`Wikidata SPARQL failed for ${cleanName}:`, err);
