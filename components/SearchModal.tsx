@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
-import { Search, X, Film, Clapperboard, Tv, Loader2, Star, Mic } from 'lucide-react';
+import { Search, X, Film, Clapperboard, Tv, Loader2, Star, Mic, LucideIcon } from 'lucide-react';
 import { Channel } from '@/types/iptv';
 import { db } from '@/lib/db';
 import { ContextMenuModal } from './ContextMenuModal';
@@ -68,7 +68,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     }
   }, [isTvMode]);
 
-  const FILTERS: { id: SearchFilterType; label: string; icon: any }[] = [
+  const FILTERS: { id: SearchFilterType; label: string; icon: LucideIcon }[] = [
     { id: 'all', label: 'Tous', icon: Search },
     { id: 'vod', label: 'Films', icon: Film },
     { id: 'series', label: 'Séries', icon: Clapperboard },
