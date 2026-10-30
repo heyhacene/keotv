@@ -603,8 +603,14 @@ export default function KeoTVHome() {
                   try {
                     await db.channels.bulkPut(mergedStreams);
                   } catch (putErr) {
-                    for (const s of mergedStreams) {
-                      try { await db.channels.put(s); } catch {}
+                    try {
+                      await db.transaction('rw', db.channels, async () => {
+                        for (const s of mergedStreams) {
+                          try { await db.channels.put(s); } catch {}
+                        }
+                      });
+                    } catch (txErr) {
+                      console.warn('Transaction fallback failed', txErr);
                     }
                   }
                   await db.categories.update(cat.id, { count: mergedStreams.length });
@@ -695,9 +701,9 @@ export default function KeoTVHome() {
             for (const s of allLive) {
               countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
-            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
-              await db.categories.update(gid, { count: cnt });
-            }
+            await db.transaction('rw', db.categories, () =>
+              Promise.all(Array.from(countsByGroup.entries()).map(([gid, cnt]) => db.categories.update(gid, { count: cnt })))
+            );
             setCategories((prev) =>
               prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
             );
@@ -734,9 +740,9 @@ export default function KeoTVHome() {
             for (const s of allVod) {
               countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
-            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
-              await db.categories.update(gid, { count: cnt });
-            }
+            await db.transaction('rw', db.categories, () =>
+              Promise.all(Array.from(countsByGroup.entries()).map(([gid, cnt]) => db.categories.update(gid, { count: cnt })))
+            );
             setCategories((prev) =>
               prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
             );
@@ -760,8 +766,14 @@ export default function KeoTVHome() {
               try {
                 await db.channels.bulkPut(mergedStreams);
               } catch {
-                for (const s of mergedStreams) {
-                  try { await db.channels.put(s); } catch {}
+                try {
+                  await db.transaction('rw', db.channels, async () => {
+                    for (const s of mergedStreams) {
+                      try { await db.channels.put(s); } catch {}
+                    }
+                  });
+                } catch (txErr) {
+                  console.warn('Transaction fallback failed', txErr);
                 }
               }
               await db.categories.update(cat.id, { count: streams.length });
@@ -802,9 +814,9 @@ export default function KeoTVHome() {
             for (const s of allSeries) {
               countsByGroup.set(s.group_id, (countsByGroup.get(s.group_id) || 0) + 1);
             }
-            for (const [gid, cnt] of Array.from(countsByGroup.entries())) {
-              await db.categories.update(gid, { count: cnt });
-            }
+            await db.transaction('rw', db.categories, () =>
+              Promise.all(Array.from(countsByGroup.entries()).map(([gid, cnt]) => db.categories.update(gid, { count: cnt })))
+            );
             setCategories((prev) =>
               prev.map((c) => (countsByGroup.has(c.id) ? { ...c, count: countsByGroup.get(c.id)! } : c))
             );
@@ -884,12 +896,18 @@ export default function KeoTVHome() {
             await db.channels.bulkPut(mergedChunk);
           } catch (chunkErr) {
             console.warn('bulkPut chunk error, fallback to individual put:', chunkErr);
-            for (const item of mergedChunk) {
-              try {
-                await db.channels.put(item);
-              } catch (putErr) {
-                console.error('Failed to put channel', item.id, putErr);
-              }
+            try {
+              await db.transaction('rw', db.channels, async () => {
+                for (const item of mergedChunk) {
+                  try {
+                    await db.channels.put(item);
+                  } catch (putErr) {
+                    console.error('Failed to put channel', item.id, putErr);
+                  }
+                }
+              });
+            } catch (txErr) {
+              console.warn('Transaction fallback failed', txErr);
             }
           }
           if (result.channels.length > 1000) {
@@ -984,8 +1002,14 @@ export default function KeoTVHome() {
           try {
             await db.channels.bulkPut(mergedChunk);
           } catch {
-            for (const item of mergedChunk) {
-              try { await db.channels.put(item); } catch {}
+            try {
+              await db.transaction('rw', db.channels, async () => {
+                for (const item of mergedChunk) {
+                  try { await db.channels.put(item); } catch {}
+                }
+              });
+            } catch (txErr) {
+              console.warn('Transaction fallback failed', txErr);
             }
           }
         }
@@ -1198,11 +1222,12 @@ export default function KeoTVHome() {
         // Ensure saved favorite channel IDs are marked in db.channels
         const favIds = await getFavoriteChannelIds();
         if (favIds.size > 0) {
-          for (const fId of favIds) {
-            try {
-              await db.channels.update(fId, { is_favorite: true });
-            } catch {}
-          }
+          await db.transaction('rw', db.channels, async () => {
+            const promises = Array.from(favIds).map((fId) =>
+              db.channels.update(fId, { is_favorite: true }).catch(() => {})
+            );
+            await Promise.all(promises);
+          });
         }
         await updateFavoriteCounts();
 
@@ -1376,11 +1401,9 @@ export default function KeoTVHome() {
       });
       if (cancelled || changed.length === 0) return;
       setCategories(next);
-      for (const c of changed) {
-        try {
-          await db.categories.update(c.id, { is_adult: c.is_adult });
-        } catch {}
-      }
+      await db.transaction('rw', db.categories, () =>
+        Promise.all(changed.map((c) => db.categories.update(c.id, { is_adult: c.is_adult })))
+      ).catch(() => {});
     })();
     return () => {
       cancelled = true;
@@ -2276,9 +2299,9 @@ export default function KeoTVHome() {
   };
 
   const handleReorderCategories = async (reordered: Category[]) => {
-    for (const c of reordered) {
-      await db.categories.update(c.id, { custom_order: c.custom_order });
-    }
+    await db.transaction('rw', db.categories, () =>
+      Promise.all(reordered.map((c) => db.categories.update(c.id, { custom_order: c.custom_order })))
+    );
     setCategories(reordered);
     showToast('Ordre des bouquets enregistré');
   };
@@ -2288,9 +2311,9 @@ export default function KeoTVHome() {
     all.forEach((c, idx) => {
       c.custom_order = idx;
     });
-    for (const c of all) {
-      await db.categories.update(c.id, { custom_order: c.custom_order });
-    }
+    await db.transaction('rw', db.categories, () =>
+      Promise.all(all.map((c) => db.categories.update(c.id, { custom_order: c.custom_order })))
+    );
     setCategories(all);
     showToast('Ordre d’origine réinitialisé');
   };
@@ -2754,12 +2777,18 @@ export default function KeoTVHome() {
         await db.channels.bulkPut(mergedChunk);
       } catch (chunkErr) {
         console.warn('bulkPut chunk error, falling back to individual put:', chunkErr);
-        for (const item of mergedChunk) {
-          try {
-            await db.channels.put(item);
-          } catch (itemErr) {
-            console.error('Failed to put channel:', item.id, itemErr);
-          }
+        try {
+          await db.transaction('rw', db.channels, async () => {
+            for (const item of mergedChunk) {
+              try {
+                await db.channels.put(item);
+              } catch (itemErr) {
+                console.error('Failed to put channel:', item.id, itemErr);
+              }
+            }
+          });
+        } catch (txErr) {
+          console.warn('Transaction fallback failed', txErr);
         }
       }
       if (result.channels.length > 1000) {
@@ -3062,11 +3091,17 @@ export default function KeoTVHome() {
 
       // 2. Restore user favorites
       if (account.favorites && account.favorites.length > 0) {
-        await db.channels.toCollection().modify({ is_favorite: false });
-        for (const favId of account.favorites) {
-          await db.channels.update(favId, { is_favorite: true });
-          await saveFavoriteChannelId(favId, true);
-        }
+        await db.transaction('rw', db.channels, db.settings, async () => {
+          await db.channels.toCollection().modify({ is_favorite: false });
+          const item = await db.settings.get('favorite_channel_ids');
+          const ids = item ? (item.value as string[]) : [];
+          const set = new Set(Array.isArray(ids) ? ids : []);
+          for (const favId of account.favorites) {
+            await db.channels.update(favId, { is_favorite: true });
+            set.add(favId);
+          }
+          await db.settings.put({ key: 'favorite_channel_ids', value: Array.from(set) });
+        });
         if (selectedCategory) {
           await loadCategoryChannels(selectedCategory, channelSort);
         }
@@ -3131,11 +3166,17 @@ export default function KeoTVHome() {
     if (!data) return false;
 
     if (data.favorites && data.favorites.length > 0) {
-      await db.channels.toCollection().modify({ is_favorite: false });
-      for (const favId of data.favorites) {
-        await db.channels.update(favId, { is_favorite: true });
-        await saveFavoriteChannelId(favId, true);
-      }
+      await db.transaction('rw', db.channels, db.settings, async () => {
+        await db.channels.toCollection().modify({ is_favorite: false });
+        const item = await db.settings.get('favorite_channel_ids');
+        const ids = item ? (item.value as string[]) : [];
+        const set = new Set(Array.isArray(ids) ? ids : []);
+        for (const favId of data.favorites) {
+          await db.channels.update(favId, { is_favorite: true });
+          set.add(favId);
+        }
+        await db.settings.put({ key: 'favorite_channel_ids', value: Array.from(set) });
+      });
       if (selectedCategory) {
         await loadCategoryChannels(selectedCategory, channelSort);
       }

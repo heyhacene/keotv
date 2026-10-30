@@ -25,7 +25,7 @@ export function toArray<T = any>(data: any): T[] {
 const IPTV_USER_AGENT = 'IPTVSmartersPro/3.1.5 (Linux; Android 12)';
 
 // Universal HTTP fetcher that bypasses CORS on Android TV / Mobile using Capacitor Native HTTP
-export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'json'): Promise<any> {
+export async function fetchHttp<T = any>(url: string, responseType: 'json' | 'text' = 'json'): Promise<T> {
   const cleanUrl = url.trim();
 
   if (Capacitor.isNativePlatform()) {
@@ -55,16 +55,16 @@ export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'js
         if (responseType === 'json') {
           if (typeof response.data === 'string') {
             const trimmed = response.data.trim();
-            if (!trimmed || trimmed === 'null') return [];
+            if (!trimmed || trimmed === 'null') return [] as unknown as T;
             try {
               return JSON.parse(trimmed);
             } catch {
-              return response.data;
+              return response.data as unknown as T;
             }
           }
-          return response.data;
+          return response.data as unknown as T;
         }
-        return response.data;
+        return response.data as unknown as T;
       }
     } catch (nativeErr: any) {
       console.warn('CapacitorHttp native request failed, trying fetch fallback:', nativeErr);
@@ -85,7 +85,7 @@ export async function fetchHttp(url: string, responseType: 'json' | 'text' = 'js
   if (responseType === 'json') {
     return await res.json();
   }
-  return await res.text();
+  return (await res.text()) as unknown as T;
 }
 
 // Category classification helpers to guarantee 100% strict separation between Films and Séries
@@ -186,7 +186,7 @@ export function isSeparatorChannel(ch?: Channel | null): boolean {
   if (/^[-=*#_~]{2,}\s*.+\s*[-=*#_~]{2,}$/.test(name)) return true;
 
   // Common IPTV header prefixes: "---", "***", "===", "###", ">>>", "<<<", "|||"
-  if (/^[-=*#_~|]{3,}/.test(name)) return true;
+  if (/^[-=*#_~|><]{3,}/.test(name)) return true;
 
   return false;
 }
@@ -196,7 +196,7 @@ export function isSeparatorChannel(ch?: Channel | null): boolean {
  */
 export function cleanSeparatorName(name: string): string {
   if (!name) return '';
-  return name.replace(/^[-=*#_~|.\s/\\+]+|[-=*#_~|.\s/\\+]+$/g, '').trim() || name;
+  return name.replace(/^[-=*#_~|.\s/\\<>]+|[-=*#_~|.\s/\\<>]+$/g, '').trim() || name;
 }
 
 /**
@@ -1649,34 +1649,27 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     throw new Error('Identifiant ou mot de passe Xtream incorrect, ou compte inactif sur ce serveur.');
   }
 
-  // 2. Fetch Categories (Live, VOD, Series)
+  // 2. Fetch Categories (Live, VOD, Series) in parallel
   onProgress?.('Étape 2/3 : Organisation des bouquets TV, Films et Séries...');
   const catUrl = `${server}/player_api.php?username=${username}&password=${password}&action=get_live_categories`;
-  let rawLiveCategories: any[] = [];
-  try {
-    const res = await fetchHttp(catUrl, 'json');
-    rawLiveCategories = toArray(res);
-  } catch (err) {
-    console.warn('Could not fetch live categories directly:', err);
-  }
-
   const vodCatUrl = `${server}/player_api.php?username=${username}&password=${password}&action=get_vod_categories`;
-  let rawVodCategories: any[] = [];
-  try {
-    const res = await fetchHttp(vodCatUrl, 'json');
-    rawVodCategories = toArray(res);
-  } catch (err) {
-    console.warn('Could not fetch vod categories:', err);
-  }
-
   const seriesCatUrl = `${server}/player_api.php?username=${username}&password=${password}&action=get_series_categories`;
+
+  let rawLiveCategories: any[] = [];
+  let rawVodCategories: any[] = [];
   let rawSeriesCategories: any[] = [];
-  try {
-    const res = await fetchHttp(seriesCatUrl, 'json');
-    rawSeriesCategories = toArray(res);
-  } catch (err) {
-    console.warn('Could not fetch series categories:', err);
-  }
+
+  await Promise.all([
+    fetchHttp(catUrl, 'json')
+      .then((res) => { rawLiveCategories = toArray(res); })
+      .catch((err) => console.warn('Could not fetch live categories directly:', err)),
+    fetchHttp(vodCatUrl, 'json')
+      .then((res) => { rawVodCategories = toArray(res); })
+      .catch((err) => console.warn('Could not fetch vod categories:', err)),
+    fetchHttp(seriesCatUrl, 'json')
+      .then((res) => { rawSeriesCategories = toArray(res); })
+      .catch((err) => console.warn('Could not fetch series categories:', err)),
+  ]);
 
   // 3. Build categories. Each category keeps the namespace of the API it came from:
   //    get_live_categories -> grp_live_<id>, get_vod_categories -> grp_vod_<id>,
