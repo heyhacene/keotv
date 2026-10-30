@@ -6,7 +6,7 @@ export class KeoTVDatabase extends Dexie {
   categories!: Table<Category, string>;
   epg_programs!: Table<EpgProgram, string>;
   playlists!: Table<PlaylistConfig, string>;
-  settings!: Table<{ key: string; value: any }, string>;
+  settings!: Table<{ key: string; value: unknown }, string>;
 
   constructor() {
     super('KeoTVDB');
