@@ -3062,11 +3062,17 @@ export default function KeoTVHome() {
 
       // 2. Restore user favorites
       if (account.favorites && account.favorites.length > 0) {
-        await db.channels.toCollection().modify({ is_favorite: false });
-        for (const favId of account.favorites) {
-          await db.channels.update(favId, { is_favorite: true });
-          await saveFavoriteChannelId(favId, true);
-        }
+        await db.transaction('rw', db.channels, db.settings, async () => {
+          await db.channels.toCollection().modify({ is_favorite: false });
+          const item = await db.settings.get('favorite_channel_ids');
+          const ids = item ? (item.value as string[]) : [];
+          const set = new Set(Array.isArray(ids) ? ids : []);
+          for (const favId of account.favorites) {
+            await db.channels.update(favId, { is_favorite: true });
+            set.add(favId);
+          }
+          await db.settings.put({ key: 'favorite_channel_ids', value: Array.from(set) });
+        });
         if (selectedCategory) {
           await loadCategoryChannels(selectedCategory, channelSort);
         }
@@ -3131,11 +3137,17 @@ export default function KeoTVHome() {
     if (!data) return false;
 
     if (data.favorites && data.favorites.length > 0) {
-      await db.channels.toCollection().modify({ is_favorite: false });
-      for (const favId of data.favorites) {
-        await db.channels.update(favId, { is_favorite: true });
-        await saveFavoriteChannelId(favId, true);
-      }
+      await db.transaction('rw', db.channels, db.settings, async () => {
+        await db.channels.toCollection().modify({ is_favorite: false });
+        const item = await db.settings.get('favorite_channel_ids');
+        const ids = item ? (item.value as string[]) : [];
+        const set = new Set(Array.isArray(ids) ? ids : []);
+        for (const favId of data.favorites) {
+          await db.channels.update(favId, { is_favorite: true });
+          set.add(favId);
+        }
+        await db.settings.put({ key: 'favorite_channel_ids', value: Array.from(set) });
+      });
       if (selectedCategory) {
         await loadCategoryChannels(selectedCategory, channelSort);
       }
