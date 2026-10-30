@@ -20,6 +20,7 @@ import {
   Radio,
   Pencil,
   Clock,
+  Tv,
 } from 'lucide-react';
 import { PlaylistConfig } from '@/types/iptv';
 import { submitAppFeedback, getActiveKeoUser, logoutKeoUser, KeoUserAccount } from '@/lib/supabase';
@@ -713,19 +714,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <div>
                   <h3 className="text-sm font-bold text-white">Gestion de vos Playlists IPTV</h3>
                   <p className="text-xs text-slate-400">
-                    Ajoutez vos abonnements Xtream ou supprimez les listes inutilisées.
+                    Gérez vos abonnements Xtream, vos fichiers M3U et la playlist démo France.
                   </p>
                 </div>
-                <button
-                  onClick={() => {
-                    onClose();
-                    onOpenXtreamModal();
-                  }}
-                  className="px-4 py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 shadow-lg flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
-                >
-                  <PlusCircle className="w-4 h-4" />
-                  <span>Ajouter une Playlist</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await onRestoreDemoPlaylist();
+                        onClose();
+                      } catch (err) {
+                        console.error('Failed to restore demo playlist:', err);
+                      }
+                    }}
+                    className="px-3.5 py-2 bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border border-sky-500/30 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5 focus:outline-none focus:ring-2 focus:ring-tv-accent"
+                    title="Charger la playlist démo France (Direct, VOD & Séries - sans CNews)"
+                  >
+                    <Tv className="w-4 h-4 text-sky-400" />
+                    <span>Charger Démo France</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      onClose();
+                      onOpenXtreamModal();
+                    }}
+                    className="px-4 py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 shadow-lg flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                  >
+                    <PlusCircle className="w-4 h-4" />
+                    <span>Ajouter une Playlist</span>
+                  </button>
+                </div>
               </div>
 
               {/* Playlists List */}
@@ -740,13 +759,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       onClick={async () => {
                         try {
                           await onRestoreDemoPlaylist();
+                          onClose();
                         } catch (err) {
                           console.error('Failed to restore demo playlist:', err);
                         }
                       }}
-                      className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-semibold transition focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
+                      className="px-4 py-2 bg-tv-focus hover:bg-sky-500 text-white rounded-xl text-xs font-semibold transition shadow-md focus:outline-none focus:ring-2 focus:ring-tv-accent focus:ring-offset-2 focus:ring-offset-tv-surface"
                     >
-                      Restaurer la playlist de test gratuite
+                      📺 Charger la playlist démo France (Direct, VOD & Séries)
                     </button>
                   </div>
                 ) : (

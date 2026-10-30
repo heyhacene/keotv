@@ -19,6 +19,7 @@ interface XtreamModalProps {
     onProgress: (step: string) => void
   ) => Promise<void>;
   initialPlaylist?: PlaylistConfig | null;
+  onLoadDemoPlaylist?: () => Promise<void>;
   onUpdatePlaylist?: (
     id: string,
     data: {
@@ -39,6 +40,7 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({
   onClose,
   onSavePlaylist,
   initialPlaylist,
+  onLoadDemoPlaylist,
   onUpdatePlaylist,
 }) => {
   const isEditing = Boolean(initialPlaylist);
@@ -297,6 +299,35 @@ export const XtreamModal: React.FC<XtreamModalProps> = ({
               <div className="min-w-0 flex-1 font-medium">
                 {progressMessage}
               </div>
+            </div>
+          )}
+
+          {!isEditing && onLoadDemoPlaylist && (
+            <div className="p-3.5 rounded-xl bg-gradient-to-r from-sky-950/40 via-tv-card/60 to-purple-950/30 border border-sky-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-sky-300 flex items-center space-x-1.5">
+                  <span>📺 Pas de compte IPTV ?</span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  Testez immédiatement l'application avec la playlist de démonstration (France Direct, Films & Séries, sans CNews).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={async () => {
+                  try {
+                    setIsLoading(true);
+                    await onLoadDemoPlaylist();
+                    onClose();
+                  } finally {
+                    setIsLoading(false);
+                  }
+                }}
+                disabled={isLoading}
+                className="px-3 py-1.5 bg-sky-500/20 hover:bg-sky-500/30 text-sky-200 border border-sky-500/40 rounded-lg text-xs font-semibold whitespace-nowrap transition"
+              >
+                Charger la démo
+              </button>
             </div>
           )}
 

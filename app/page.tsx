@@ -943,7 +943,7 @@ export default function KeoTVHome() {
   const triggerSilentRefresh = useCallback(async () => {
     if (isSilentRefreshing) return;
     const allPls = await db.playlists.toArray();
-    const activePl = allPls.find((p) => p.type === 'xtream' || (p.type === 'm3u' && p.id !== 'pl_demo_default'));
+    const activePl = allPls.find((p) => p.type === 'xtream' || (p.type === 'm3u' && !p.id.startsWith('pl_demo_')));
     if (!activePl) return;
 
     setIsSilentRefreshing(true);
@@ -1079,7 +1079,7 @@ export default function KeoTVHome() {
         let activePlaylists = await db.playlists.toArray();
 
         // If Dexie playlists table is empty or only has the demo playlist, RESTORE from permanent backups!
-        if (activePlaylists.length === 0 || activePlaylists.every((p) => p.id === 'pl_demo_default')) {
+        if (activePlaylists.length === 0 || activePlaylists.every((p) => p.id.startsWith('pl_demo_'))) {
           let recoveredPl: PlaylistConfig | null = null;
           if (backupPlJson) {
             try {
@@ -1120,6 +1120,7 @@ export default function KeoTVHome() {
 
           if (recoveredPl) {
             await db.playlists.delete('pl_demo_default');
+            await db.playlists.delete('pl_demo_france');
             await db.playlists.put(recoveredPl);
             activePlaylists = [recoveredPl];
             // If channels or categories are empty, schedule background reload
@@ -1151,18 +1152,14 @@ export default function KeoTVHome() {
         }
 
         // Check if user has non-demo categories
+        const demoCatIds = new Set(['fav', 'france_direct', 'sport', 'regions', 'films_vod', 'series_vod', 'tnt', 'cinema', 'news', 'doc']);
         const hasRealCats = allDbCats.some(
-          (c) =>
-            c.id !== 'fav' &&
-            c.id !== 'tnt' &&
-            c.id !== 'sport' &&
-            c.id !== 'cinema' &&
-            c.id !== 'news' &&
-            c.id !== 'doc'
+          (c) => !demoCatIds.has(c.id)
         );
 
         if (hasRealCats) {
           await db.playlists.delete('pl_demo_default');
+          await db.playlists.delete('pl_demo_france');
         }
 
         // Only install demo channels on fresh first-time installation (NEVER overwrite user setup!)
@@ -1171,7 +1168,7 @@ export default function KeoTVHome() {
           Boolean(backupPlJson) ||
           Boolean(backupXtreamJson) ||
           Boolean(savedXtreamConfig) ||
-          activePlaylists.some((p) => p.id !== 'pl_demo_default');
+          activePlaylists.some((p) => !p.id.startsWith('pl_demo_'));
 
         if (!hasAnyUserConfig && chCount === 0 && catCount === 0) {
           const userHasDeletedAll = await getSetting<boolean>('user_deleted_all_playlists', false);
@@ -1180,12 +1177,15 @@ export default function KeoTVHome() {
             await db.channels.bulkAdd(INITIAL_CHANNELS);
 
             const demoPlaylist: PlaylistConfig = {
-              id: 'pl_demo_default',
-              name: 'Chaînes Démo Gratuites',
+              id: 'pl_demo_france',
+              name: '📺 Démo France (Direct, VOD & Séries)',
               type: 'm3u',
-              server_url: 'https://test-streams.mux.dev',
+              server_url: '/playlist-demo.m3u',
               status: 'active',
               channel_count: INITIAL_CHANNELS.length,
+              live_count: INITIAL_CHANNELS.filter((c) => c.stream_type === 'live').length,
+              vod_count: INITIAL_CHANNELS.filter((c) => c.stream_type === 'vod').length,
+              series_count: INITIAL_CHANNELS.filter((c) => c.stream_type === 'series').length,
               last_sync_at: new Date().toISOString(),
             };
             await db.playlists.put(demoPlaylist);
@@ -1209,8 +1209,8 @@ export default function KeoTVHome() {
         setCategories(loadedCats);
         setPlaylists(loadedPlaylists);
 
-        // Pick initial category: first non-fav category with count > 0 (or TNT if demo)
-        let initialCat = loadedCats.find((c) => c.id === 'tnt');
+        // Pick initial category: france_direct if available, else first non-fav category
+        let initialCat = loadedCats.find((c) => c.id === 'france_direct' || c.id === 'tnt');
         if (!initialCat) {
           initialCat =
             loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) ||
@@ -2933,7 +2933,7 @@ export default function KeoTVHome() {
     const remainingPlaylists = await db.playlists.toArray();
     setPlaylists(remainingPlaylists);
 
-    if (id === 'pl_demo_default' || remainingPlaylists.length === 0) {
+    if (id.startsWith('pl_demo_') || remainingPlaylists.length === 0) {
       await setSetting('user_deleted_all_playlists', true);
       await setSetting('last_xtream_config', null);
       await db.categories.clear();
@@ -2967,12 +2967,15 @@ export default function KeoTVHome() {
     await db.channels.bulkAdd(INITIAL_CHANNELS);
 
     const demoPlaylist: PlaylistConfig = {
-      id: 'pl_demo_default',
-      name: 'Chaînes Démo Gratuites',
+      id: 'pl_demo_france',
+      name: '📺 Démo France (Direct, VOD & Séries)',
       type: 'm3u',
-      server_url: 'https://test-streams.mux.dev',
+      server_url: '/playlist-demo.m3u',
       status: 'active',
       channel_count: INITIAL_CHANNELS.length,
+      live_count: INITIAL_CHANNELS.filter((c) => c.stream_type === 'live').length,
+      vod_count: INITIAL_CHANNELS.filter((c) => c.stream_type === 'vod').length,
+      series_count: INITIAL_CHANNELS.filter((c) => c.stream_type === 'series').length,
       last_sync_at: new Date().toISOString(),
     };
     await db.playlists.put(demoPlaylist);
@@ -2982,15 +2985,15 @@ export default function KeoTVHome() {
 
     setCategories(loadedCats);
     setPlaylists(loadedPlaylists);
-    setFavCount(0);
+    setFavCount(INITIAL_CHANNELS.filter((c) => c.is_favorite).length);
 
-    const initialCat = loadedCats.find((c) => c.id === 'tnt') || loadedCats[0];
+    const initialCat = loadedCats.find((c) => c.id === 'france_direct') || loadedCats.find((c) => c.type === 'live') || loadedCats[0];
     setSelectedCategory(initialCat || null);
     if (initialCat) {
       await loadCategoryChannels(initialCat, channelSort);
     }
 
-    const initialChannel = INITIAL_CHANNELS.find((ch) => ch.id === 'ch_tf1') || INITIAL_CHANNELS[0];
+    const initialChannel = INITIAL_CHANNELS.find((ch) => ch.id === 'ch_bfm') || INITIAL_CHANNELS[0];
     if (initialChannel) {
       setActiveChannel(initialChannel);
       const epg = getMockEpgForChannel(initialChannel.id);
@@ -2998,6 +3001,7 @@ export default function KeoTVHome() {
       setNextEpg(epg.next);
       setIsStopped(false);
     }
+    toast.success('Playlist Démo France chargée avec succès !');
   };
 
   // User Account Sync Handler (username + password account login / registration)
@@ -4203,6 +4207,7 @@ export default function KeoTVHome() {
         }}
         onSavePlaylist={handleSavePlaylist}
         initialPlaylist={editingPlaylist}
+        onLoadDemoPlaylist={handleRestoreDemoPlaylist}
         onUpdatePlaylist={handleUpdatePlaylistSettings}
       />
 

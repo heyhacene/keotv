@@ -229,7 +229,7 @@ export default function WebSyncDashboard() {
       setPlaylistName('📺 Chaînes Françaises & VODs (Test M3U)');
       setStatusMessage({
         type: 'success',
-        text: 'Playlist de test française (BFM, CNews, CStar, Euronews, Films VOD) injectée sur votre compte avec succès !',
+        text: 'Playlist démo France (BFM, Arte, CStar, Euronews, Films & Séries - sans CNews) injectée sur votre compte avec succès !',
       });
     } catch (err: any) {
       setStatusMessage({ type: 'error', text: err?.message || 'Erreur lors de l’injection.' });
@@ -400,7 +400,7 @@ export default function WebSyncDashboard() {
                 onClick={handleInjectDemoPlaylist}
                 disabled={isLoading}
                 className="px-4 py-2.5 bg-gradient-to-r from-amber-500/20 to-yellow-500/20 border border-amber-500/30 hover:border-amber-400 text-amber-300 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 shadow-sm"
-                title="Ajouter la playlist de test française (BFM, CNews, CStar, Euronews, Films VOD)"
+                title="Ajouter la playlist démo France (BFM, Arte, CStar, Euronews, Films & Séries - sans CNews)"
               >
                 <Sparkles className="w-4 h-4 text-amber-400" />
                 <span>Charger la Playlist Démo France</span>
