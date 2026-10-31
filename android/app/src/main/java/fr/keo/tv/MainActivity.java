@@ -3,6 +3,7 @@ package fr.keo.tv;
 import androidx.appcompat.app.AlertDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
@@ -18,6 +19,16 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -56,12 +67,12 @@ public class MainActivity extends AppCompatActivity {
         setupAdapters();
         loadLocalData();
 
-        // Check if playlist configured, otherwise prompt login
+        // Check if playlist configured, otherwise prompt cloud sync from website
         KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
         if (pl != null && pl.serverUrl != null && !pl.serverUrl.isEmpty()) {
             updateHeaderPlaylistInfo(pl);
         } else {
-            showLoginDialog();
+            showCloudSyncDialog();
         }
     }
 
@@ -78,6 +89,7 @@ public class MainActivity extends AppCompatActivity {
         btnWatchFullscreen = findViewById(R.id.btn_watch_fullscreen);
         btnToggleFav = findViewById(R.id.btn_toggle_fav);
 
+        findViewById(R.id.btn_header_cloud).setOnClickListener(v -> showCloudSyncDialog());
         findViewById(R.id.btn_header_sync).setOnClickListener(v -> triggerSync());
         findViewById(R.id.btn_header_diagnostic).setOnClickListener(v -> showDiagnosticDialog());
         findViewById(R.id.btn_header_login).setOnClickListener(v -> showLoginDialog());
@@ -236,6 +248,135 @@ public class MainActivity extends AppCompatActivity {
                 .show();
     }
 
+    private void showCloudSyncDialog() {
+        final SharedPreferences prefs = getSharedPreferences("keotv_prefs", MODE_PRIVATE);
+        String lastUser = prefs.getString("cloud_username", "hacene");
+
+        android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
+        layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+        layout.setPadding(32, 24, 32, 24);
+
+        TextView tvInfo = new TextView(this);
+        tvInfo.setText("Récupérez instantanément vos abonnements IPTV enregistrés sur le portail Web (https://keotv.vercel.app/sync).\n\nSaisissez votre identifiant ou adresse email :");
+        tvInfo.setTextColor(0xFFCBD5E1);
+        tvInfo.setTextSize(12);
+        tvInfo.setPadding(0, 0, 0, 16);
+        layout.addView(tvInfo);
+
+        final EditText etUser = new EditText(this);
+        etUser.setHint("Identifiant ou email (ex: hacene)");
+        etUser.setText(lastUser);
+        layout.addView(etUser);
+
+        new AlertDialog.Builder(this)
+                .setTitle("☁️ Rapatriement depuis le portail Web")
+                .setView(layout)
+                .setPositiveButton("Rapatrier", (dialog, which) -> {
+                    String ident = etUser.getText().toString().trim();
+                    if (ident.isEmpty()) {
+                        Toast.makeText(MainActivity.this, "Veuillez entrer votre identifiant", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    prefs.edit().putString("cloud_username", ident).apply();
+                    pullAccountsFromCloud(ident);
+                })
+                .setNeutralButton("Saisie Manuelle", (dialog, which) -> showLoginDialog())
+                .setNegativeButton("Annuler", null)
+                .show();
+    }
+
+    private void pullAccountsFromCloud(final String ident) {
+        tvStatusBadge.setText("⏳ Rapatriement...");
+        Toast.makeText(this, "Connexion au portail Web pour '" + ident + "'...", Toast.LENGTH_SHORT).show();
+
+        new Thread(() -> {
+            try {
+                String cleanIdent = ident.trim().toLowerCase();
+                String enc = URLEncoder.encode(cleanIdent, "UTF-8");
+                String urlStr = "https://qvfmfstwrkcerzlbemzb.supabase.co/rest/v1/keotv_users?or=(username.eq."
+                        + enc + ",id.eq.usr_" + enc + ",id.eq." + enc + ")&select=*";
+
+                URL url = new URL(urlStr);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(15000);
+                conn.setRequestProperty("apikey", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs");
+                conn.setRequestProperty("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs");
+                conn.setRequestProperty("Accept", "application/json");
+
+                int code = conn.getResponseCode();
+                if (code != 200) {
+                    runOnUiThread(() -> {
+                        tvStatusBadge.setText("❌ Erreur");
+                        Toast.makeText(MainActivity.this, "Erreur serveur HTTP " + code, Toast.LENGTH_LONG).show();
+                    });
+                    return;
+                }
+
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                reader.close();
+
+                JsonArray arr = JsonParser.parseString(sb.toString()).getAsJsonArray();
+                if (arr.size() == 0) {
+                    runOnUiThread(() -> {
+                        tvStatusBadge.setText("❌ Non trouvé");
+                        Toast.makeText(MainActivity.this, "Aucun compte trouvé pour '" + ident + "'. Vérifiez sur https://keotv.vercel.app/sync", Toast.LENGTH_LONG).show();
+                    });
+                    return;
+                }
+
+                JsonObject userObj = arr.get(0).getAsJsonObject();
+                JsonArray playlists = userObj.has("playlists") && userObj.get("playlists").isJsonArray()
+                        ? userObj.getAsJsonArray("playlists") : null;
+
+                if (playlists == null || playlists.size() == 0) {
+                    runOnUiThread(() -> {
+                        tvStatusBadge.setText("⚠️ Vide");
+                        Toast.makeText(MainActivity.this, "Ce compte ne contient aucune playlist enregistrée sur le site.", Toast.LENGTH_LONG).show();
+                    });
+                    return;
+                }
+
+                JsonObject targetPl = null;
+                for (int i = 0; i < playlists.size(); i++) {
+                    JsonObject p = playlists.get(i).getAsJsonObject();
+                    if (p.has("server_url") && !p.get("server_url").getAsString().isEmpty()) {
+                        targetPl = p;
+                        break;
+                    }
+                }
+
+                if (targetPl == null) targetPl = playlists.get(0).getAsJsonObject();
+
+                final KeoDatabase.PlaylistItem pl = new KeoDatabase.PlaylistItem();
+                pl.id = targetPl.has("id") ? targetPl.get("id").getAsString() : "active_xtream";
+                pl.name = targetPl.has("name") ? targetPl.get("name").getAsString() : "Abonnement Xtream";
+                pl.type = targetPl.has("type") ? targetPl.get("type").getAsString() : "xtream";
+                pl.serverUrl = targetPl.has("server_url") ? targetPl.get("server_url").getAsString() : "";
+                pl.username = targetPl.has("username") ? targetPl.get("username").getAsString() : "";
+                pl.password = targetPl.has("password") ? targetPl.get("password").getAsString() : "";
+
+                db.savePlaylist(pl);
+
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "Compte '" + pl.name + "' rapatrié avec succès ! Synchronisation en cours...", Toast.LENGTH_LONG).show();
+                    triggerSync();
+                });
+
+            } catch (Exception e) {
+                final String err = e.getMessage();
+                runOnUiThread(() -> {
+                    tvStatusBadge.setText("❌ Erreur");
+                    Toast.makeText(MainActivity.this, "Erreur de rapatriement : " + err, Toast.LENGTH_LONG).show();
+                });
+            }
+        }).start();
+    }
+
     private void showLoginDialog() {
         KeoDatabase.PlaylistItem existing = db.getActivePlaylist();
 
@@ -259,7 +400,7 @@ public class MainActivity extends AppCompatActivity {
         layout.addView(etPass);
 
         new AlertDialog.Builder(this)
-                .setTitle("Configuration du Compte IPTV Xtream")
+                .setTitle("Configuration Manuelle du Compte Xtream")
                 .setView(layout)
                 .setPositiveButton("Enregistrer & Synchroniser", (dialog, which) -> {
                     String server = etServer.getText().toString().trim();
@@ -282,6 +423,7 @@ public class MainActivity extends AppCompatActivity {
 
                     triggerSync();
                 })
+                .setNeutralButton("☁️ Rapatrier du site", (dialog, which) -> showCloudSyncDialog())
                 .setNegativeButton("Annuler", null)
                 .show();
     }
