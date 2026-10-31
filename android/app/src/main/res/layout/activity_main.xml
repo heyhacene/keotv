@@ -5,192 +5,236 @@
     android:orientation="vertical"
     android:background="#080C14">
 
-    <!-- Top Bar Header -->
+    <!-- Top Compact Header (Mobile Portrait) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="16dp"
+        android:paddingEnd="16dp"
+        android:paddingTop="12dp"
+        android:paddingBottom="8dp"
+        android:background="#0F172A">
+
+        <!-- Row 1: Logo & Badges -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="KeoTV"
+                android:textColor="#38BDF8"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/tv_status_badge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="12dp"
+                android:text="✅ Prêt"
+                android:textColor="#34D399"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:background="#132E27" />
+
+            <View
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
+            <Button
+                android:id="@+id/btn_header_update"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:text="🔄 MàJ"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:background="@drawable/bg_button_selector"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:focusable="true" />
+
+        </LinearLayout>
+
+        <!-- Row 2: Sync Info -->
+        <TextView
+            android:id="@+id/tv_header_sync_info"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:textColor="#94A3B8"
+            android:textSize="11sp"
+            android:text="Abonnement Xtream"
+            android:singleLine="true" />
+
+        <!-- Row 3: Horizontal Action Buttons -->
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/btn_header_cloud"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:text="☁️ Rapatrier"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_button_selector"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:layout_marginEnd="6dp" />
+
+                <Button
+                    android:id="@+id/btn_header_sync"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:text="🔄 Synchroniser"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_button_selector"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:layout_marginEnd="6dp" />
+
+                <Button
+                    android:id="@+id/btn_header_diagnostic"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:text="📊 Diagnostic"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_button_selector"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:layout_marginEnd="6dp" />
+
+                <Button
+                    android:id="@+id/btn_header_login"
+                    android:layout_width="wrap_content"
+                    android:layout_height="32dp"
+                    android:text="👤 Compte"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_button_selector"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp" />
+
+            </LinearLayout>
+
+        </HorizontalScrollView>
+
+        <!-- Row 4: Search input -->
+        <EditText
+            android:id="@+id/et_search"
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:layout_marginTop="8dp"
+            android:hint="🔍 Rechercher une chaîne ou bouquet..."
+            android:textColor="#F8FAFC"
+            android:textColorHint="#64748B"
+            android:textSize="12sp"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:background="@drawable/bg_item_selector"
+            android:singleLine="true"
+            android:imeOptions="actionSearch" />
+
+    </LinearLayout>
+
+    <!-- Bouquets TV Horizontal Chips -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="4dp">
+
+        <TextView
+            android:id="@+id/tv_bouquets_header"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="BOUQUETS TV"
+            android:textColor="#64748B"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:paddingBottom="4dp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recycler_categories"
+            android:layout_width="match_parent"
+            android:layout_height="42dp"
+            android:scrollbars="none" />
+
+    </LinearLayout>
+
+    <!-- Channels List (Full remaining height in portrait) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="4dp">
+
+        <TextView
+            android:id="@+id/tv_channels_header"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CHAÎNES DU BOUQUET"
+            android:textColor="#64748B"
+            android:textSize="10sp"
+            android:textStyle="bold"
+            android:paddingBottom="4dp" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/recycler_channels"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:scrollbars="vertical" />
+
+    </LinearLayout>
+
+    <!-- Active Channel Bottom Bar (Mobile Portrait) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingStart="24dp"
-        android:paddingEnd="24dp"
-        android:paddingTop="12dp"
-        android:paddingBottom="12dp"
-        android:background="#0F172A">
+        android:background="@drawable/bg_card"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="KeoTV"
-            android:textColor="#38BDF8"
-            android:textSize="18sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/tv_status_badge"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginStart="16dp"
-            android:text="✅ Prêt"
-            android:textColor="#34D399"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:paddingTop="3dp"
-            android:paddingBottom="3dp"
-            android:background="#132E27" />
-
-        <TextView
-            android:id="@+id/tv_header_sync_info"
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="12dp"
-            android:textColor="#94A3B8"
-            android:textSize="12sp"
-            android:text="Abonnement Xtream"
-            android:singleLine="true" />
-
-        <!-- Header action buttons -->
-        <Button
-            android:id="@+id/btn_header_cloud"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="☁️ Rapatrier du site"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:background="@drawable/bg_button_selector"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:layout_marginEnd="8dp"
-            android:focusable="true" />
-
-        <Button
-            android:id="@+id/btn_header_sync"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="Synchroniser"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:background="@drawable/bg_button_selector"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:layout_marginEnd="8dp"
-            android:focusable="true" />
-
-        <Button
-            android:id="@+id/btn_header_diagnostic"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="Diagnostic"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:background="@drawable/bg_button_selector"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:layout_marginEnd="8dp"
-            android:focusable="true" />
-
-        <Button
-            android:id="@+id/btn_header_update"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="🔄 MàJ"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:background="@drawable/bg_button_selector"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:layout_marginEnd="8dp"
-            android:focusable="true" />
-
-        <Button
-            android:id="@+id/btn_header_login"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="Compte IPTV"
-            android:textColor="#FFFFFF"
-            android:textSize="11sp"
-            android:textStyle="bold"
-            android:background="@drawable/bg_button_selector"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:focusable="true" />
-
-    </LinearLayout>
-
-    <!-- Main Split-Screen Content -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="horizontal"
-        android:padding="16dp">
-
-        <!-- Column 1: Bouquets (Categories) -->
-        <LinearLayout
-            android:layout_width="260dp"
-            android:layout_height="match_parent"
-            android:orientation="vertical"
-            android:layout_marginEnd="12dp">
-
-            <TextView
-                android:id="@+id/tv_bouquets_header"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="BOUQUETS TV"
-                android:textColor="#64748B"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:paddingBottom="8dp" />
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/recycler_categories"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:focusable="true"
-                android:scrollbars="vertical" />
-
-        </LinearLayout>
-
-        <!-- Column 2: Channels -->
-        <LinearLayout
-            android:layout_width="380dp"
-            android:layout_height="match_parent"
-            android:orientation="vertical"
-            android:layout_marginEnd="16dp">
-
-            <TextView
-                android:id="@+id/tv_channels_header"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:text="CHAÎNES DU BOUQUET"
-                android:textColor="#64748B"
-                android:textSize="11sp"
-                android:textStyle="bold"
-                android:paddingBottom="8dp" />
-
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/recycler_channels"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:focusable="true"
-                android:scrollbars="vertical" />
-
-        </LinearLayout>
-
-        <!-- Column 3: Active Channel Details & Quick Watch -->
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:background="@drawable/bg_card"
-            android:padding="20dp">
+            android:orientation="vertical">
 
             <TextView
                 android:id="@+id/tv_detail_name"
@@ -198,9 +242,9 @@
                 android:layout_height="wrap_content"
                 android:text="Sélectionnez une chaîne"
                 android:textColor="#F8FAFC"
-                android:textSize="18sp"
+                android:textSize="14sp"
                 android:textStyle="bold"
-                android:maxLines="2"
+                android:maxLines="1"
                 android:ellipsize="end" />
 
             <LinearLayout
@@ -208,16 +252,15 @@
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical"
-                android:layout_marginTop="8dp">
+                android:layout_marginTop="2dp">
 
                 <TextView
                     android:id="@+id/tv_detail_group"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:textColor="#38BDF8"
-                    android:textSize="12sp"
-                    android:textStyle="bold"
-                    android:text="Direct" />
+                    android:textSize="11sp"
+                    android:text="Direct TV" />
 
                 <TextView
                     android:id="@+id/tv_detail_resolution"
@@ -225,65 +268,42 @@
                     android:layout_height="wrap_content"
                     android:layout_marginStart="8dp"
                     android:textColor="#94A3B8"
-                    android:textSize="11sp"
+                    android:textSize="10sp"
                     android:text="HD" />
+
+                <!-- Hidden on portrait bottom bar to keep compact -->
+                <TextView
+                    android:id="@+id/tv_detail_epg"
+                    android:layout_width="0dp"
+                    android:layout_height="0dp"
+                    android:visibility="gone" />
 
             </LinearLayout>
 
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="1dp"
-                android:background="#1F2B40"
-                android:layout_marginTop="16dp"
-                android:layout_marginBottom="16dp" />
-
-            <!-- EPG Info -->
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Programme en cours"
-                android:textColor="#64748B"
-                android:textSize="11sp"
-                android:textStyle="bold" />
-
-            <TextView
-                android:id="@+id/tv_detail_epg"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:textColor="#F8FAFC"
-                android:textSize="14sp"
-                android:text="Direct TV" />
-
-            <View
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1" />
-
-            <!-- Big Watch Fullscreen Button -->
-            <Button
-                android:id="@+id/btn_watch_fullscreen"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:text="▶ Regarder en plein écran (OK)"
-                android:textColor="#FFFFFF"
-                android:textSize="13sp"
-                android:textStyle="bold"
-                android:background="@drawable/bg_button_selector"
-                android:focusable="true" />
-
-            <Button
-                android:id="@+id/btn_toggle_fav"
-                android:layout_width="match_parent"
-                android:layout_height="42dp"
-                android:layout_marginTop="8dp"
-                android:text="⭐ Ajouter aux favoris"
-                android:textColor="#F8FAFC"
-                android:textSize="12sp"
-                android:background="@drawable/bg_button_selector"
-                android:focusable="true" />
-
         </LinearLayout>
+
+        <!-- Star favorite icon button -->
+        <Button
+            android:id="@+id/btn_toggle_fav"
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:text="⭐"
+            android:textSize="14sp"
+            android:background="@drawable/bg_button_selector"
+            android:layout_marginEnd="8dp" />
+
+        <!-- Watch fullscreen button -->
+        <Button
+            android:id="@+id/btn_watch_fullscreen"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:text="▶ Regarder"
+            android:textColor="#FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:background="@drawable/bg_button_selector"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp" />
 
     </LinearLayout>
 

@@ -3,9 +3,12 @@ package fr.keo.tv;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.res.Configuration;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
@@ -48,6 +51,8 @@ public class MainActivity extends AppCompatActivity {
     // UI elements
     private TextView tvStatusBadge;
     private TextView tvHeaderSyncInfo;
+    private TextView tvChannelsHeader;
+    private EditText etSearch;
     private RecyclerView recyclerCategories;
     private RecyclerView recyclerChannels;
 
@@ -63,12 +68,13 @@ public class MainActivity extends AppCompatActivity {
 
     private KeoDatabase.CategoryItem selectedCategory = null;
     private KeoDatabase.ChannelItem activeChannel = null;
+    private boolean isSearching = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Global crash protector to avoid silent exits on Android TV
+        // Global crash protector to avoid silent exits on Android TV & phone
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
             Log.e(TAG, "FATAL CRASH on thread " + thread.getName(), throwable);
             try {
@@ -123,6 +129,8 @@ public class MainActivity extends AppCompatActivity {
     private void initViews() {
         tvStatusBadge = findViewById(R.id.tv_status_badge);
         tvHeaderSyncInfo = findViewById(R.id.tv_header_sync_info);
+        tvChannelsHeader = findViewById(R.id.tv_channels_header);
+        etSearch = findViewById(R.id.et_search);
         recyclerCategories = findViewById(R.id.recycler_categories);
         recyclerChannels = findViewById(R.id.recycler_channels);
 
@@ -147,14 +155,80 @@ public class MainActivity extends AppCompatActivity {
             if (activeChannel != null) {
                 db.toggleFavorite(activeChannel.id);
                 activeChannel.isFav = !activeChannel.isFav;
-                btnToggleFav.setText(activeChannel.isFav ? "★ Retirer des favoris" : "⭐ Ajouter aux favoris");
+                updateFavButtonLabel(activeChannel.isFav);
                 channelsAdapter.notifyDataSetChanged();
+
+                // Refresh categories to update the ⭐ Favoris bouquet count
+                List<KeoDatabase.CategoryItem> cats = db.getCategories("live");
+                categoriesAdapter.setItems(cats);
+
+                if (selectedCategory != null && "grp_favs".equals(selectedCategory.id)) {
+                    List<KeoDatabase.ChannelItem> favChannels = db.getFavoriteChannels();
+                    channelsAdapter.setItems(favChannels);
+                }
             }
         });
+
+        // Instant search / filtering
+        if (etSearch != null) {
+            etSearch.addTextChangedListener(new TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    performSearch(s != null ? s.toString() : "");
+                }
+
+                @Override
+                public void afterTextChanged(Editable s) {}
+            });
+        }
+    }
+
+    private void updateFavButtonLabel(boolean isFav) {
+        if (btnToggleFav == null) return;
+        boolean isLandscape = getResources().getConfiguration().orientation == Configuration.ORIENTATION_LANDSCAPE;
+        if (isLandscape) {
+            btnToggleFav.setText(isFav ? "★ Retirer des favoris" : "⭐ Ajouter aux favoris");
+        } else {
+            btnToggleFav.setText(isFav ? "★" : "⭐");
+        }
+    }
+
+    private void performSearch(String query) {
+        String q = query.trim();
+        if (q.isEmpty()) {
+            isSearching = false;
+            if (tvChannelsHeader != null) {
+                tvChannelsHeader.setText(selectedCategory != null ? selectedCategory.name.toUpperCase() : "CHAÎNES DU BOUQUET");
+            }
+            if (selectedCategory != null) {
+                selectCategory(selectedCategory);
+            }
+        } else {
+            isSearching = true;
+            List<KeoDatabase.ChannelItem> results = db.searchChannels(q);
+            if (tvChannelsHeader != null) {
+                tvChannelsHeader.setText("RÉSULTATS (" + results.size() + ")");
+            }
+            channelsAdapter.setItems(results);
+            if (!results.isEmpty()) {
+                selectChannel(results.get(0));
+            }
+        }
     }
 
     private void setupAdapters() {
-        recyclerCategories.setLayoutManager(new LinearLayoutManager(this));
+        int orientation = getResources().getConfiguration().orientation;
+        if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+            // Horizontal bouquet chips on mobile phones
+            recyclerCategories.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
+        } else {
+            // Vertical bouquet list on Android TV and landscape
+            recyclerCategories.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false));
+        }
+
         categoriesAdapter = new CategoriesAdapter();
         recyclerCategories.setAdapter(categoriesAdapter);
 
@@ -173,9 +247,9 @@ public class MainActivity extends AppCompatActivity {
                 recyclerCategories.requestFocus();
             } else {
                 tvDetailName.setText("Aucune chaîne en mémoire. Cliquez sur 'Synchroniser' ou 'Rapatrier'");
-                tvDetailGroup.setText("-");
-                tvDetailResolution.setText("-");
-                tvDetailEpg.setText("-");
+                if (tvDetailGroup != null) tvDetailGroup.setText("-");
+                if (tvDetailResolution != null) tvDetailResolution.setText("-");
+                if (tvDetailEpg != null) tvDetailEpg.setText("-");
                 findViewById(R.id.btn_header_cloud).requestFocus();
             }
         } catch (Throwable t) {
@@ -186,6 +260,10 @@ public class MainActivity extends AppCompatActivity {
     private void selectCategory(KeoDatabase.CategoryItem cat) {
         if (cat == null) return;
         selectedCategory = cat;
+        if (tvChannelsHeader != null && !isSearching) {
+            tvChannelsHeader.setText(cat.name.toUpperCase());
+        }
+
         List<KeoDatabase.ChannelItem> channels = db.getChannelsByGroup(cat.id);
         channelsAdapter.setItems(channels);
 
@@ -194,9 +272,9 @@ public class MainActivity extends AppCompatActivity {
         } else {
             activeChannel = null;
             tvDetailName.setText("Aucune chaîne dans ce bouquet");
-            tvDetailGroup.setText(cat.name);
-            tvDetailResolution.setText("-");
-            tvDetailEpg.setText("-");
+            if (tvDetailGroup != null) tvDetailGroup.setText(cat.name);
+            if (tvDetailResolution != null) tvDetailResolution.setText("-");
+            if (tvDetailEpg != null) tvDetailEpg.setText("-");
         }
     }
 
@@ -204,10 +282,16 @@ public class MainActivity extends AppCompatActivity {
         if (ch == null) return;
         activeChannel = ch;
         tvDetailName.setText(ch.name);
-        tvDetailGroup.setText(selectedCategory != null ? selectedCategory.name : "Direct TV");
-        tvDetailResolution.setText(ch.resolution != null ? ch.resolution : "HD");
-        tvDetailEpg.setText("Direct TV (" + ch.resolution + ")");
-        btnToggleFav.setText(ch.isFav ? "★ Retirer des favoris" : "⭐ Ajouter aux favoris");
+        if (tvDetailGroup != null) {
+            tvDetailGroup.setText(selectedCategory != null ? selectedCategory.name : "Direct TV");
+        }
+        if (tvDetailResolution != null) {
+            tvDetailResolution.setText(ch.resolution != null ? ch.resolution : "HD");
+        }
+        if (tvDetailEpg != null) {
+            tvDetailEpg.setText("Direct TV (" + ch.resolution + ")");
+        }
+        updateFavButtonLabel(ch.isFav);
     }
 
     private void launchPlayerFullscreen() {
@@ -271,12 +355,20 @@ public class MainActivity extends AppCompatActivity {
                 if (isFinishing() || isDestroyed()) return;
 
                 try {
-                    new AlertDialog.Builder(MainActivity.this)
+                    AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this)
                             .setTitle("⚠️ Erreur de synchronisation IPTV")
                             .setMessage("Impossible de synchroniser avec le serveur IPTV :\n\n" + error + "\n\n💡 Vérifiez l'adresse de votre serveur (ex: http://domaine:port), votre identifiant et mot de passe.")
                             .setPositiveButton("Vérifier le compte", (dialog, which) -> showLoginDialog())
-                            .setNegativeButton("Fermer", null)
-                            .show();
+                            .setNegativeButton("Fermer", null);
+
+                    if (error.contains("no column") || error.contains("SQLITE_ERROR")) {
+                        builder.setNeutralButton("Réparer la Base", (dialog, which) -> {
+                            db.purgeCache(true);
+                            triggerSync();
+                        });
+                    }
+
+                    builder.show();
                 } catch (Throwable t) {
                     Log.e(TAG, "Failed to show sync error dialog", t);
                 }
@@ -295,6 +387,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             int liveCount = db.getChannelCount("live");
             int catCount = db.getCategoryCount();
+            int favCount = db.getFavoriteCount();
             KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
 
             Runtime rt = Runtime.getRuntime();
@@ -303,8 +396,9 @@ public class MainActivity extends AppCompatActivity {
 
             StringBuilder msg = new StringBuilder();
             msg.append("📊 DIAGNOSTIC & SANTÉ DU SYSTÈME KEOTV\n\n");
-            msg.append("• Version : Build ").append(UpdateManager.getAppVersionCode(this)).append(" (100% Natif Android TV)\n");
+            msg.append("• Version : Build ").append(UpdateManager.getAppVersionCode(this)).append(" (100% Natif Android)\n");
             msg.append("• Chaînes TV en mémoire : ").append(liveCount).append("\n");
+            msg.append("• Favoris enregistrés : ").append(favCount).append("\n");
             msg.append("• Bouquets TV : ").append(catCount).append("\n");
             msg.append("• Playlist : ").append(pl != null ? pl.name : "Aucune").append("\n");
             msg.append("• Serveur : ").append(pl != null ? pl.serverUrl : "Non configuré").append("\n");
@@ -555,7 +649,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // --- RECYCLER VIEW ADAPTERS WITH CLEAN D-PAD FOCUS ---
+    // --- RECYCLER VIEW ADAPTERS WITH CLEAN TOUCH & D-PAD FOCUS ---
 
     private class CategoriesAdapter extends RecyclerView.Adapter<CategoriesAdapter.ViewHolder> {
         private final List<KeoDatabase.CategoryItem> items = new ArrayList<>();
@@ -640,13 +734,33 @@ public class MainActivity extends AppCompatActivity {
             holder.tvNum.setText(String.valueOf(position + 1));
             holder.tvName.setText(item.name);
             holder.tvRes.setText(item.resolution != null ? item.resolution : "HD");
+
+            // Favorite star badge
+            if (holder.tvFavStar != null) {
+                holder.tvFavStar.setVisibility(item.isFav ? View.VISIBLE : View.GONE);
+            }
+
+            // Resolution color styling
+            if ("4K".equalsIgnoreCase(item.resolution) || "UHD".equalsIgnoreCase(item.resolution)) {
+                holder.tvRes.setTextColor(0xFFF59E0B); // Amber / Gold
+            } else if ("FHD".equalsIgnoreCase(item.resolution)) {
+                holder.tvRes.setTextColor(0xFF38BDF8); // Cyan
+            } else {
+                holder.tvRes.setTextColor(0xFF94A3B8); // Slate
+            }
+
             holder.itemView.setSelected(selectedPos == position);
 
             holder.itemView.setOnClickListener(v -> {
                 selectedPos = holder.getBindingAdapterPosition();
                 notifyDataSetChanged();
                 selectChannel(item);
-                launchPlayerFullscreen();
+
+                // On phone (portrait), clicking directly can launch playback
+                int orientation = getResources().getConfiguration().orientation;
+                if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                    launchPlayerFullscreen();
+                }
             });
 
             holder.itemView.setOnFocusChangeListener((v, hasFocus) -> {
@@ -664,13 +778,14 @@ public class MainActivity extends AppCompatActivity {
         }
 
         class ViewHolder extends RecyclerView.ViewHolder {
-            TextView tvNum, tvName, tvEpg, tvRes;
+            TextView tvNum, tvName, tvEpg, tvRes, tvFavStar;
             ViewHolder(View v) {
                 super(v);
                 tvNum = v.findViewById(R.id.tv_channel_num);
                 tvName = v.findViewById(R.id.tv_channel_name);
                 tvEpg = v.findViewById(R.id.tv_channel_epg);
                 tvRes = v.findViewById(R.id.tv_channel_res);
+                tvFavStar = v.findViewById(R.id.tv_channel_fav_star);
             }
         }
     }
@@ -678,6 +793,11 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (etSearch != null && etSearch.hasFocus()) {
+                etSearch.clearFocus();
+                if (recyclerChannels != null) recyclerChannels.requestFocus();
+                return true;
+            }
             if (btnWatchFullscreen != null && (btnWatchFullscreen.hasFocus() || btnToggleFav.hasFocus())) {
                 if (recyclerChannels != null) recyclerChannels.requestFocus();
                 return true;

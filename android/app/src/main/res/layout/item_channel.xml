@@ -28,15 +28,33 @@
         android:layout_weight="1"
         android:orientation="vertical">
 
-        <TextView
-            android:id="@+id/tv_channel_name"
+        <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textColor="#F8FAFC"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:maxLines="1"
-            android:ellipsize="end" />
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tv_channel_name"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:textColor="#F8FAFC"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/tv_channel_fav_star"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="⭐"
+                android:textSize="11sp"
+                android:layout_marginStart="4dp"
+                android:visibility="gone" />
+
+        </LinearLayout>
 
         <TextView
             android:id="@+id/tv_channel_epg"
@@ -57,11 +75,10 @@
         android:textColor="#38BDF8"
         android:textSize="10sp"
         android:textStyle="bold"
-        android:paddingStart="5dp"
-        android:paddingEnd="5dp"
+        android:paddingStart="6dp"
+        android:paddingEnd="6dp"
         android:paddingTop="2dp"
         android:paddingBottom="2dp"
-        android:background="#1E293B"
-        android:text="HD" />
+        android:background="#0F243A" />
 
 </LinearLayout>

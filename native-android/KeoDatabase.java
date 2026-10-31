@@ -13,7 +13,7 @@ import java.util.List;
 public class KeoDatabase extends SQLiteOpenHelper {
 
     private static final String DB_NAME = "keotv_native.db";
-    private static final int DB_VERSION = 1;
+    private static final int DB_VERSION = 2;
     private static KeoDatabase instance;
 
     public static synchronized KeoDatabase getInstance(Context context) {
@@ -31,6 +31,44 @@ public class KeoDatabase extends SQLiteOpenHelper {
     public void onConfigure(SQLiteDatabase db) {
         super.onConfigure(db);
         db.enableWriteAheadLogging();
+    }
+
+    @Override
+    public void onOpen(SQLiteDatabase db) {
+        super.onOpen(db);
+        ensureColumnsExist(db);
+    }
+
+    private void ensureColumnsExist(SQLiteDatabase db) {
+        ensureColumnExists(db, "channels", "is_fav", "INTEGER DEFAULT 0");
+        ensureColumnExists(db, "channels", "resolution", "TEXT");
+        ensureColumnExists(db, "channels", "is_separator", "INTEGER DEFAULT 0");
+        ensureColumnExists(db, "channels", "logo", "TEXT");
+        ensureColumnExists(db, "categories", "is_adult", "INTEGER DEFAULT 0");
+        ensureColumnExists(db, "categories", "is_hidden", "INTEGER DEFAULT 0");
+    }
+
+    private void ensureColumnExists(SQLiteDatabase db, String table, String column, String typeDef) {
+        Cursor c = null;
+        try {
+            c = db.rawQuery("PRAGMA table_info(" + table + ")", null);
+            boolean exists = false;
+            if (c != null) {
+                int nameIdx = c.getColumnIndex("name");
+                while (c.moveToNext()) {
+                    if (nameIdx >= 0 && column.equalsIgnoreCase(c.getString(nameIdx))) {
+                        exists = true;
+                        break;
+                    }
+                }
+            }
+            if (!exists) {
+                db.execSQL("ALTER TABLE " + table + " ADD COLUMN " + column + " " + typeDef);
+            }
+        } catch (Exception ignored) {
+        } finally {
+            if (c != null) c.close();
+        }
     }
 
     @Override
@@ -98,11 +136,11 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        db.execSQL("DROP TABLE IF EXISTS playlists");
-        db.execSQL("DROP TABLE IF EXISTS categories");
-        db.execSQL("DROP TABLE IF EXISTS channels");
-        db.execSQL("DROP TABLE IF EXISTS settings");
-        onCreate(db);
+        try {
+            db.execSQL("DROP TABLE IF EXISTS categories");
+            db.execSQL("DROP TABLE IF EXISTS channels");
+            onCreate(db);
+        } catch (Exception ignored) {}
     }
 
     // Models
@@ -174,7 +212,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
     public void savePlaylist(PlaylistItem pl) {
         SQLiteDatabase db = getWritableDatabase();
         ContentValues cv = new ContentValues();
-        cv.put("id", pl.id != null ? pl.id : "default_xtream");
+        cv.put("id", pl.id != null ? pl.id : "active_xtream");
         cv.put("name", pl.name);
         cv.put("type", pl.type != null ? pl.type : "xtream");
         cv.put("server_url", pl.serverUrl);
@@ -189,6 +227,13 @@ public class KeoDatabase extends SQLiteOpenHelper {
     public List<CategoryItem> getCategories(String type) {
         List<CategoryItem> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
+
+        int favCount = getFavoriteCount();
+        if (favCount > 0) {
+            CategoryItem fav = new CategoryItem("grp_favs", "⭐ Favoris", type != null ? type : "live", favCount, 0);
+            list.add(fav);
+        }
+
         String sql = "SELECT id, name, type, count, custom_order, is_hidden, is_adult FROM categories WHERE is_hidden = 0";
         String[] args = null;
         if (type != null && !type.isEmpty()) {
@@ -216,6 +261,10 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
     // Channels queries
     public List<ChannelItem> getChannelsByGroup(String groupId) {
+        if ("grp_favs".equals(groupId)) {
+            return getFavoriteChannels();
+        }
+
         List<ChannelItem> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
         Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator "
@@ -257,6 +306,41 @@ public class KeoDatabase extends SQLiteOpenHelper {
             item.streamType = c.getString(6);
             item.logo = c.getString(7);
             item.isFav = true;
+            item.resolution = c.getString(9);
+            item.isSeparator = c.getInt(10) == 1;
+            list.add(item);
+        }
+        c.close();
+        return list;
+    }
+
+    public int getFavoriteCount() {
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT COUNT(*) FROM channels WHERE is_fav = 1 AND is_separator = 0", null);
+        int cnt = 0;
+        if (c.moveToFirst()) cnt = c.getInt(0);
+        c.close();
+        return cnt;
+    }
+
+    public List<ChannelItem> searchChannels(String query) {
+        List<ChannelItem> list = new ArrayList<>();
+        if (query == null || query.trim().isEmpty()) return list;
+        SQLiteDatabase db = getReadableDatabase();
+        String q = "%" + query.trim() + "%";
+        Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator "
+                + "FROM channels WHERE name LIKE ? AND is_separator = 0 ORDER BY num ASC, name ASC LIMIT 100", new String[]{q});
+        while (c.moveToNext()) {
+            ChannelItem item = new ChannelItem();
+            item.id = c.getString(0);
+            item.name = c.getString(1);
+            item.num = c.getInt(2);
+            item.groupId = c.getString(3);
+            item.groupName = c.getString(4);
+            item.streamUrl = c.getString(5);
+            item.streamType = c.getString(6);
+            item.logo = c.getString(7);
+            item.isFav = c.getInt(8) == 1;
             item.resolution = c.getString(9);
             item.isSeparator = c.getInt(10) == 1;
             list.add(item);
