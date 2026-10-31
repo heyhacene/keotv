@@ -62,9 +62,10 @@ try {
 
   // 4. Test du nettoyage des titres
   console.log('  -> Test 4 : Nettoyage des titres décoratifs...');
-  assert.strictEqual(cleanSeparatorName('▼ |BR| VOD BRAZIL |BR| ▼'), 'VOD BRAZIL');
   assert.strictEqual(cleanSeparatorName('--- FRANCE DIRECT ---'), 'FRANCE DIRECT');
   assert.strictEqual(cleanSeparatorName('=== SPORT ==='), 'SPORT');
+  assert.strictEqual(cleanSeparatorName('▼ VOD BRAZIL ▼'), 'VOD BRAZIL');
+  assert.strictEqual(cleanSeparatorName('▼ |BR| VOD BRAZIL |BR| ▼'), 'BR| VOD BRAZIL |BR');
 
   // 5. Test des résolutions
   console.log('  -> Test 5 : Détection des résolutions vidéo...');
