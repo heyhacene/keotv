@@ -1,5 +1,6 @@
 package fr.keo.tv;
 
+import android.app.Activity;
 import android.app.ProgressDialog;
 import android.content.Context;
 import android.content.DialogInterface;
@@ -10,6 +11,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.util.Log;
 import android.widget.Toast;
 
 import androidx.appcompat.app.AlertDialog;
@@ -36,15 +38,22 @@ import java.util.regex.Pattern;
 
 public class UpdateManager {
 
+    private static final String TAG = "KeoUpdate";
     private static final String RELEASES_API = "https://api.github.com/repos/heyhacene/keotv/releases/latest";
     private static final ExecutorService executor = Executors.newSingleThreadExecutor();
     private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-    public interface UpdateCheckCallback {
-        void onResult(boolean hasUpdate, int latestBuild, String apkUrl);
+    private static boolean isActivitySafe(Context context) {
+        if (context instanceof Activity) {
+            Activity act = (Activity) context;
+            return !act.isFinishing() && !act.isDestroyed();
+        }
+        return context != null;
     }
 
     public static void checkForUpdates(final Context context, final boolean manualCheck) {
+        if (!isActivitySafe(context)) return;
+
         executor.execute(new Runnable() {
             @Override
             public void run() {
@@ -79,7 +88,6 @@ public class UpdateManager {
                     String tagName = releaseObj.has("tag_name") ? releaseObj.get("tag_name").getAsString() : "";
                     String releaseName = releaseObj.has("name") ? releaseObj.get("name").getAsString() : "";
 
-                    // Extract build number from tag (e.g., v1.4.148-build.148) or name
                     int remoteBuild = extractBuildNumber(tagName);
                     if (remoteBuild <= 0) {
                         remoteBuild = extractBuildNumber(releaseName);
@@ -97,7 +105,7 @@ public class UpdateManager {
                             if (downloadUrl != null && name.toLowerCase().endsWith(".apk")) {
                                 apkDownloadUrl = downloadUrl;
                                 if (name.startsWith("KeoTV-Build-")) {
-                                    break; // Prefer specific build package
+                                    break;
                                 }
                             }
                         }
@@ -109,14 +117,20 @@ public class UpdateManager {
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            if (finalRemoteBuild > currentBuild && finalApkUrl != null) {
-                                showUpdateAvailableDialog(context, currentBuild, finalRemoteBuild, finalApkUrl);
-                            } else if (manualCheck) {
-                                new AlertDialog.Builder(context)
-                                        .setTitle("KeoTV est à jour")
-                                        .setMessage("Vous disposez déjà de la version la plus récente (Build " + currentBuild + ").")
-                                        .setPositiveButton("OK", null)
-                                        .show();
+                            if (!isActivitySafe(context)) return;
+
+                            try {
+                                if (finalRemoteBuild > currentBuild && finalApkUrl != null) {
+                                    showUpdateAvailableDialog(context, currentBuild, finalRemoteBuild, finalApkUrl);
+                                } else if (manualCheck) {
+                                    new AlertDialog.Builder(context)
+                                            .setTitle("KeoTV est à jour")
+                                            .setMessage("Vous disposez déjà de la version la plus récente (Build " + currentBuild + ").")
+                                            .setPositiveButton("OK", null)
+                                            .show();
+                                }
+                            } catch (Throwable t) {
+                                Log.e(TAG, "Error displaying update dialog", t);
                             }
                         }
                     });
@@ -126,7 +140,9 @@ public class UpdateManager {
                         mainHandler.post(new Runnable() {
                             @Override
                             public void run() {
-                                Toast.makeText(context, "Erreur vérification mise à jour : " + e.getMessage(), Toast.LENGTH_LONG).show();
+                                if (isActivitySafe(context)) {
+                                    Toast.makeText(context, "Erreur vérification mise à jour : " + e.getMessage(), Toast.LENGTH_LONG).show();
+                                }
                             }
                         });
                     }
@@ -157,20 +173,28 @@ public class UpdateManager {
     }
 
     private static void showUpdateAvailableDialog(final Context context, final int currentBuild, final int newBuild, final String downloadUrl) {
-        new AlertDialog.Builder(context)
-                .setTitle("🚀 Mise à jour KeoTV disponible")
-                .setMessage("Une nouvelle version native est prête (Build " + newBuild + " vs actuelle " + currentBuild + ").\n\nSouhaitez-vous la télécharger et l'installer directement sur votre Android TV ?")
-                .setPositiveButton("Installer maintenant", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        downloadAndInstallApk(context, downloadUrl, newBuild);
-                    }
-                })
-                .setNegativeButton("Plus tard", null)
-                .show();
+        if (!isActivitySafe(context)) return;
+
+        try {
+            new AlertDialog.Builder(context)
+                    .setTitle("🚀 Mise à jour KeoTV disponible")
+                    .setMessage("Une nouvelle version native est prête (Build " + newBuild + " vs actuelle " + currentBuild + ").\n\nSouhaitez-vous la télécharger et l'installer directement sur votre Android TV ?")
+                    .setPositiveButton("Installer maintenant", new DialogInterface.OnClickListener() {
+                        @Override
+                        public void onClick(DialogInterface dialog, int which) {
+                            downloadAndInstallApk(context, downloadUrl, newBuild);
+                        }
+                    })
+                    .setNegativeButton("Plus tard", null)
+                    .show();
+        } catch (Throwable t) {
+            Log.e(TAG, "showUpdateAvailableDialog failed", t);
+        }
     }
 
     private static void downloadAndInstallApk(final Context context, final String downloadUrl, final int newBuild) {
+        if (!isActivitySafe(context)) return;
+
         final ProgressDialog progress = new ProgressDialog(context);
         progress.setTitle("Mise à jour KeoTV (Build " + newBuild + ")");
         progress.setMessage("Téléchargement du package en cours...");
@@ -178,17 +202,23 @@ public class UpdateManager {
         progress.setMax(100);
         progress.setProgress(0);
         progress.setCancelable(false);
-        progress.show();
+        try {
+            progress.show();
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to show progress dialog", t);
+        }
 
         executor.execute(new Runnable() {
             @Override
             public void run() {
                 File outputFile = null;
                 try {
-                    File cacheDir = context.getExternalCacheDir();
-                    if (cacheDir == null) cacheDir = context.getCacheDir();
+                    // Internal cache is always available and safe
+                    File cacheDir = context.getCacheDir();
                     outputFile = new File(cacheDir, "KeoTV-update.apk");
-                    if (outputFile.exists()) outputFile.delete();
+                    if (outputFile.exists()) {
+                        outputFile.delete();
+                    }
 
                     URL url = new URL(downloadUrl);
                     HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -197,7 +227,6 @@ public class UpdateManager {
                     conn.setConnectTimeout(15000);
                     conn.setReadTimeout(30000);
 
-                    // Follow redirects if needed
                     int responseCode = conn.getResponseCode();
                     if (responseCode == HttpURLConnection.HTTP_MOVED_PERM || responseCode == HttpURLConnection.HTTP_MOVED_TEMP || responseCode == 307 || responseCode == 308) {
                         String newUrl = conn.getHeaderField("Location");
@@ -223,7 +252,9 @@ public class UpdateManager {
                             mainHandler.post(new Runnable() {
                                 @Override
                                 public void run() {
-                                    progress.setProgress(percent);
+                                    if (progress.isShowing()) {
+                                        progress.setProgress(percent);
+                                    }
                                 }
                             });
                         }
@@ -238,18 +269,30 @@ public class UpdateManager {
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            progress.dismiss();
-                            triggerPackageInstaller(context, finalApk);
+                            try {
+                                if (progress.isShowing()) progress.dismiss();
+                            } catch (Throwable ignored) {}
+
+                            if (isActivitySafe(context)) {
+                                triggerPackageInstaller(context, finalApk);
+                            }
                         }
                     });
 
                 } catch (final Exception e) {
-                    if (outputFile != null && outputFile.exists()) outputFile.delete();
+                    if (outputFile != null && outputFile.exists()) {
+                        outputFile.delete();
+                    }
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            progress.dismiss();
-                            Toast.makeText(context, "Erreur téléchargement mise à jour : " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            try {
+                                if (progress.isShowing()) progress.dismiss();
+                            } catch (Throwable ignored) {}
+
+                            if (isActivitySafe(context)) {
+                                Toast.makeText(context, "Erreur téléchargement mise à jour : " + e.getMessage(), Toast.LENGTH_LONG).show();
+                            }
                         }
                     });
                 }
@@ -258,28 +301,39 @@ public class UpdateManager {
     }
 
     private static void triggerPackageInstaller(final Context context, final File apkFile) {
+        if (!isActivitySafe(context)) return;
+
         if (apkFile == null || !apkFile.exists() || apkFile.length() < 100000) {
-            Toast.makeText(context, "Erreur : fichier de mise à jour invalide", Toast.LENGTH_SHORT).show();
+            postToast(context, "Erreur : fichier de mise à jour invalide");
             return;
         }
 
-        // On Android 8.0+ (Oreo+), check permission to install from unknown sources
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             if (!context.getPackageManager().canRequestPackageInstalls()) {
-                new AlertDialog.Builder(context)
-                        .setTitle("Autorisation d'installation requise")
-                        .setMessage("Pour installer les mises à jour automatiques en 1 clic sur Android TV, veuillez autoriser KeoTV à 'Installer des applications inconnues' dans les paramètres qui vont s'ouvrir.")
-                        .setPositiveButton("Ouvrir les paramètres", new DialogInterface.OnClickListener() {
-                            @Override
-                            public void onClick(DialogInterface dialog, int which) {
-                                Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                        Uri.parse("package:" + context.getPackageName()));
-                                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                                context.startActivity(intent);
-                            }
-                        })
-                        .setNegativeButton("Annuler", null)
-                        .show();
+                try {
+                    new AlertDialog.Builder(context)
+                            .setTitle("Autorisation requise")
+                            .setMessage("Pour installer les mises à jour directes sur Android TV, veuillez autoriser KeoTV à 'Installer des applications inconnues'.")
+                            .setPositiveButton("Ouvrir les paramètres", new DialogInterface.OnClickListener() {
+                                @Override
+                                public void onClick(DialogInterface dialog, int which) {
+                                    try {
+                                        Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                                Uri.parse("package:" + context.getPackageName()));
+                                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                        context.startActivity(intent);
+                                    } catch (Exception e) {
+                                        Intent intent = new Intent(Settings.ACTION_SECURITY_SETTINGS);
+                                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                        context.startActivity(intent);
+                                    }
+                                }
+                            })
+                            .setNegativeButton("Annuler", null)
+                            .show();
+                } catch (Throwable t) {
+                    Log.e(TAG, "Failed to show permission dialog", t);
+                }
                 return;
             }
         }
@@ -292,7 +346,7 @@ public class UpdateManager {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             context.startActivity(intent);
         } catch (Exception e) {
-            Toast.makeText(context, "Impossible de lancer l'installateur : " + e.getMessage(), Toast.LENGTH_LONG).show();
+            postToast(context, "Impossible de lancer l'installateur : " + e.getMessage());
         }
     }
 
@@ -300,7 +354,9 @@ public class UpdateManager {
         mainHandler.post(new Runnable() {
             @Override
             public void run() {
-                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show();
+                if (isActivitySafe(context)) {
+                    Toast.makeText(context, msg, Toast.LENGTH_SHORT).show();
+                }
             }
         });
     }
