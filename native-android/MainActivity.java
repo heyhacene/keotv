@@ -13,6 +13,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(NativePlayerPlugin.class);
+        registerPlugin(NativeDatabasePlugin.class);
         super.onCreate(savedInstanceState);
 
         // Set window background to dark TV surface (#080c14) immediately to prevent any white or default splash flash

@@ -59,6 +59,7 @@ jobs:
           mkdir -p "$SRC_DIR"
           cp native-android/MainActivity.java "$SRC_DIR/MainActivity.java"
           cp native-android/NativePlayerPlugin.java "$SRC_DIR/NativePlayerPlugin.java"
+          cp native-android/NativeDatabasePlugin.java "$SRC_DIR/NativeDatabasePlugin.java"
           cp native-android/PlayerActivity.java "$SRC_DIR/PlayerActivity.java"
 
           GRADLE="android/app/build.gradle"

@@ -1,7 +1,16 @@
 'use client';
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { db, getSetting, setSetting, getFavoriteChannelIds, saveFavoriteChannelId } from '@/lib/db';
+import {
+  db,
+  getSetting,
+  setSetting,
+  getFavoriteChannelIds,
+  saveFavoriteChannelId,
+  saveBulkCategories,
+  saveBulkChannels,
+  getCategoryChannels,
+} from '@/lib/db';
 import { getMockEpgForChannel } from '@/lib/mock-data';
 import { Channel, Category, EpgProgram, NavigationPane, PlaylistConfig } from '@/types/iptv';
 import { useTVNavigation } from '@/lib/use-tv-navigation';
@@ -613,7 +622,7 @@ export default function KeoTVHome() {
           }
         } else {
           // Tier 1: exact group_id indexed match (e.g. grp_live_123, grp_vod_456, grp_series_789)
-          rawList = await db.channels.where('group_id').equals(cat.id).toArray();
+          rawList = await getCategoryChannels({ groupId: cat.id, sort: sortMode });
 
           // Sync real local count to category badge if out of date
           if (rawList.length > 0 && cat.count !== rawList.length) {
@@ -668,19 +677,7 @@ export default function KeoTVHome() {
                 if (onDemandStreams.length > 0) {
                   const favIds = await getFavoriteChannelIds();
                   const mergedStreams = onDemandStreams.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
-                  try {
-                    await db.channels.bulkPut(mergedStreams);
-                  } catch (putErr) {
-                    try {
-                      await db.transaction('rw', db.channels, async () => {
-                        for (const s of mergedStreams) {
-                          try { await db.channels.put(s); } catch {}
-                        }
-                      });
-                    } catch (txErr) {
-                      console.warn('Transaction fallback failed', txErr);
-                    }
-                  }
+                  await saveBulkChannels(mergedStreams);
                   await db.categories.update(cat.id, { count: mergedStreams.length });
                   setCategories((prev) =>
                     prev.map((c) => (c.id === cat.id ? { ...c, count: mergedStreams.length } : c))
@@ -826,38 +823,8 @@ export default function KeoTVHome() {
 
         await purgeDemoData();
         await db.playlists.put(result.playlist);
-        await db.categories.bulkPut(result.categories);
-
-        const favIds = await getFavoriteChannelIds();
-        const CHUNK_SIZE = 500;
-        for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
-          const chunk = result.channels.slice(i, i + CHUNK_SIZE);
-          const mergedChunk = chunk.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
-          try {
-            await db.channels.bulkPut(mergedChunk);
-          } catch (chunkErr) {
-            console.warn('bulkPut chunk error, fallback to individual put:', chunkErr);
-            try {
-              await db.transaction('rw', db.channels, async () => {
-                for (const item of mergedChunk) {
-                  try {
-                    await db.channels.put(item);
-                  } catch (putErr) {
-                    console.error('Failed to put channel', item.id, putErr);
-                  }
-                }
-              });
-            } catch (txErr) {
-              console.warn('Transaction fallback failed', txErr);
-            }
-          }
-          if (result.channels.length > 1000) {
-            const percent = Math.min(100, Math.round(((i + chunk.length) / result.channels.length) * 100));
-            setSyncStatusBanner(`Enregistrement local : ${percent}% (${Math.min(i + chunk.length, result.channels.length)}/${result.channels.length} chaînes)...`);
-          }
-        }
-
-        // Immediately clear the banner once saving is complete!
+        await saveBulkCategories(result.categories);
+        await saveBulkChannels(result.channels);
         setSyncStatusBanner(null);
 
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
@@ -2717,38 +2684,9 @@ export default function KeoTVHome() {
       }
     }
 
-    // Save real categories in Dexie
-    await db.categories.bulkPut(result.categories);
-
-    // Chunked channels save with individual put fallback to prevent SQLite / IndexedDB transaction limits & memory errors
-    const favIds = await getFavoriteChannelIds();
-    const CHUNK_SIZE = 500;
-    for (let i = 0; i < result.channels.length; i += CHUNK_SIZE) {
-      const chunk = result.channels.slice(i, i + CHUNK_SIZE);
-      const mergedChunk = chunk.map((s) => (favIds.has(s.id) ? { ...s, is_favorite: true } : s));
-      try {
-        await db.channels.bulkPut(mergedChunk);
-      } catch (chunkErr) {
-        console.warn('bulkPut chunk error, falling back to individual put:', chunkErr);
-        try {
-          await db.transaction('rw', db.channels, async () => {
-            for (const item of mergedChunk) {
-              try {
-                await db.channels.put(item);
-              } catch (itemErr) {
-                console.error('Failed to put channel:', item.id, itemErr);
-              }
-            }
-          });
-        } catch (txErr) {
-          console.warn('Transaction fallback failed', txErr);
-        }
-      }
-      if (result.channels.length > 1000) {
-        const percent = Math.min(100, Math.round(((i + chunk.length) / result.channels.length) * 100));
-        onProgress(`Enregistrement local : ${percent}% (${Math.min(i + chunk.length, result.channels.length)}/${result.channels.length} chaînes)...`);
-      }
-    }
+    // Save real categories & channels via unified fast storage
+    await saveBulkCategories(result.categories);
+    await saveBulkChannels(result.channels);
 
     // Reload categories from Dexie
     const loadedCats = await db.categories.orderBy('custom_order').toArray();

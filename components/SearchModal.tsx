@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { Search, X, Film, Clapperboard, Tv, Loader2, Star, Mic, LucideIcon } from 'lucide-react';
 import { Channel } from '@/types/iptv';
-import { db } from '@/lib/db';
+import { db, searchAllChannels } from '@/lib/db';
 import { ContextMenuModal } from './ContextMenuModal';
 
 interface SearchModalProps {
@@ -142,79 +142,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
-        const normQuery = trimmed
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .toLowerCase();
-        const normWords = normQuery.split(/\s+/).filter(Boolean);
-
-        // Ensure in-memory cache is ready
-        let items = cacheRef.current;
-        if (!items || items.length === 0) {
-          const all = await db.channels.toArray();
-          items = all.map((c) => ({
-            channel: c,
-            normName: (c.name || '')
-              .normalize('NFD')
-              .replace(/[\u0300-\u036f]/g, '')
-              .toLowerCase(),
-            normGroup: (c.group_name || '')
-              .normalize('NFD')
-              .replace(/[\u0300-\u036f]/g, '')
-              .toLowerCase(),
-            type: c.stream_type || c.type || 'live',
-          }));
-          cacheRef.current = items;
-          cacheLoadedAtRef.current = Date.now();
-        }
-
-        // Filter pool by active tab
-        let pool = items;
-        if (activeFilter !== 'all') {
-          pool = items.filter((it) => it.type === activeFilter);
-        }
-
-        // Match against name, stripped name, channel number & group
-        const matched: { channel: Channel; score: number }[] = [];
-        for (let i = 0; i < pool.length; i++) {
-          const item = pool[i];
-          const name = item.normName;
-          const group = item.normGroup;
-          const cleanName = (item.channel.name || '')
-            .replace(/^[|\[(].*?[|)\]]\s*/g, '')
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .toLowerCase();
-
-          const chNum = item.channel.num ? String(item.channel.num) : '';
-          const numMatch = chNum === normQuery || chNum.startsWith(normQuery);
-
-          let allWordsMatch = true;
-          for (let w = 0; w < normWords.length; w++) {
-            const word = normWords[w];
-            if (!name.includes(word) && !cleanName.includes(word) && !group.includes(word)) {
-              allWordsMatch = false;
-              break;
-            }
-          }
-
-          if (allWordsMatch || numMatch) {
-            let score = 0;
-            if (numMatch) score += 300;
-            if (cleanName === normQuery || name === normQuery) score += 200;
-            else if (cleanName.startsWith(normQuery) || name.startsWith(normQuery)) score += 120;
-            else if (cleanName.includes(' ' + normQuery) || name.includes(' ' + normQuery)) score += 70;
-            else if (cleanName.includes(normQuery) || name.includes(normQuery)) score += 40;
-            if (item.channel.is_favorite) score += 25;
-            matched.push({ channel: item.channel, score });
-          }
-        }
-
-        matched.sort((a, b) => b.score - a.score);
-        setResults(matched.slice(0, 100).map((m) => m.channel));
+        const found = await searchAllChannels(trimmed, activeFilter, 100);
+        setResults(found);
         setFocusedResultIndex(0);
       } catch (err) {
-        console.warn('In-memory search error:', err);
+        console.warn('Fast search error:', err);
       } finally {
         setIsSearching(false);
       }
