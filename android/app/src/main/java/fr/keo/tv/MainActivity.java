@@ -51,8 +51,14 @@ public class MainActivity extends AppCompatActivity {
     // UI elements
     private TextView tvStatusBadge;
     private TextView tvHeaderSyncInfo;
+    private TextView tvBouquetsHeader;
     private TextView tvChannelsHeader;
     private EditText etSearch;
+
+    private Button tabLive;
+    private Button tabVod;
+    private Button tabSeries;
+
     private RecyclerView recyclerCategories;
     private RecyclerView recyclerChannels;
 
@@ -66,6 +72,7 @@ public class MainActivity extends AppCompatActivity {
     private CategoriesAdapter categoriesAdapter;
     private ChannelsAdapter channelsAdapter;
 
+    private String currentType = "live"; // "live", "vod", "series"
     private KeoDatabase.CategoryItem selectedCategory = null;
     private KeoDatabase.ChannelItem activeChannel = null;
     private boolean isSearching = false;
@@ -129,8 +136,14 @@ public class MainActivity extends AppCompatActivity {
     private void initViews() {
         tvStatusBadge = findViewById(R.id.tv_status_badge);
         tvHeaderSyncInfo = findViewById(R.id.tv_header_sync_info);
+        tvBouquetsHeader = findViewById(R.id.tv_bouquets_header);
         tvChannelsHeader = findViewById(R.id.tv_channels_header);
         etSearch = findViewById(R.id.et_search);
+
+        tabLive = findViewById(R.id.tab_live);
+        tabVod = findViewById(R.id.tab_vod);
+        tabSeries = findViewById(R.id.tab_series);
+
         recyclerCategories = findViewById(R.id.recycler_categories);
         recyclerChannels = findViewById(R.id.recycler_channels);
 
@@ -141,6 +154,7 @@ public class MainActivity extends AppCompatActivity {
         btnWatchFullscreen = findViewById(R.id.btn_watch_fullscreen);
         btnToggleFav = findViewById(R.id.btn_toggle_fav);
 
+        // Top bar buttons
         findViewById(R.id.btn_header_cloud).setOnClickListener(v -> showCloudSyncDialog());
         View btnUpdate = findViewById(R.id.btn_header_update);
         if (btnUpdate != null) {
@@ -150,6 +164,11 @@ public class MainActivity extends AppCompatActivity {
         findViewById(R.id.btn_header_diagnostic).setOnClickListener(v -> showDiagnosticDialog());
         findViewById(R.id.btn_header_login).setOnClickListener(v -> showLoginDialog());
 
+        // Mode tabs (TV / Films / Séries)
+        if (tabLive != null) tabLive.setOnClickListener(v -> switchContentType("live"));
+        if (tabVod != null) tabVod.setOnClickListener(v -> switchContentType("vod"));
+        if (tabSeries != null) tabSeries.setOnClickListener(v -> switchContentType("series"));
+
         btnWatchFullscreen.setOnClickListener(v -> launchPlayerFullscreen());
         btnToggleFav.setOnClickListener(v -> {
             if (activeChannel != null) {
@@ -158,8 +177,8 @@ public class MainActivity extends AppCompatActivity {
                 updateFavButtonLabel(activeChannel.isFav);
                 channelsAdapter.notifyDataSetChanged();
 
-                // Refresh categories to update the ⭐ Favoris bouquet count
-                List<KeoDatabase.CategoryItem> cats = db.getCategories("live");
+                // Refresh categories to update the ⭐ Favoris count
+                List<KeoDatabase.CategoryItem> cats = db.getCategories(currentType);
                 categoriesAdapter.setItems(cats);
 
                 if (selectedCategory != null && "grp_favs".equals(selectedCategory.id)) {
@@ -169,7 +188,7 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        // Instant search / filtering
+        // Instant search / filtering with DPAD key listener to prevent trapping focus
         if (etSearch != null) {
             etSearch.addTextChangedListener(new TextWatcher() {
                 @Override
@@ -183,6 +202,65 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void afterTextChanged(Editable s) {}
             });
+
+            etSearch.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        if (recyclerChannels != null && channelsAdapter.getItemCount() > 0) {
+                            recyclerChannels.requestFocus();
+                            return true;
+                        }
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                        if (recyclerCategories != null) {
+                            recyclerCategories.requestFocus();
+                            return true;
+                        }
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                        if (tabSeries != null) {
+                            tabSeries.requestFocus();
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            });
+        }
+    }
+
+    private void switchContentType(String type) {
+        currentType = type;
+        updateTabStyles();
+
+        if (etSearch != null) {
+            etSearch.setText("");
+        }
+        isSearching = false;
+
+        if (tvBouquetsHeader != null) {
+            if ("vod".equals(type)) {
+                tvBouquetsHeader.setText("CATÉGORIES FILMS (VOD)");
+            } else if ("series".equals(type)) {
+                tvBouquetsHeader.setText("CATÉGORIES SÉRIES");
+            } else {
+                tvBouquetsHeader.setText("BOUQUETS TV EN DIRECT");
+            }
+        }
+
+        loadLocalData();
+    }
+
+    private void updateTabStyles() {
+        int activeBg = 0xFF0284C7;   // Glowing Sky Blue
+        int inactiveBg = 0xFF1E293B; // Dark Slate
+
+        if (tabLive != null) {
+            tabLive.setBackgroundColor("live".equals(currentType) ? activeBg : inactiveBg);
+        }
+        if (tabVod != null) {
+            tabVod.setBackgroundColor("vod".equals(currentType) ? activeBg : inactiveBg);
+        }
+        if (tabSeries != null) {
+            tabSeries.setBackgroundColor("series".equals(currentType) ? activeBg : inactiveBg);
         }
     }
 
@@ -208,7 +286,7 @@ public class MainActivity extends AppCompatActivity {
             }
         } else {
             isSearching = true;
-            List<KeoDatabase.ChannelItem> results = db.searchChannels(q);
+            List<KeoDatabase.ChannelItem> results = db.searchChannels(q, currentType);
             if (tvChannelsHeader != null) {
                 tvChannelsHeader.setText("RÉSULTATS (" + results.size() + ")");
             }
@@ -239,18 +317,29 @@ public class MainActivity extends AppCompatActivity {
 
     private void loadLocalData() {
         try {
-            List<KeoDatabase.CategoryItem> cats = db.getCategories("live");
+            updateTabStyles();
+            List<KeoDatabase.CategoryItem> cats = db.getCategories(currentType);
             categoriesAdapter.setItems(cats);
 
             if (!cats.isEmpty()) {
                 selectCategory(cats.get(0));
-                recyclerCategories.requestFocus();
+                // Set default focus on categories, never on search box!
+                recyclerCategories.post(() -> {
+                    if (categoriesAdapter.getItemCount() > 0) {
+                        RecyclerView.ViewHolder vh = recyclerCategories.findViewHolderForAdapterPosition(0);
+                        if (vh != null) {
+                            vh.itemView.requestFocus();
+                        } else {
+                            recyclerCategories.requestFocus();
+                        }
+                    }
+                });
             } else {
-                tvDetailName.setText("Aucune chaîne en mémoire. Cliquez sur 'Synchroniser' ou 'Rapatrier'");
+                tvDetailName.setText("Aucun contenu dans cette section. Lancez une synchronisation.");
                 if (tvDetailGroup != null) tvDetailGroup.setText("-");
                 if (tvDetailResolution != null) tvDetailResolution.setText("-");
                 if (tvDetailEpg != null) tvDetailEpg.setText("-");
-                findViewById(R.id.btn_header_cloud).requestFocus();
+                if (tabLive != null) tabLive.requestFocus();
             }
         } catch (Throwable t) {
             Log.e(TAG, "Error loading local data", t);
@@ -271,7 +360,7 @@ public class MainActivity extends AppCompatActivity {
             selectChannel(channels.get(0));
         } else {
             activeChannel = null;
-            tvDetailName.setText("Aucune chaîne dans ce bouquet");
+            tvDetailName.setText("Aucun élément dans cette catégorie");
             if (tvDetailGroup != null) tvDetailGroup.setText(cat.name);
             if (tvDetailResolution != null) tvDetailResolution.setText("-");
             if (tvDetailEpg != null) tvDetailEpg.setText("-");
@@ -289,14 +378,20 @@ public class MainActivity extends AppCompatActivity {
             tvDetailResolution.setText(ch.resolution != null ? ch.resolution : "HD");
         }
         if (tvDetailEpg != null) {
-            tvDetailEpg.setText("Direct TV (" + ch.resolution + ")");
+            if ("vod".equals(ch.streamType)) {
+                tvDetailEpg.setText("Film VOD - Lecture à la demande");
+            } else if ("series".equals(ch.streamType)) {
+                tvDetailEpg.setText("Série TV - Catalogue complet");
+            } else {
+                tvDetailEpg.setText("Direct TV (" + ch.resolution + ")");
+            }
         }
         updateFavButtonLabel(ch.isFav);
     }
 
     private void launchPlayerFullscreen() {
         if (activeChannel == null || activeChannel.streamUrl == null || activeChannel.streamUrl.isEmpty()) {
-            Toast.makeText(this, "Sélectionnez d'abord une chaîne", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Sélectionnez d'abord un programme", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -317,7 +412,8 @@ public class MainActivity extends AppCompatActivity {
         PlayerActivity.pendingUrls = urls;
         PlayerActivity.pendingTitles = titles;
         PlayerActivity.pendingIndex = startIndex;
-        PlayerActivity.pendingIsLive = true;
+        PlayerActivity.pendingIsLive = !"vod".equals(activeChannel.streamType) && !"series".equals(activeChannel.streamType);
+        PlayerActivity.pendingSeriesId = "series".equals(activeChannel.streamType) ? activeChannel.id : null;
 
         Intent intent = new Intent(this, PlayerActivity.class);
         startActivity(intent);
@@ -343,7 +439,7 @@ public class MainActivity extends AppCompatActivity {
             public void onSuccess(int bouquetCount, int channelCount) {
                 tvStatusBadge.setText("✅ Prêt");
                 tvStatusBadge.setBackgroundColor(0xFF132E27); // green
-                Toast.makeText(MainActivity.this, "Synchronisation réussie : " + channelCount + " chaînes", Toast.LENGTH_LONG).show();
+                Toast.makeText(MainActivity.this, "Synchronisation réussie : " + channelCount + " éléments au total", Toast.LENGTH_LONG).show();
                 updateHeaderPlaylistInfo(db.getActivePlaylist());
                 loadLocalData();
             }
@@ -386,7 +482,8 @@ public class MainActivity extends AppCompatActivity {
 
         try {
             int liveCount = db.getChannelCount("live");
-            int catCount = db.getCategoryCount();
+            int vodCount = db.getChannelCount("vod");
+            int seriesCount = db.getChannelCount("series");
             int favCount = db.getFavoriteCount();
             KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
 
@@ -397,10 +494,11 @@ public class MainActivity extends AppCompatActivity {
             StringBuilder msg = new StringBuilder();
             msg.append("📊 DIAGNOSTIC & SANTÉ DU SYSTÈME KEOTV\n\n");
             msg.append("• Version : Build ").append(UpdateManager.getAppVersionCode(this)).append(" (100% Natif Android)\n");
-            msg.append("• Chaînes TV en mémoire : ").append(liveCount).append("\n");
+            msg.append("• Chaînes TV en direct : ").append(liveCount).append("\n");
+            msg.append("• Films (VOD) : ").append(vodCount).append("\n");
+            msg.append("• Séries : ").append(seriesCount).append("\n");
             msg.append("• Favoris enregistrés : ").append(favCount).append("\n");
-            msg.append("• Bouquets TV : ").append(catCount).append("\n");
-            msg.append("• Playlist : ").append(pl != null ? pl.name : "Aucune").append("\n");
+            msg.append("• Playlist active : ").append(pl != null ? pl.name : "Aucune").append("\n");
             msg.append("• Serveur : ").append(pl != null ? pl.serverUrl : "Non configuré").append("\n");
             msg.append("• Fin d'abonnement : ").append(pl != null ? pl.expDate : "N/A").append("\n");
             msg.append("• Dernière synchronisation : ").append(pl != null ? pl.lastSyncAt : "Jamais").append("\n");
@@ -408,7 +506,7 @@ public class MainActivity extends AppCompatActivity {
 
             File crashLog = new File(getFilesDir(), "crash.log");
             if (crashLog.exists() && crashLog.length() > 0) {
-                msg.append("\n⚠️ Dernier rapport d'anomalie détecté (enregistré dans crash.log)");
+                msg.append("\n⚠️ Rapport d'anomalie détecté dans crash.log");
             }
 
             new AlertDialog.Builder(this)
@@ -433,7 +531,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             new AlertDialog.Builder(this)
                     .setTitle("⚠️ Nettoyage et Réinitialisation Complète")
-                    .setMessage("Voulez-vous réinitialiser complètement KeoTV à zéro ?\n\nToutes les chaînes, bouquets, comptes et paramètres en mémoire seront entièrement effacés.")
+                    .setMessage("Voulez-vous réinitialiser complètement KeoTV à zéro ?\n\nToutes les chaînes, films, séries, comptes et paramètres en mémoire seront entièrement effacés.")
                     .setPositiveButton("Oui, tout effacer", (dialog, which) -> {
                         try {
                             db.purgeCache(false);
@@ -756,7 +854,7 @@ public class MainActivity extends AppCompatActivity {
                 notifyDataSetChanged();
                 selectChannel(item);
 
-                // On phone (portrait), clicking directly can launch playback
+                // On phone (portrait), clicking directly launches playback
                 int orientation = getResources().getConfiguration().orientation;
                 if (orientation == Configuration.ORIENTATION_PORTRAIT) {
                     launchPlayerFullscreen();
@@ -794,6 +892,7 @@ public class MainActivity extends AppCompatActivity {
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
             if (etSearch != null && etSearch.hasFocus()) {
+                etSearch.setText("");
                 etSearch.clearFocus();
                 if (recyclerChannels != null) recyclerChannels.requestFocus();
                 return true;

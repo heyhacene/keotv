@@ -169,7 +169,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
         public String groupId;
         public String groupName;
         public String streamUrl;
-        public String streamType;
+        public String streamType; // live, vod, series
         public String logo;
         public boolean isFav;
         public String resolution;
@@ -228,10 +228,13 @@ public class KeoDatabase extends SQLiteOpenHelper {
         List<CategoryItem> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
 
-        int favCount = getFavoriteCount();
-        if (favCount > 0) {
-            CategoryItem fav = new CategoryItem("grp_favs", "⭐ Favoris", type != null ? type : "live", favCount, 0);
-            list.add(fav);
+        // Add virtual favorites bouquet for live channels
+        if ("live".equals(type) || type == null) {
+            int favCount = getFavoriteCount();
+            if (favCount > 0) {
+                CategoryItem fav = new CategoryItem("grp_favs", "⭐ Favoris", "live", favCount, 0);
+                list.add(fav);
+            }
         }
 
         String sql = "SELECT id, name, type, count, custom_order, is_hidden, is_adult FROM categories WHERE is_hidden = 0";
@@ -323,13 +326,23 @@ public class KeoDatabase extends SQLiteOpenHelper {
         return cnt;
     }
 
-    public List<ChannelItem> searchChannels(String query) {
+    public List<ChannelItem> searchChannels(String query, String streamType) {
         List<ChannelItem> list = new ArrayList<>();
         if (query == null || query.trim().isEmpty()) return list;
         SQLiteDatabase db = getReadableDatabase();
         String q = "%" + query.trim() + "%";
-        Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator "
-                + "FROM channels WHERE name LIKE ? AND is_separator = 0 ORDER BY num ASC, name ASC LIMIT 100", new String[]{q});
+        String sql = "SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator "
+                + "FROM channels WHERE name LIKE ? AND is_separator = 0";
+        String[] args;
+        if (streamType != null && !streamType.isEmpty()) {
+            sql += " AND stream_type = ?";
+            args = new String[]{q, streamType};
+        } else {
+            args = new String[]{q};
+        }
+        sql += " ORDER BY num ASC, name ASC LIMIT 100";
+
+        Cursor c = db.rawQuery(sql, args);
         while (c.moveToNext()) {
             ChannelItem item = new ChannelItem();
             item.id = c.getString(0);
@@ -355,12 +368,12 @@ public class KeoDatabase extends SQLiteOpenHelper {
     }
 
     // High performance bulk inserts in atomic transaction
-    public void bulkInsertCategories(List<CategoryItem> categories, boolean clearExisting) {
+    public void bulkInsertCategories(List<CategoryItem> categories, String typeToClear) {
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
         try {
-            if (clearExisting) {
-                db.execSQL("DELETE FROM categories");
+            if (typeToClear != null && !typeToClear.isEmpty()) {
+                db.execSQL("DELETE FROM categories WHERE type = ?", new String[]{typeToClear});
             }
             SQLiteStatement stmt = db.compileStatement(
                     "INSERT OR REPLACE INTO categories (id, name, type, count, custom_order, icon, is_hidden, is_adult) "
@@ -383,12 +396,12 @@ public class KeoDatabase extends SQLiteOpenHelper {
         }
     }
 
-    public void bulkInsertChannels(List<ChannelItem> channels, boolean clearExisting) {
+    public void bulkInsertChannels(List<ChannelItem> channels, String typeToClear) {
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
         try {
-            if (clearExisting) {
-                db.execSQL("DELETE FROM channels");
+            if (typeToClear != null && !typeToClear.isEmpty()) {
+                db.execSQL("DELETE FROM channels WHERE stream_type = ?", new String[]{typeToClear});
             }
             SQLiteStatement stmt = db.compileStatement(
                     "INSERT OR REPLACE INTO channels (id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator) "
@@ -436,9 +449,15 @@ public class KeoDatabase extends SQLiteOpenHelper {
         return cnt;
     }
 
-    public int getCategoryCount() {
+    public int getCategoryCount(String type) {
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT COUNT(*) FROM categories", null);
+        String sql = "SELECT COUNT(*) FROM categories";
+        String[] args = null;
+        if (type != null) {
+            sql += " WHERE type = ?";
+            args = new String[]{type};
+        }
+        Cursor c = db.rawQuery(sql, args);
         int cnt = 0;
         if (c.moveToFirst()) cnt = c.getInt(0);
         c.close();

@@ -3,10 +3,14 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#080C14">
+    android:background="#080C14"
+    android:descendantFocusability="afterDescendants"
+    android:focusable="false"
+    android:focusableInTouchMode="true">
 
     <!-- Top Bar Header -->
     <LinearLayout
+        android:id="@+id/header_bar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
@@ -64,7 +68,9 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:layout_marginEnd="8dp"
-            android:focusable="true" />
+            android:focusable="true"
+            android:nextFocusDown="@+id/tab_live"
+            android:nextFocusRight="@+id/btn_header_sync" />
 
         <Button
             android:id="@+id/btn_header_sync"
@@ -78,7 +84,10 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:layout_marginEnd="8dp"
-            android:focusable="true" />
+            android:focusable="true"
+            android:nextFocusDown="@+id/tab_live"
+            android:nextFocusLeft="@+id/btn_header_cloud"
+            android:nextFocusRight="@+id/btn_header_diagnostic" />
 
         <Button
             android:id="@+id/btn_header_diagnostic"
@@ -92,7 +101,10 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:layout_marginEnd="8dp"
-            android:focusable="true" />
+            android:focusable="true"
+            android:nextFocusDown="@+id/tab_vod"
+            android:nextFocusLeft="@+id/btn_header_sync"
+            android:nextFocusRight="@+id/btn_header_update" />
 
         <Button
             android:id="@+id/btn_header_update"
@@ -106,7 +118,10 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:layout_marginEnd="8dp"
-            android:focusable="true" />
+            android:focusable="true"
+            android:nextFocusDown="@+id/tab_series"
+            android:nextFocusLeft="@+id/btn_header_diagnostic"
+            android:nextFocusRight="@+id/btn_header_login" />
 
         <Button
             android:id="@+id/btn_header_login"
@@ -119,7 +134,9 @@
             android:background="@drawable/bg_button_selector"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
-            android:focusable="true" />
+            android:focusable="true"
+            android:nextFocusDown="@+id/recycler_channels"
+            android:nextFocusLeft="@+id/btn_header_update" />
 
     </LinearLayout>
 
@@ -129,14 +146,74 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:orientation="horizontal"
-        android:padding="16dp">
+        android:padding="16dp"
+        android:descendantFocusability="afterDescendants">
 
-        <!-- Column 1: Bouquets (Categories) -->
+        <!-- Column 1: Mode Tabs + Bouquets (Categories) -->
         <LinearLayout
-            android:layout_width="250dp"
+            android:layout_width="260dp"
             android:layout_height="match_parent"
             android:orientation="vertical"
-            android:layout_marginEnd="12dp">
+            android:layout_marginEnd="12dp"
+            android:descendantFocusability="afterDescendants">
+
+            <!-- Content Type Tabs: TV / Films / Séries -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingBottom="8dp">
+
+                <Button
+                    android:id="@+id/tab_live"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:text="📺 TV"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_button_selector"
+                    android:layout_marginEnd="4dp"
+                    android:focusable="true"
+                    android:nextFocusUp="@+id/btn_header_cloud"
+                    android:nextFocusDown="@+id/recycler_categories"
+                    android:nextFocusRight="@+id/tab_vod" />
+
+                <Button
+                    android:id="@+id/tab_vod"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:text="🎬 Films"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_button_selector"
+                    android:layout_marginEnd="4dp"
+                    android:focusable="true"
+                    android:nextFocusUp="@+id/btn_header_sync"
+                    android:nextFocusDown="@+id/recycler_categories"
+                    android:nextFocusLeft="@+id/tab_live"
+                    android:nextFocusRight="@+id/tab_series" />
+
+                <Button
+                    android:id="@+id/tab_series"
+                    android:layout_width="0dp"
+                    android:layout_height="36dp"
+                    android:layout_weight="1"
+                    android:text="🍿 Séries"
+                    android:textColor="#FFFFFF"
+                    android:textSize="11sp"
+                    android:textStyle="bold"
+                    android:background="@drawable/bg_button_selector"
+                    android:focusable="true"
+                    android:nextFocusUp="@+id/btn_header_diagnostic"
+                    android:nextFocusDown="@+id/recycler_categories"
+                    android:nextFocusLeft="@+id/tab_vod"
+                    android:nextFocusRight="@+id/recycler_channels" />
+
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/tv_bouquets_header"
@@ -146,14 +223,17 @@
                 android:textColor="#64748B"
                 android:textSize="11sp"
                 android:textStyle="bold"
-                android:paddingBottom="8dp" />
+                android:paddingBottom="6dp" />
 
             <androidx.recyclerview.widget.RecyclerView
                 android:id="@+id/recycler_categories"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:focusable="true"
-                android:scrollbars="vertical" />
+                android:descendantFocusability="afterDescendants"
+                android:scrollbars="vertical"
+                android:nextFocusUp="@+id/tab_live"
+                android:nextFocusRight="@+id/recycler_channels" />
 
         </LinearLayout>
 
@@ -162,7 +242,8 @@
             android:layout_width="380dp"
             android:layout_height="match_parent"
             android:orientation="vertical"
-            android:layout_marginEnd="16dp">
+            android:layout_marginEnd="16dp"
+            android:descendantFocusability="afterDescendants">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -181,22 +262,25 @@
                     android:textSize="11sp"
                     android:textStyle="bold" />
 
-                <!-- Search Input -->
+                <!-- Search Input: Not focusable in touch mode to prevent auto-stealing focus on TV -->
                 <EditText
                     android:id="@+id/et_search"
-                    android:layout_width="150dp"
-                    android:layout_height="32dp"
+                    android:layout_width="160dp"
+                    android:layout_height="34dp"
                     android:hint="🔍 Filtrer..."
                     android:textColor="#F8FAFC"
                     android:textColorHint="#64748B"
                     android:textSize="11sp"
                     android:paddingStart="8dp"
                     android:paddingEnd="8dp"
-                    android:paddingTop="2dp"
-                    android:paddingBottom="2dp"
                     android:background="@drawable/bg_item_selector"
                     android:singleLine="true"
-                    android:imeOptions="actionSearch" />
+                    android:imeOptions="actionSearch"
+                    android:focusable="true"
+                    android:focusableInTouchMode="false"
+                    android:nextFocusDown="@+id/recycler_channels"
+                    android:nextFocusLeft="@+id/recycler_categories"
+                    android:nextFocusUp="@+id/btn_header_update" />
 
             </LinearLayout>
 
@@ -205,7 +289,11 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:focusable="true"
-                android:scrollbars="vertical" />
+                android:descendantFocusability="afterDescendants"
+                android:scrollbars="vertical"
+                android:nextFocusLeft="@+id/recycler_categories"
+                android:nextFocusRight="@+id/btn_watch_fullscreen"
+                android:nextFocusUp="@+id/et_search" />
 
         </LinearLayout>
 
@@ -216,13 +304,14 @@
             android:layout_weight="1"
             android:orientation="vertical"
             android:background="@drawable/bg_card"
-            android:padding="20dp">
+            android:padding="20dp"
+            android:descendantFocusability="afterDescendants">
 
             <TextView
                 android:id="@+id/tv_detail_name"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Sélectionnez une chaîne"
+                android:text="Sélectionnez un programme"
                 android:textColor="#F8FAFC"
                 android:textSize="18sp"
                 android:textStyle="bold"
@@ -267,7 +356,7 @@
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Programme en cours"
+                android:text="Information &amp; Diffusion"
                 android:textColor="#64748B"
                 android:textSize="11sp"
                 android:textStyle="bold" />
@@ -296,7 +385,10 @@
                 android:textSize="13sp"
                 android:textStyle="bold"
                 android:background="@drawable/bg_button_selector"
-                android:focusable="true" />
+                android:focusable="true"
+                android:nextFocusLeft="@+id/recycler_channels"
+                android:nextFocusDown="@+id/btn_toggle_fav"
+                android:nextFocusUp="@+id/btn_header_login" />
 
             <Button
                 android:id="@+id/btn_toggle_fav"
@@ -307,7 +399,9 @@
                 android:textColor="#F8FAFC"
                 android:textSize="12sp"
                 android:background="@drawable/bg_button_selector"
-                android:focusable="true" />
+                android:focusable="true"
+                android:nextFocusLeft="@+id/recycler_channels"
+                android:nextFocusUp="@+id/btn_watch_fullscreen" />
 
         </LinearLayout>
 

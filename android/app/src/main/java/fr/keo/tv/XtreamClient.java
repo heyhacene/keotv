@@ -131,13 +131,13 @@ public class XtreamClient {
                     pl.lastSyncAt = new java.text.SimpleDateFormat("dd/MM/yyyy HH:mm", java.util.Locale.FRANCE).format(new java.util.Date());
                     db.savePlaylist(pl);
 
-                    // 2. Fetch Live Categories (Handles both JSON Array and PHP Associative Object)
+                    // 2. Fetch Live Categories
                     postProgress(callback, "Téléchargement des bouquets TV...");
                     String catUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_live_categories";
                     String catJson = fetchUrl(catUrl);
 
                     List<JsonObject> catObjects = parseJsonList(catJson);
-                    List<KeoDatabase.CategoryItem> categories = new ArrayList<>();
+                    List<KeoDatabase.CategoryItem> liveCategories = new ArrayList<>();
                     int order = 1;
 
                     for (JsonObject obj : catObjects) {
@@ -152,29 +152,27 @@ public class XtreamClient {
                                 0,
                                 order++
                         );
-                        categories.add(c);
+                        liveCategories.add(c);
                     }
+                    db.bulkInsertCategories(liveCategories, "live");
 
-                    // Insert Categories
-                    db.bulkInsertCategories(categories, true);
-
-                    // 3. Fetch Live Streams (Handles both JSON Array and PHP Associative Object)
+                    // 3. Fetch Live Streams
                     postProgress(callback, "Téléchargement des chaînes TV en direct...");
                     String streamsUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_live_streams";
                     String streamsJson = fetchUrl(streamsUrl);
 
                     List<JsonObject> streamObjects = parseJsonList(streamsJson);
-                    List<KeoDatabase.ChannelItem> channels = new ArrayList<>();
+                    List<KeoDatabase.ChannelItem> liveChannels = new ArrayList<>();
 
                     for (JsonObject obj : streamObjects) {
                         String name = getOptString(obj, "name", "").trim();
                         String streamId = getOptString(obj, "stream_id", "");
                         String catId = getOptString(obj, "category_id", "");
-                        int num = getOptInt(obj, "num", channels.size() + 1);
+                        int num = getOptInt(obj, "num", liveChannels.size() + 1);
                         String logo = getOptString(obj, "stream_icon", "");
 
                         if (streamId.isEmpty() || isSeparatorChannel(name)) {
-                            continue; // Eradicate separator items immediately at ingestion
+                            continue;
                         }
 
                         String streamUrlFinal = server + "/live/" + encUser + "/" + encPass + "/" + streamId + ".m3u8";
@@ -192,20 +190,136 @@ public class XtreamClient {
                         ch.resolution = detectResolution(name);
                         ch.isSeparator = false;
 
-                        channels.add(ch);
+                        liveChannels.add(ch);
                     }
+                    db.bulkInsertChannels(liveChannels, "live");
 
-                    // Save Channels in batch
-                    db.bulkInsertChannels(channels, true);
+                    // 4. Fetch VOD Categories & Streams (Films)
+                    int vodCount = 0;
+                    try {
+                        postProgress(callback, "Téléchargement des catégories Films (VOD)...");
+                        String vodCatUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_vod_categories";
+                        String vodCatJson = fetchUrl(vodCatUrl);
+                        List<JsonObject> vodCatObjects = parseJsonList(vodCatJson);
+                        List<KeoDatabase.CategoryItem> vodCategories = new ArrayList<>();
+                        int vodOrder = 1;
+                        for (JsonObject obj : vodCatObjects) {
+                            String catId = getOptString(obj, "category_id", null);
+                            String catName = getOptString(obj, "category_name", "Films");
+                            if (catId == null || catId.isEmpty()) continue;
+                            vodCategories.add(new KeoDatabase.CategoryItem(
+                                    "grp_vod_" + catId,
+                                    catName,
+                                    "vod",
+                                    0,
+                                    vodOrder++
+                            ));
+                        }
+                        db.bulkInsertCategories(vodCategories, "vod");
+
+                        postProgress(callback, "Téléchargement du catalogue Films (VOD)...");
+                        String vodStreamsUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_vod_streams";
+                        String vodStreamsJson = fetchUrl(vodStreamsUrl);
+                        List<JsonObject> vodStreamObjects = parseJsonList(vodStreamsJson);
+                        List<KeoDatabase.ChannelItem> vodMovies = new ArrayList<>();
+
+                        for (JsonObject obj : vodStreamObjects) {
+                            String name = getOptString(obj, "name", "").trim();
+                            String streamId = getOptString(obj, "stream_id", "");
+                            String catId = getOptString(obj, "category_id", "");
+                            int num = getOptInt(obj, "num", vodMovies.size() + 1);
+                            String logo = getOptString(obj, "stream_icon", "");
+                            String ext = getOptString(obj, "container_extension", "mp4");
+                            if (ext.isEmpty()) ext = "mp4";
+
+                            if (streamId.isEmpty() || isSeparatorChannel(name)) continue;
+
+                            String streamUrlFinal = server + "/movie/" + encUser + "/" + encPass + "/" + streamId + "." + ext;
+
+                            KeoDatabase.ChannelItem ch = new KeoDatabase.ChannelItem();
+                            ch.id = "xtream_vod_" + streamId;
+                            ch.name = name;
+                            ch.num = num;
+                            ch.groupId = "grp_vod_" + catId;
+                            ch.groupName = "Films " + catId;
+                            ch.streamUrl = streamUrlFinal;
+                            ch.streamType = "vod";
+                            ch.logo = logo;
+                            ch.isFav = false;
+                            ch.resolution = detectResolution(name);
+                            ch.isSeparator = false;
+
+                            vodMovies.add(ch);
+                        }
+                        db.bulkInsertChannels(vodMovies, "vod");
+                        vodCount = vodMovies.size();
+                    } catch (Exception ignored) {}
+
+                    // 5. Fetch Series Categories & Series
+                    int seriesCount = 0;
+                    try {
+                        postProgress(callback, "Téléchargement des Séries...");
+                        String seriesCatUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_series_categories";
+                        String seriesCatJson = fetchUrl(seriesCatUrl);
+                        List<JsonObject> seriesCatObjects = parseJsonList(seriesCatJson);
+                        List<KeoDatabase.CategoryItem> seriesCategories = new ArrayList<>();
+                        int seriesOrder = 1;
+                        for (JsonObject obj : seriesCatObjects) {
+                            String catId = getOptString(obj, "category_id", null);
+                            String catName = getOptString(obj, "category_name", "Séries");
+                            if (catId == null || catId.isEmpty()) continue;
+                            seriesCategories.add(new KeoDatabase.CategoryItem(
+                                    "grp_series_" + catId,
+                                    catName,
+                                    "series",
+                                    0,
+                                    seriesOrder++
+                            ));
+                        }
+                        db.bulkInsertCategories(seriesCategories, "series");
+
+                        String seriesStreamsUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_series";
+                        String seriesStreamsJson = fetchUrl(seriesStreamsUrl);
+                        List<JsonObject> seriesStreamObjects = parseJsonList(seriesStreamsJson);
+                        List<KeoDatabase.ChannelItem> seriesList = new ArrayList<>();
+
+                        for (JsonObject obj : seriesStreamObjects) {
+                            String name = getOptString(obj, "name", "").trim();
+                            String seriesId = getOptString(obj, "series_id", "");
+                            String catId = getOptString(obj, "category_id", "");
+                            int num = getOptInt(obj, "num", seriesList.size() + 1);
+                            String logo = getOptString(obj, "cover", "");
+
+                            if (seriesId.isEmpty() || isSeparatorChannel(name)) continue;
+
+                            KeoDatabase.ChannelItem ch = new KeoDatabase.ChannelItem();
+                            ch.id = "xtream_series_" + seriesId;
+                            ch.name = name;
+                            ch.num = num;
+                            ch.groupId = "grp_series_" + catId;
+                            ch.groupName = "Série " + catId;
+                            ch.streamUrl = ""; // series episode resolver
+                            ch.streamType = "series";
+                            ch.logo = logo;
+                            ch.isFav = false;
+                            ch.resolution = "HD";
+                            ch.isSeparator = false;
+
+                            seriesList.add(ch);
+                        }
+                        db.bulkInsertChannels(seriesList, "series");
+                        seriesCount = seriesList.size();
+                    } catch (Exception ignored) {}
+
                     db.updateCategoryCounts();
 
-                    final int finalBouquets = categories.size();
-                    final int finalChannels = channels.size();
+                    final int totalCategories = db.getCategoryCount(null);
+                    final int totalChannels = liveChannels.size() + vodCount + seriesCount;
 
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            callback.onSuccess(finalBouquets, finalChannels);
+                            callback.onSuccess(totalCategories, totalChannels);
                         }
                     });
 
@@ -231,9 +345,6 @@ public class XtreamClient {
         });
     }
 
-    /**
-     * Safely parse JSON that could be either a standard JSON Array or a PHP associative object {"0": {...}, "1": {...}}
-     */
     public static List<JsonObject> parseJsonList(String jsonStr) {
         List<JsonObject> list = new ArrayList<>();
         if (jsonStr == null || jsonStr.trim().isEmpty()) return list;
@@ -257,9 +368,6 @@ public class XtreamClient {
         return list;
     }
 
-    /**
-     * Robust HTTP fetcher that handles cross-protocol redirects, GZIP compression, and 60s timeout
-     */
     private String fetchUrl(String urlStr) throws Exception {
         String currentUrl = urlStr;
         int redirects = 0;
@@ -343,7 +451,6 @@ public class XtreamClient {
     public static boolean isSeparatorChannel(String name) {
         if (name == null || name.trim().isEmpty()) return true;
         String trimmed = name.trim();
-        // Common IPTV separator patterns
         if (trimmed.startsWith("---") || trimmed.startsWith("===") || trimmed.startsWith("***")) return true;
         if (trimmed.startsWith("▼") || trimmed.startsWith("▲") || trimmed.startsWith("▶") || trimmed.startsWith("◀")) return true;
         if (trimmed.endsWith("---") || trimmed.endsWith("===") || trimmed.endsWith("***")) return true;
