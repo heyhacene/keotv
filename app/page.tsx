@@ -1230,16 +1230,16 @@ export default function KeoTVHome() {
         setAutoRefreshInterval(savedAutoRefresh);
         setLastAutoRefreshAt(savedLastRefresh);
 
-        // One-time automatic clean database migration for Build 144 (purges old 28/10 cache)
+        // One-time automatic clean database migration for Build 145 (purges old cache & applies ingestion fixes)
         const lastCleanBuild = await getSetting<number>('keotv_clean_sync_build', 0);
         const xtreamPl = (await db.playlists.toArray()).find(
           (p) => p.type === 'xtream' && p.server_url && p.username && p.password
         );
 
-        if (lastCleanBuild < 144 && xtreamPl) {
-          console.log('[MIGRATION] Build 144 auto-purge: clearing old cached data from 28/10...');
-          await setSetting('keotv_clean_sync_build', 144);
+        if (lastCleanBuild < 145 && xtreamPl) {
+          console.log('[MIGRATION] Build 145 auto-purge: clearing old cached data...');
           await handleResyncPlaylist(xtreamPl);
+          await setSetting('keotv_clean_sync_build', 145);
           return;
         }
 

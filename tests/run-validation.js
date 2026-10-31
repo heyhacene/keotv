@@ -106,6 +106,14 @@ try {
     'Les flux live séparateurs doivent être ignorés dès l\'ingestion'
   );
 
+  // 11. Test de vérification des imports de iptv-utils dans iptv-service.ts
+  console.log('  -> Test 11 : Vérification de la présence des imports iptv-utils dans iptv-service.ts...');
+  assert.strictEqual(
+    iptvServiceSource.includes("import {\n  isSeriesCategory,\n  isFilmCategory,\n  detectCategoryIcon,\n  isAdultCategoryName,"),
+    true,
+    'iptv-service.ts doit impérativement importer les fonctions de iptv-utils dans sa portée lexicale'
+  );
+
   console.log('🎉 TOUS LES TESTS DE VALIDATION IPTV ONT RÉUSSI AVEC SUCCÈS !');
 } catch (err) {
   console.error('❌ ÉCHEC DE LA VALIDATION AUTOMATIQUE :');

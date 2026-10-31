@@ -97,7 +97,7 @@ export async function fetchHttp<T = any>(
   }
 }
 
-export {
+import {
   isSeriesCategory,
   isFilmCategory,
   detectCategoryIcon,
@@ -108,6 +108,18 @@ export {
   detectResolution,
   extractAttribute,
 } from './iptv-utils';
+
+export {
+  isSeriesCategory,
+  isFilmCategory,
+  detectCategoryIcon,
+  isAdultCategoryName,
+  isSeparatorChannel,
+  cleanSeparatorName,
+  shouldExcludeChannelByPrefix,
+  detectResolution,
+  extractAttribute,
+};
 
 // Auto-detect stream type (live, vod, series) based on name, group and url
 export function detectStreamType(name: string, groupName: string, url: string): 'live' | 'vod' | 'series' {

@@ -1074,8 +1074,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     type="button"
                     onClick={async () => {
                       try {
-                        await db.categories.clear();
-                        await db.channels.clear();
                         await onResyncPlaylist(localPlaylists[0]);
                       } catch (err) {
                         console.error('Manual resync error:', err);
