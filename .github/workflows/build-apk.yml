@@ -57,7 +57,7 @@ jobs:
         run: |
           chmod +x ./gradlew
           echo "🚀 Compilation Release officielle native avec Gradle..."
-          ./gradlew assembleRelease --stacktrace 2>&1 | tee ../gradle-build.log
+          ./gradlew assembleRelease --stacktrace
 
           UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           echo "APK généré : $UNSIGNED_APK"

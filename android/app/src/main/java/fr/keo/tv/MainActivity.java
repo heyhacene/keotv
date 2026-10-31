@@ -209,8 +209,6 @@ public class MainActivity extends AppCompatActivity {
                 updateHeaderPlaylistInfo(db.getActivePlaylist());
                 loadLocalData();
 
-        // Silent background check for updates on startup
-        UpdateManager.checkForUpdates(this, false);
             }
 
             @Override
