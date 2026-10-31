@@ -3,10 +3,7 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
-    android:background="#080C14"
-    android:descendantFocusability="afterDescendants"
-    android:focusable="false"
-    android:focusableInTouchMode="true">
+    android:background="#080C14">
 
     <!-- Top Bar Header -->
     <LinearLayout
@@ -60,7 +57,7 @@
             android:id="@+id/btn_header_cloud"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
-            android:text="☁️ Rapatrier du site"
+            android:text="☁️ Rapatrier"
             android:textColor="#FFFFFF"
             android:textSize="11sp"
             android:textStyle="bold"
@@ -68,9 +65,7 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:layout_marginEnd="8dp"
-            android:focusable="true"
-            android:nextFocusDown="@+id/tab_live"
-            android:nextFocusRight="@+id/btn_header_sync" />
+            android:focusable="true" />
 
         <Button
             android:id="@+id/btn_header_sync"
@@ -84,10 +79,7 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:layout_marginEnd="8dp"
-            android:focusable="true"
-            android:nextFocusDown="@+id/tab_live"
-            android:nextFocusLeft="@+id/btn_header_cloud"
-            android:nextFocusRight="@+id/btn_header_diagnostic" />
+            android:focusable="true" />
 
         <Button
             android:id="@+id/btn_header_diagnostic"
@@ -101,10 +93,7 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:layout_marginEnd="8dp"
-            android:focusable="true"
-            android:nextFocusDown="@+id/tab_vod"
-            android:nextFocusLeft="@+id/btn_header_sync"
-            android:nextFocusRight="@+id/btn_header_update" />
+            android:focusable="true" />
 
         <Button
             android:id="@+id/btn_header_update"
@@ -118,10 +107,7 @@
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
             android:layout_marginEnd="8dp"
-            android:focusable="true"
-            android:nextFocusDown="@+id/tab_series"
-            android:nextFocusLeft="@+id/btn_header_diagnostic"
-            android:nextFocusRight="@+id/btn_header_login" />
+            android:focusable="true" />
 
         <Button
             android:id="@+id/btn_header_login"
@@ -134,9 +120,7 @@
             android:background="@drawable/bg_button_selector"
             android:paddingStart="12dp"
             android:paddingEnd="12dp"
-            android:focusable="true"
-            android:nextFocusDown="@+id/recycler_channels"
-            android:nextFocusLeft="@+id/btn_header_update" />
+            android:focusable="true" />
 
     </LinearLayout>
 
@@ -146,16 +130,14 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:orientation="horizontal"
-        android:padding="16dp"
-        android:descendantFocusability="afterDescendants">
+        android:padding="16dp">
 
         <!-- Column 1: Mode Tabs + Bouquets (Categories) -->
         <LinearLayout
             android:layout_width="260dp"
             android:layout_height="match_parent"
             android:orientation="vertical"
-            android:layout_marginEnd="12dp"
-            android:descendantFocusability="afterDescendants">
+            android:layout_marginEnd="12dp">
 
             <!-- Content Type Tabs: TV / Films / Séries -->
             <LinearLayout
@@ -173,12 +155,9 @@
                     android:textColor="#FFFFFF"
                     android:textSize="11sp"
                     android:textStyle="bold"
-                    android:background="@drawable/bg_button_selector"
+                    android:background="@drawable/bg_tab_selector"
                     android:layout_marginEnd="4dp"
-                    android:focusable="true"
-                    android:nextFocusUp="@+id/btn_header_cloud"
-                    android:nextFocusDown="@+id/recycler_categories"
-                    android:nextFocusRight="@+id/tab_vod" />
+                    android:focusable="true" />
 
                 <Button
                     android:id="@+id/tab_vod"
@@ -189,13 +168,9 @@
                     android:textColor="#FFFFFF"
                     android:textSize="11sp"
                     android:textStyle="bold"
-                    android:background="@drawable/bg_button_selector"
+                    android:background="@drawable/bg_tab_selector"
                     android:layout_marginEnd="4dp"
-                    android:focusable="true"
-                    android:nextFocusUp="@+id/btn_header_sync"
-                    android:nextFocusDown="@+id/recycler_categories"
-                    android:nextFocusLeft="@+id/tab_live"
-                    android:nextFocusRight="@+id/tab_series" />
+                    android:focusable="true" />
 
                 <Button
                     android:id="@+id/tab_series"
@@ -206,12 +181,8 @@
                     android:textColor="#FFFFFF"
                     android:textSize="11sp"
                     android:textStyle="bold"
-                    android:background="@drawable/bg_button_selector"
-                    android:focusable="true"
-                    android:nextFocusUp="@+id/btn_header_diagnostic"
-                    android:nextFocusDown="@+id/recycler_categories"
-                    android:nextFocusLeft="@+id/tab_vod"
-                    android:nextFocusRight="@+id/recycler_channels" />
+                    android:background="@drawable/bg_tab_selector"
+                    android:focusable="true" />
 
             </LinearLayout>
 
@@ -230,10 +201,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:focusable="true"
-                android:descendantFocusability="afterDescendants"
-                android:scrollbars="vertical"
-                android:nextFocusUp="@+id/tab_live"
-                android:nextFocusRight="@+id/recycler_channels" />
+                android:scrollbars="vertical" />
 
         </LinearLayout>
 
@@ -242,8 +210,7 @@
             android:layout_width="380dp"
             android:layout_height="match_parent"
             android:orientation="vertical"
-            android:layout_marginEnd="16dp"
-            android:descendantFocusability="afterDescendants">
+            android:layout_marginEnd="16dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
@@ -277,10 +244,7 @@
                     android:singleLine="true"
                     android:imeOptions="actionSearch"
                     android:focusable="true"
-                    android:focusableInTouchMode="false"
-                    android:nextFocusDown="@+id/recycler_channels"
-                    android:nextFocusLeft="@+id/recycler_categories"
-                    android:nextFocusUp="@+id/btn_header_update" />
+                    android:focusableInTouchMode="false" />
 
             </LinearLayout>
 
@@ -289,11 +253,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:focusable="true"
-                android:descendantFocusability="afterDescendants"
-                android:scrollbars="vertical"
-                android:nextFocusLeft="@+id/recycler_categories"
-                android:nextFocusRight="@+id/btn_watch_fullscreen"
-                android:nextFocusUp="@+id/et_search" />
+                android:scrollbars="vertical" />
 
         </LinearLayout>
 
@@ -304,8 +264,7 @@
             android:layout_weight="1"
             android:orientation="vertical"
             android:background="@drawable/bg_card"
-            android:padding="20dp"
-            android:descendantFocusability="afterDescendants">
+            android:padding="20dp">
 
             <TextView
                 android:id="@+id/tv_detail_name"

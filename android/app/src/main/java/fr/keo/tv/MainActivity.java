@@ -154,20 +154,91 @@ public class MainActivity extends AppCompatActivity {
         btnWatchFullscreen = findViewById(R.id.btn_watch_fullscreen);
         btnToggleFav = findViewById(R.id.btn_toggle_fav);
 
-        // Top bar buttons
-        findViewById(R.id.btn_header_cloud).setOnClickListener(v -> showCloudSyncDialog());
-        View btnUpdate = findViewById(R.id.btn_header_update);
-        if (btnUpdate != null) {
-            btnUpdate.setOnClickListener(v -> UpdateManager.checkForUpdates(this, true));
-        }
-        findViewById(R.id.btn_header_sync).setOnClickListener(v -> triggerSync());
-        findViewById(R.id.btn_header_diagnostic).setOnClickListener(v -> showDiagnosticDialog());
-        findViewById(R.id.btn_header_login).setOnClickListener(v -> showLoginDialog());
+        // Top bar buttons click listeners
+        View btnCloud = findViewById(R.id.btn_header_cloud);
+        if (btnCloud != null) btnCloud.setOnClickListener(v -> showCloudSyncDialog());
 
-        // Mode tabs (TV / Films / Séries)
+        View btnUpdate = findViewById(R.id.btn_header_update);
+        if (btnUpdate != null) btnUpdate.setOnClickListener(v -> UpdateManager.checkForUpdates(this, true));
+
+        View btnSync = findViewById(R.id.btn_header_sync);
+        if (btnSync != null) btnSync.setOnClickListener(v -> triggerSync());
+
+        View btnDiagnostic = findViewById(R.id.btn_header_diagnostic);
+        if (btnDiagnostic != null) btnDiagnostic.setOnClickListener(v -> showDiagnosticDialog());
+
+        View btnLogin = findViewById(R.id.btn_header_login);
+        if (btnLogin != null) btnLogin.setOnClickListener(v -> showLoginDialog());
+
+        // Header DPAD-Down navigation override: forces focus out of the top bar down to tabs/categories
+        View.OnKeyListener headerDownListener = (v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                int id = v.getId();
+                if (id == R.id.btn_header_diagnostic && tabVod != null && tabVod.isShown()) {
+                    tabVod.requestFocus();
+                    return true;
+                } else if (id == R.id.btn_header_update && tabSeries != null && tabSeries.isShown()) {
+                    tabSeries.requestFocus();
+                    return true;
+                } else if (id == R.id.btn_header_login) {
+                    if (recyclerChannels != null && channelsAdapter.getItemCount() > 0) {
+                        focusRecyclerViewPosition(recyclerChannels, channelsAdapter.getSelectedPos());
+                    } else if (tabSeries != null) {
+                        tabSeries.requestFocus();
+                    }
+                    return true;
+                } else {
+                    if (tabLive != null && tabLive.isShown()) {
+                        tabLive.requestFocus();
+                        return true;
+                    } else if (recyclerCategories != null) {
+                        focusRecyclerViewFirstItem(recyclerCategories);
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        if (btnCloud != null) btnCloud.setOnKeyListener(headerDownListener);
+        if (btnSync != null) btnSync.setOnKeyListener(headerDownListener);
+        if (btnDiagnostic != null) btnDiagnostic.setOnKeyListener(headerDownListener);
+        if (btnUpdate != null) btnUpdate.setOnKeyListener(headerDownListener);
+        if (btnLogin != null) btnLogin.setOnKeyListener(headerDownListener);
+
+        // Mode tabs (TV / Films / Séries) click & DPAD navigation
         if (tabLive != null) tabLive.setOnClickListener(v -> switchContentType("live"));
         if (tabVod != null) tabVod.setOnClickListener(v -> switchContentType("vod"));
         if (tabSeries != null) tabSeries.setOnClickListener(v -> switchContentType("series"));
+
+        View.OnKeyListener tabKeyListener = (v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    focusRecyclerViewFirstItem(recyclerCategories);
+                    return true;
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    int id = v.getId();
+                    if (id == R.id.tab_vod && btnSync != null) {
+                        btnSync.requestFocus();
+                    } else if (id == R.id.tab_series && btnDiagnostic != null) {
+                        btnDiagnostic.requestFocus();
+                    } else if (btnCloud != null) {
+                        btnCloud.requestFocus();
+                    }
+                    return true;
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v.getId() == R.id.tab_series) {
+                    if (recyclerChannels != null && channelsAdapter.getItemCount() > 0) {
+                        focusRecyclerViewPosition(recyclerChannels, channelsAdapter.getSelectedPos());
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        if (tabLive != null) tabLive.setOnKeyListener(tabKeyListener);
+        if (tabVod != null) tabVod.setOnKeyListener(tabKeyListener);
+        if (tabSeries != null) tabSeries.setOnKeyListener(tabKeyListener);
 
         btnWatchFullscreen.setOnClickListener(v -> launchPlayerFullscreen());
         btnToggleFav.setOnClickListener(v -> {
@@ -187,6 +258,25 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         });
+
+        View.OnKeyListener detailKeyListener = (v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    if (recyclerChannels != null && channelsAdapter.getItemCount() > 0) {
+                        focusRecyclerViewPosition(recyclerChannels, channelsAdapter.getSelectedPos());
+                        return true;
+                    }
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP && v.getId() == R.id.btn_watch_fullscreen) {
+                    if (btnLogin != null) {
+                        btnLogin.requestFocus();
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+        btnWatchFullscreen.setOnKeyListener(detailKeyListener);
+        btnToggleFav.setOnKeyListener(detailKeyListener);
 
         // Instant search / filtering with DPAD key listener to prevent trapping focus
         if (etSearch != null) {
@@ -250,17 +340,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateTabStyles() {
-        int activeBg = 0xFF0284C7;   // Glowing Sky Blue
-        int inactiveBg = 0xFF1E293B; // Dark Slate
-
         if (tabLive != null) {
-            tabLive.setBackgroundColor("live".equals(currentType) ? activeBg : inactiveBg);
+            tabLive.setSelected("live".equals(currentType));
         }
         if (tabVod != null) {
-            tabVod.setBackgroundColor("vod".equals(currentType) ? activeBg : inactiveBg);
+            tabVod.setSelected("vod".equals(currentType));
         }
         if (tabSeries != null) {
-            tabSeries.setBackgroundColor("series".equals(currentType) ? activeBg : inactiveBg);
+            tabSeries.setSelected("series".equals(currentType));
         }
     }
 
@@ -315,6 +402,41 @@ public class MainActivity extends AppCompatActivity {
         recyclerChannels.setAdapter(channelsAdapter);
     }
 
+    private void focusRecyclerViewFirstItem(RecyclerView rv) {
+        if (rv == null) return;
+        rv.post(() -> {
+            RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(0);
+            if (vh != null && vh.itemView != null) {
+                vh.itemView.requestFocus();
+            } else {
+                View child = rv.getChildAt(0);
+                if (child != null) {
+                    child.requestFocus();
+                } else {
+                    rv.requestFocus();
+                }
+            }
+        });
+    }
+
+    private void focusRecyclerViewPosition(RecyclerView rv, int position) {
+        if (rv == null) return;
+        rv.post(() -> {
+            int targetPos = Math.max(0, position);
+            RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(targetPos);
+            if (vh != null && vh.itemView != null) {
+                vh.itemView.requestFocus();
+            } else {
+                View child = rv.getChildAt(targetPos);
+                if (child != null) {
+                    child.requestFocus();
+                } else {
+                    rv.requestFocus();
+                }
+            }
+        });
+    }
+
     private void loadLocalData() {
         try {
             updateTabStyles();
@@ -323,17 +445,10 @@ public class MainActivity extends AppCompatActivity {
 
             if (!cats.isEmpty()) {
                 selectCategory(cats.get(0));
-                // Set default focus on categories, never on search box!
-                recyclerCategories.post(() -> {
-                    if (categoriesAdapter.getItemCount() > 0) {
-                        RecyclerView.ViewHolder vh = recyclerCategories.findViewHolderForAdapterPosition(0);
-                        if (vh != null) {
-                            vh.itemView.requestFocus();
-                        } else {
-                            recyclerCategories.requestFocus();
-                        }
-                    }
-                });
+                // Set default focus on categories list, never on top bar!
+                recyclerCategories.postDelayed(() -> {
+                    focusRecyclerViewFirstItem(recyclerCategories);
+                }, 200);
             } else {
                 tvDetailName.setText("Aucun contenu dans cette section. Lancez une synchronisation.");
                 if (tvDetailGroup != null) tvDetailGroup.setText("-");
@@ -381,7 +496,7 @@ public class MainActivity extends AppCompatActivity {
             if ("vod".equals(ch.streamType)) {
                 tvDetailEpg.setText("Film VOD - Lecture à la demande");
             } else if ("series".equals(ch.streamType)) {
-                tvDetailEpg.setText("Série TV - Catalogue complet");
+                tvDetailEpg.setText("Série TV - Appuyez sur OK pour voir les épisodes");
             } else {
                 tvDetailEpg.setText("Direct TV (" + ch.resolution + ")");
             }
@@ -390,8 +505,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void launchPlayerFullscreen() {
-        if (activeChannel == null || activeChannel.streamUrl == null || activeChannel.streamUrl.isEmpty()) {
+        if (activeChannel == null) {
             Toast.makeText(this, "Sélectionnez d'abord un programme", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        if ("series".equals(activeChannel.streamType)) {
+            openSeriesEpisodes(activeChannel);
+            return;
+        }
+
+        if (activeChannel.streamUrl == null || activeChannel.streamUrl.isEmpty()) {
+            Toast.makeText(this, "Flux vidéo non disponible pour ce programme", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -412,11 +537,93 @@ public class MainActivity extends AppCompatActivity {
         PlayerActivity.pendingUrls = urls;
         PlayerActivity.pendingTitles = titles;
         PlayerActivity.pendingIndex = startIndex;
-        PlayerActivity.pendingIsLive = !"vod".equals(activeChannel.streamType) && !"series".equals(activeChannel.streamType);
-        PlayerActivity.pendingSeriesId = "series".equals(activeChannel.streamType) ? activeChannel.id : null;
+        PlayerActivity.pendingIsLive = !"vod".equals(activeChannel.streamType);
+        PlayerActivity.pendingSeriesId = null;
 
         Intent intent = new Intent(this, PlayerActivity.class);
         startActivity(intent);
+    }
+
+    private void openSeriesEpisodes(final KeoDatabase.ChannelItem seriesItem) {
+        if (seriesItem == null) return;
+        final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
+        if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) {
+            Toast.makeText(this, "Veuillez d'abord configurer votre compte IPTV", Toast.LENGTH_LONG).show();
+            return;
+        }
+
+        final String rawId = seriesItem.id.replace("xtream_series_", "");
+        Toast.makeText(this, "Chargement des épisodes de " + seriesItem.name + "...", Toast.LENGTH_SHORT).show();
+
+        xtreamClient.fetchSeriesInfo(pl.serverUrl, pl.username, pl.password, rawId, new XtreamClient.SeriesInfoCallback() {
+            @Override
+            public void onSuccess(JsonObject seriesDetails) {
+                if (isFinishing() || isDestroyed()) return;
+
+                if (!seriesDetails.has("episodes") || !seriesDetails.get("episodes").isJsonObject()) {
+                    Toast.makeText(MainActivity.this, "Aucun épisode trouvé pour cette série.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+
+                JsonObject epObj = seriesDetails.getAsJsonObject("episodes");
+                final List<String> displayTitles = new ArrayList<>();
+                final List<String> streamUrls = new ArrayList<>();
+
+                String server = pl.serverUrl.trim().replaceAll("/+$", "");
+                if (!server.startsWith("http://") && !server.startsWith("https://")) server = "http://" + server;
+                String user = pl.username.trim();
+                String pass = pl.password.trim();
+
+                for (java.util.Map.Entry<String, JsonElement> seasonEntry : epObj.entrySet()) {
+                    String seasonKey = seasonEntry.getKey();
+                    if (!seasonEntry.getValue().isJsonArray()) continue;
+
+                    JsonArray eps = seasonEntry.getValue().getAsJsonArray();
+                    for (int i = 0; i < eps.size(); i++) {
+                        if (!eps.get(i).isJsonObject()) continue;
+                        JsonObject ep = eps.get(i).getAsJsonObject();
+                        String epId = XtreamClient.getOptString(ep, "id", "");
+                        int epNum = XtreamClient.getOptInt(ep, "episode_num", i + 1);
+                        String epTitle = XtreamClient.getOptString(ep, "title", "Épisode " + epNum);
+                        String ext = XtreamClient.getOptString(ep, "container_extension", "mkv");
+                        if (ext.isEmpty()) ext = "mkv";
+
+                        String url = server + "/series/" + user + "/" + pass + "/" + epId + "." + ext;
+                        String label = "S" + seasonKey + " E" + epNum + " - " + epTitle;
+
+                        displayTitles.add(label);
+                        streamUrls.add(url);
+                    }
+                }
+
+                if (displayTitles.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Aucun épisode disponible pour cette série.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+
+                CharSequence[] items = displayTitles.toArray(new CharSequence[0]);
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("🍿 " + seriesItem.name + " (" + displayTitles.size() + " épisodes)")
+                        .setItems(items, (dialog, which) -> {
+                            PlayerActivity.pendingUrls = streamUrls;
+                            PlayerActivity.pendingTitles = displayTitles;
+                            PlayerActivity.pendingIndex = which;
+                            PlayerActivity.pendingIsLive = false;
+                            PlayerActivity.pendingSeriesId = rawId;
+
+                            Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
+                            startActivity(intent);
+                        })
+                        .setNegativeButton("Fermer", null)
+                        .show();
+            }
+
+            @Override
+            public void onError(String error) {
+                if (isFinishing() || isDestroyed()) return;
+                Toast.makeText(MainActivity.this, "Erreur chargement série : " + error, Toast.LENGTH_LONG).show();
+            }
+        });
     }
 
     private void triggerSync() {
@@ -436,10 +643,14 @@ public class MainActivity extends AppCompatActivity {
             }
 
             @Override
-            public void onSuccess(int bouquetCount, int channelCount) {
+            public void onSuccess(int liveCount, int vodCount, int seriesCount) {
                 tvStatusBadge.setText("✅ Prêt");
                 tvStatusBadge.setBackgroundColor(0xFF132E27); // green
-                Toast.makeText(MainActivity.this, "Synchronisation réussie : " + channelCount + " éléments au total", Toast.LENGTH_LONG).show();
+                String msg = "Synchronisation réussie !\n"
+                        + "• Direct TV : " + liveCount + " chaînes\n"
+                        + "• Films (VOD) : " + vodCount + " films\n"
+                        + "• Séries : " + seriesCount + " séries";
+                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
                 updateHeaderPlaylistInfo(db.getActivePlaylist());
                 loadLocalData();
             }
@@ -760,6 +971,10 @@ public class MainActivity extends AppCompatActivity {
             notifyDataSetChanged();
         }
 
+        public int getSelectedPos() {
+            return selectedPos;
+        }
+
         @NonNull
         @Override
         public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -787,6 +1002,29 @@ public class MainActivity extends AppCompatActivity {
                     selectCategory(item);
                 }
             });
+
+            holder.itemView.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_UP && holder.getBindingAdapterPosition() == 0) {
+                        if ("vod".equals(currentType) && tabVod != null) {
+                            tabVod.requestFocus();
+                            return true;
+                        } else if ("series".equals(currentType) && tabSeries != null) {
+                            tabSeries.requestFocus();
+                            return true;
+                        } else if (tabLive != null) {
+                            tabLive.requestFocus();
+                            return true;
+                        }
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        if (recyclerChannels != null && channelsAdapter.getItemCount() > 0) {
+                            focusRecyclerViewPosition(recyclerChannels, channelsAdapter.getSelectedPos());
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            });
         }
 
         @Override
@@ -813,6 +1051,10 @@ public class MainActivity extends AppCompatActivity {
             items.addAll(newItems);
             selectedPos = 0;
             notifyDataSetChanged();
+        }
+
+        public int getSelectedPos() {
+            return selectedPos;
         }
 
         public List<KeoDatabase.ChannelItem> getItems() {
@@ -854,9 +1096,10 @@ public class MainActivity extends AppCompatActivity {
                 notifyDataSetChanged();
                 selectChannel(item);
 
-                // On phone (portrait), clicking directly launches playback
-                int orientation = getResources().getConfiguration().orientation;
-                if (orientation == Configuration.ORIENTATION_PORTRAIT) {
+                // Clicking directly launches playback or opens series episodes
+                if ("series".equals(item.streamType)) {
+                    openSeriesEpisodes(item);
+                } else {
                     launchPlayerFullscreen();
                 }
             });
@@ -867,6 +1110,31 @@ public class MainActivity extends AppCompatActivity {
                     notifyDataSetChanged();
                     selectChannel(item);
                 }
+            });
+
+            holder.itemView.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                        if (recyclerCategories != null && categoriesAdapter.getItemCount() > 0) {
+                            focusRecyclerViewPosition(recyclerCategories, categoriesAdapter.getSelectedPos());
+                            return true;
+                        }
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        if (btnWatchFullscreen != null) {
+                            btnWatchFullscreen.requestFocus();
+                            return true;
+                        }
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP && holder.getBindingAdapterPosition() == 0) {
+                        if (etSearch != null && etSearch.isShown()) {
+                            etSearch.requestFocus();
+                            return true;
+                        } else if (tabSeries != null) {
+                            tabSeries.requestFocus();
+                            return true;
+                        }
+                    }
+                }
+                return false;
             });
         }
 
@@ -898,12 +1166,16 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             }
             if (btnWatchFullscreen != null && (btnWatchFullscreen.hasFocus() || btnToggleFav.hasFocus())) {
-                if (recyclerChannels != null) recyclerChannels.requestFocus();
-                return true;
+                if (recyclerChannels != null) {
+                    focusRecyclerViewPosition(recyclerChannels, channelsAdapter.getSelectedPos());
+                    return true;
+                }
             }
             if (recyclerChannels != null && recyclerChannels.hasFocus()) {
-                if (recyclerCategories != null) recyclerCategories.requestFocus();
-                return true;
+                if (recyclerCategories != null) {
+                    focusRecyclerViewPosition(recyclerCategories, categoriesAdapter.getSelectedPos());
+                    return true;
+                }
             }
         }
         return super.onKeyDown(keyCode, event);

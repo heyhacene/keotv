@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<selector xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Focused & Selected: bright cyan with thick 3dp white border -->
+    <item android:state_focused="true" android:state_selected="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#0284C7" />
+            <corners android:radius="8dp" />
+            <stroke android:width="3dp" android:color="#FFFFFF" />
+        </shape>
+    </item>
+    <!-- Focused & Not Selected: vibrant blue with thick 3dp white border -->
+    <item android:state_focused="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#0369A1" />
+            <corners android:radius="8dp" />
+            <stroke android:width="3dp" android:color="#FFFFFF" />
+        </shape>
+    </item>
+    <!-- Selected & Unfocused: glowing cyan outline and bright slate blue fill -->
+    <item android:state_selected="true">
+        <shape android:shape="rectangle">
+            <solid android:color="#0284C7" />
+            <corners android:radius="8dp" />
+            <stroke android:width="2dp" android:color="#38BDF8" />
+        </shape>
+    </item>
+    <!-- Default Inactive Tab -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#1E293B" />
+            <corners android:radius="8dp" />
+            <stroke android:width="1dp" android:color="#334155" />
+        </shape>
+    </item>
+</selector>

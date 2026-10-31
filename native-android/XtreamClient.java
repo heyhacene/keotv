@@ -28,8 +28,11 @@ import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 
+import android.util.Log;
+
 public class XtreamClient {
 
+    private static final String TAG = "XtreamClient";
     private static final String USER_AGENT = "IPTVSmartersPro/3.1.5 (Linux; Android 12)";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -53,7 +56,12 @@ public class XtreamClient {
 
     public interface SyncCallback {
         void onProgress(String message);
-        void onSuccess(int bouquetCount, int channelCount);
+        void onSuccess(int liveCount, int vodCount, int seriesCount);
+        void onError(String error);
+    }
+
+    public interface SeriesInfoCallback {
+        void onSuccess(JsonObject seriesDetails);
         void onError(String error);
     }
 
@@ -253,7 +261,9 @@ public class XtreamClient {
                         }
                         db.bulkInsertChannels(vodMovies, "vod");
                         vodCount = vodMovies.size();
-                    } catch (Exception ignored) {}
+                    } catch (Throwable t) {
+                        Log.e(TAG, "Erreur téléchargement VOD (Films)", t);
+                    }
 
                     // 5. Fetch Series Categories & Series
                     int seriesCount = 0;
@@ -309,17 +319,20 @@ public class XtreamClient {
                         }
                         db.bulkInsertChannels(seriesList, "series");
                         seriesCount = seriesList.size();
-                    } catch (Exception ignored) {}
+                    } catch (Throwable t) {
+                        Log.e(TAG, "Erreur téléchargement Séries", t);
+                    }
 
                     db.updateCategoryCounts();
 
-                    final int totalCategories = db.getCategoryCount(null);
-                    final int totalChannels = liveChannels.size() + vodCount + seriesCount;
+                    final int finalLiveCount = liveChannels.size();
+                    final int finalVodCount = vodCount;
+                    final int finalSeriesCount = seriesCount;
 
                     mainHandler.post(new Runnable() {
                         @Override
                         public void run() {
-                            callback.onSuccess(totalCategories, totalChannels);
+                            callback.onSuccess(finalLiveCount, finalVodCount, finalSeriesCount);
                         }
                     });
 
@@ -329,6 +342,45 @@ public class XtreamClient {
                         public void run() {
                             String err = e.getMessage() != null ? e.getMessage() : e.toString();
                             callback.onError(err);
+                        }
+                    });
+                }
+            }
+        });
+    }
+
+    public void fetchSeriesInfo(final String serverUrl, final String username, final String password,
+                                final String seriesId, final SeriesInfoCallback callback) {
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String server = serverUrl.trim().replaceAll("/+$", "");
+                    if (!server.startsWith("http://") && !server.startsWith("https://")) {
+                        server = "http://" + server;
+                    }
+                    String encUser = URLEncoder.encode(username.trim(), "UTF-8");
+                    String encPass = URLEncoder.encode(password.trim(), "UTF-8");
+                    String url = server + "/player_api.php?username=" + encUser + "&password=" + encPass
+                            + "&action=get_series_info&series_id=" + seriesId;
+
+                    String json = fetchUrl(url);
+                    JsonElement el = JsonParser.parseString(json.trim());
+                    if (!el.isJsonObject()) {
+                        throw new Exception("Réponse serveur invalide");
+                    }
+                    final JsonObject root = el.getAsJsonObject();
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            callback.onSuccess(root);
+                        }
+                    });
+                } catch (final Exception e) {
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            callback.onError(e.getMessage() != null ? e.getMessage() : e.toString());
                         }
                     });
                 }
@@ -363,7 +415,9 @@ public class XtreamClient {
                     }
                 }
             }
-        } catch (Exception ignored) {}
+        } catch (Throwable t) {
+            Log.w(TAG, "Erreur parsing JSON list", t);
+        }
 
         return list;
     }
