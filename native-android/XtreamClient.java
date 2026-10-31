@@ -441,7 +441,7 @@ public class XtreamClient {
         return list;
     }
 
-    private String fetchUrl(String urlStr) throws Exception {
+    public static String fetchUrl(String urlStr) throws Exception {
         String currentUrl = urlStr;
         int redirects = 0;
 
