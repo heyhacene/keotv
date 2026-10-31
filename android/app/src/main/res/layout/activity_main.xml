@@ -95,6 +95,20 @@
             android:focusable="true" />
 
         <Button
+            android:id="@+id/btn_header_update"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="🔄 MàJ"
+            android:textColor="#FFFFFF"
+            android:textSize="11sp"
+            android:textStyle="bold"
+            android:background="@drawable/bg_button_selector"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:layout_marginEnd="8dp"
+            android:focusable="true" />
+
+        <Button
             android:id="@+id/btn_header_login"
             android:layout_width="wrap_content"
             android:layout_height="36dp"

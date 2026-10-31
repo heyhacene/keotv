@@ -57,7 +57,7 @@ jobs:
         run: |
           chmod +x ./gradlew
           echo "🚀 Compilation Release officielle native avec Gradle..."
-          ./gradlew assembleRelease --stacktrace
+          ./gradlew assembleRelease --stacktrace 2>&1 | tee ../gradle-build.log
 
           UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           echo "APK généré : $UNSIGNED_APK"
@@ -95,8 +95,7 @@ jobs:
         with:
           name: gradle-failure-reports
           path: |
-            android/app/build/reports/
-            **/hs_err_pid*.log
+            gradle-build.log
 
       - name: Publication de l'APK en téléchargement (Artifacts)
         uses: actions/upload-artifact@v4
