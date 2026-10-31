@@ -757,6 +757,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     <span>Charger Démo France</span>
                   </button>
                   <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onOpenSyncModal();
+                    }}
+                    className="px-3.5 py-2 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-semibold transition flex items-center space-x-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                    title="Rapatrier vos comptes IPTV enregistrés sur le portail Web"
+                  >
+                    <RefreshCw className="w-4 h-4 text-emerald-400" />
+                    <span>Rapatrier depuis le Web</span>
+                  </button>
+                  <button
                     onClick={() => {
                       onClose();
                       onOpenXtreamModal();
@@ -1059,6 +1071,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </span>
                   </div>
                 </div>
+              </div>
+
+              {/* Web Portal Cloud Sync Action */}
+              <div className="p-4 bg-sky-500/10 border border-sky-500/20 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-xs font-bold text-sky-300 flex items-center space-x-1.5">
+                    <RefreshCw className="w-3.5 h-3.5 text-sky-400" />
+                    <span>Rapatrier depuis le Portail Web</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Récupérez en 1 clic vos comptes Xtream et playlists saisis depuis votre smartphone ou PC sur le site.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    onOpenSyncModal();
+                  }}
+                  className="px-4 py-2 bg-sky-600 hover:bg-sky-500 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-sky-400"
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  <span>Ouvrir la Synchro Cloud</span>
+                </button>
               </div>
 
               {/* Emergency Clean & Reset Button */}
