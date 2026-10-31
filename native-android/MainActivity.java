@@ -182,18 +182,19 @@ public class MainActivity extends AppCompatActivity {
                     tabSeries.requestFocus();
                     return true;
                 } else if (id == R.id.btn_header_login) {
-                    if (recyclerChannels != null && channelsAdapter.getItemCount() > 0) {
-                        focusRecyclerViewPosition(recyclerChannels, channelsAdapter.getSelectedPos());
-                    } else if (tabSeries != null) {
-                        tabSeries.requestFocus();
+                    if (btnWatchFullscreen != null && btnWatchFullscreen.isShown()) {
+                        btnWatchFullscreen.requestFocus();
+                        return true;
+                    } else {
+                        focusChannelsList();
+                        return true;
                     }
-                    return true;
                 } else {
                     if (tabLive != null && tabLive.isShown()) {
                         tabLive.requestFocus();
                         return true;
-                    } else if (recyclerCategories != null) {
-                        focusRecyclerViewFirstItem(recyclerCategories);
+                    } else {
+                        focusCategoriesList();
                         return true;
                     }
                 }
@@ -215,7 +216,7 @@ public class MainActivity extends AppCompatActivity {
         View.OnKeyListener tabKeyListener = (v, keyCode, event) -> {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                    focusRecyclerViewFirstItem(recyclerCategories);
+                    focusCategoriesList();
                     return true;
                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
                     int id = v.getId();
@@ -228,10 +229,8 @@ public class MainActivity extends AppCompatActivity {
                     }
                     return true;
                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v.getId() == R.id.tab_series) {
-                    if (recyclerChannels != null && channelsAdapter.getItemCount() > 0) {
-                        focusRecyclerViewPosition(recyclerChannels, channelsAdapter.getSelectedPos());
-                        return true;
-                    }
+                    focusChannelsList();
+                    return true;
                 }
             }
             return false;
@@ -263,10 +262,8 @@ public class MainActivity extends AppCompatActivity {
         View.OnKeyListener detailKeyListener = (v, keyCode, event) -> {
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                    if (recyclerChannels != null && channelsAdapter.getItemCount() > 0) {
-                        focusRecyclerViewPosition(recyclerChannels, channelsAdapter.getSelectedPos());
-                        return true;
-                    }
+                    focusChannelsList();
+                    return true;
                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP && v.getId() == R.id.btn_watch_fullscreen) {
                     if (btnLogin != null) {
                         btnLogin.requestFocus();
@@ -297,15 +294,11 @@ public class MainActivity extends AppCompatActivity {
             etSearch.setOnKeyListener((v, keyCode, event) -> {
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
                     if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                        if (recyclerChannels != null && channelsAdapter.getItemCount() > 0) {
-                            recyclerChannels.requestFocus();
-                            return true;
-                        }
+                        focusChannelsList();
+                        return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                        if (recyclerCategories != null) {
-                            recyclerCategories.requestFocus();
-                            return true;
-                        }
+                        focusCategoriesList();
+                        return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
                         if (tabSeries != null) {
                             tabSeries.requestFocus();
@@ -403,39 +396,58 @@ public class MainActivity extends AppCompatActivity {
         recyclerChannels.setAdapter(channelsAdapter);
     }
 
-    private void focusRecyclerViewFirstItem(RecyclerView rv) {
+    private void focusRecyclerViewItem(RecyclerView rv, int position) {
         if (rv == null) return;
+        RecyclerView.LayoutManager lm = rv.getLayoutManager();
+        if (lm == null) return;
+        int count = (rv.getAdapter() != null) ? rv.getAdapter().getItemCount() : 0;
+        if (count == 0) return;
+
+        final int targetPos = Math.max(0, Math.min(position, count - 1));
+        rv.scrollToPosition(targetPos);
+
         rv.post(() -> {
-            RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(0);
+            RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(targetPos);
             if (vh != null && vh.itemView != null) {
                 vh.itemView.requestFocus();
             } else {
-                View child = rv.getChildAt(0);
-                if (child != null) {
-                    child.requestFocus();
-                } else {
-                    rv.requestFocus();
+                View view = lm.findViewByPosition(targetPos);
+                if (view != null) {
+                    view.requestFocus();
+                } else if (rv.getChildCount() > 0) {
+                    View child = rv.getChildAt(0);
+                    if (child != null) child.requestFocus();
                 }
             }
         });
     }
 
-    private void focusRecyclerViewPosition(RecyclerView rv, int position) {
-        if (rv == null) return;
-        rv.post(() -> {
-            int targetPos = Math.max(0, position);
-            RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(targetPos);
-            if (vh != null && vh.itemView != null) {
-                vh.itemView.requestFocus();
-            } else {
-                View child = rv.getChildAt(targetPos);
-                if (child != null) {
-                    child.requestFocus();
-                } else {
-                    rv.requestFocus();
-                }
+    private void focusCategoriesList() {
+        if (recyclerCategories == null || categoriesAdapter == null || categoriesAdapter.getItemCount() == 0) return;
+        int target = Math.max(0, Math.min(categoriesAdapter.getSelectedPos(), categoriesAdapter.getItemCount() - 1));
+        focusRecyclerViewItem(recyclerCategories, target);
+    }
+
+    private void focusChannelsList() {
+        if (recyclerChannels == null || channelsAdapter == null || channelsAdapter.getItemCount() == 0) return;
+        int target = Math.max(0, Math.min(channelsAdapter.getSelectedPos(), channelsAdapter.getItemCount() - 1));
+        focusRecyclerViewItem(recyclerChannels, target);
+    }
+
+    private KeoDatabase.CategoryItem pendingCategoryToLoad = null;
+    private final Runnable categoryDebounceRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (pendingCategoryToLoad != null) {
+                selectCategory(pendingCategoryToLoad);
             }
-        });
+        }
+    };
+
+    private void selectCategoryDebounced(KeoDatabase.CategoryItem cat) {
+        pendingCategoryToLoad = cat;
+        mainHandler.removeCallbacks(categoryDebounceRunnable);
+        mainHandler.postDelayed(categoryDebounceRunnable, 120);
     }
 
     private void loadLocalData() {
@@ -446,10 +458,8 @@ public class MainActivity extends AppCompatActivity {
 
             if (!cats.isEmpty()) {
                 selectCategory(cats.get(0));
-                // Set default focus on categories list, never on top bar!
-                recyclerCategories.postDelayed(() -> {
-                    focusRecyclerViewFirstItem(recyclerCategories);
-                }, 200);
+                // Set default focus on the first category item on TV
+                recyclerCategories.postDelayed(this::focusCategoriesList, 150);
             } else {
                 tvDetailName.setText("Aucun contenu dans cette section. Lancez une synchronisation.");
                 if (tvDetailGroup != null) tvDetailGroup.setText("-");
@@ -991,16 +1001,21 @@ public class MainActivity extends AppCompatActivity {
             holder.itemView.setSelected(selectedPos == position);
 
             holder.itemView.setOnClickListener(v -> {
-                selectedPos = holder.getBindingAdapterPosition();
-                notifyDataSetChanged();
-                selectCategory(item);
+                int pos = holder.getBindingAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) {
+                    selectedPos = pos;
+                    mainHandler.removeCallbacks(categoryDebounceRunnable);
+                    selectCategory(item);
+                }
             });
 
             holder.itemView.setOnFocusChangeListener((v, hasFocus) -> {
                 if (hasFocus) {
-                    selectedPos = holder.getBindingAdapterPosition();
-                    notifyDataSetChanged();
-                    selectCategory(item);
+                    int pos = holder.getBindingAdapterPosition();
+                    if (pos != RecyclerView.NO_POSITION) {
+                        selectedPos = pos;
+                        selectCategoryDebounced(item);
+                    }
                 }
             });
 
@@ -1018,10 +1033,8 @@ public class MainActivity extends AppCompatActivity {
                             return true;
                         }
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                        if (recyclerChannels != null && channelsAdapter.getItemCount() > 0) {
-                            focusRecyclerViewPosition(recyclerChannels, channelsAdapter.getSelectedPos());
-                            return true;
-                        }
+                        focusChannelsList();
+                        return true;
                     }
                 }
                 return false;
@@ -1093,33 +1106,35 @@ public class MainActivity extends AppCompatActivity {
             holder.itemView.setSelected(selectedPos == position);
 
             holder.itemView.setOnClickListener(v -> {
-                selectedPos = holder.getBindingAdapterPosition();
-                notifyDataSetChanged();
-                selectChannel(item);
+                int pos = holder.getBindingAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) {
+                    selectedPos = pos;
+                    selectChannel(item);
 
-                // Clicking directly launches playback or opens series episodes
-                if ("series".equals(item.streamType)) {
-                    openSeriesEpisodes(item);
-                } else {
-                    launchPlayerFullscreen();
+                    // Clicking directly launches playback or opens series episodes
+                    if ("series".equals(item.streamType)) {
+                        openSeriesEpisodes(item);
+                    } else {
+                        launchPlayerFullscreen();
+                    }
                 }
             });
 
             holder.itemView.setOnFocusChangeListener((v, hasFocus) -> {
                 if (hasFocus) {
-                    selectedPos = holder.getBindingAdapterPosition();
-                    notifyDataSetChanged();
-                    selectChannel(item);
+                    int pos = holder.getBindingAdapterPosition();
+                    if (pos != RecyclerView.NO_POSITION) {
+                        selectedPos = pos;
+                        selectChannel(item);
+                    }
                 }
             });
 
             holder.itemView.setOnKeyListener((v, keyCode, event) -> {
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
                     if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                        if (recyclerCategories != null && categoriesAdapter.getItemCount() > 0) {
-                            focusRecyclerViewPosition(recyclerCategories, categoriesAdapter.getSelectedPos());
-                            return true;
-                        }
+                        focusCategoriesList();
+                        return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
                         if (btnWatchFullscreen != null) {
                             btnWatchFullscreen.requestFocus();
@@ -1163,20 +1178,16 @@ public class MainActivity extends AppCompatActivity {
             if (etSearch != null && etSearch.hasFocus()) {
                 etSearch.setText("");
                 etSearch.clearFocus();
-                if (recyclerChannels != null) recyclerChannels.requestFocus();
+                focusChannelsList();
                 return true;
             }
             if (btnWatchFullscreen != null && (btnWatchFullscreen.hasFocus() || btnToggleFav.hasFocus())) {
-                if (recyclerChannels != null) {
-                    focusRecyclerViewPosition(recyclerChannels, channelsAdapter.getSelectedPos());
-                    return true;
-                }
+                focusChannelsList();
+                return true;
             }
             if (recyclerChannels != null && recyclerChannels.hasFocus()) {
-                if (recyclerCategories != null) {
-                    focusRecyclerViewPosition(recyclerCategories, categoriesAdapter.getSelectedPos());
-                    return true;
-                }
+                focusCategoriesList();
+                return true;
             }
         }
         return super.onKeyDown(keyCode, event);
