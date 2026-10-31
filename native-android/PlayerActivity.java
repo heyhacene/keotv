@@ -82,6 +82,7 @@ import org.json.JSONObject;
  */
 @UnstableApi
 public class PlayerActivity extends AppCompatActivity {
+    public static boolean isPlayerActivityActive = false;
 
     public static List<String> pendingUrls = new ArrayList<>();
     public static List<String> pendingTitles = new ArrayList<>();
@@ -319,7 +320,7 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        NativePlayerPlugin.isPlayerActivityActive = true;
+        isPlayerActivityActive = true;
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         hideSystemUi();
         isLive = pendingIsLive;
@@ -2150,7 +2151,7 @@ public class PlayerActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         saveCurrentPlaybackPosition(false);
-        NativePlayerPlugin.isPlayerActivityActive = false;
+        isPlayerActivityActive = false;
         super.onDestroy();
         mainHandler.removeCallbacks(progressRunnable);
         stopCountdown();

@@ -1,4 +1,4 @@
-name: Compiler APK Android KeoTV
+name: Compiler APK Android KeoTV (Natif Pur)
 
 on:
   workflow_dispatch:
@@ -13,17 +13,12 @@ permissions:
 
 jobs:
   build-apk:
-    name: Génération de l'APK Android TV & Mobile
+    name: Compilation Release Native Android TV
     runs-on: ubuntu-latest
 
     steps:
       - name: Récupération du code source
         uses: actions/checkout@v4
-
-      - name: Configuration de Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
 
       - name: Configuration de Java JDK 21
         uses: actions/setup-java@v4
@@ -34,114 +29,14 @@ jobs:
       - name: Configuration du SDK Android
         uses: android-actions/setup-android@v4
 
-      - name: Installation des dépendances
-        run: npm install
-
-      - name: Validation stricte et tests automatisÃ©s KeoTV (Bloquant)
-        run: node tests/run-validation.js
-
-      - name: Construction de l'application Web (Next.js export)
-        run: npm run build
-        env:
-          NEXT_PUBLIC_BUILD_NUMBER: ${{ github.run_number }}
-          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://qvfmfstwrkcerzlbemzb.supabase.co' }}
-          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs' }}
-
-      - name: Initialisation du projet Android Capacitor
-        run: |
-          if [ ! -d "android" ]; then
-            npx cap add android
-          fi
-
-      - name: Synchronisation Capacitor Android
-        run: npx cap sync android
-
-      - name: Installation du lecteur vidéo natif ExoPlayer (Media3)
-        run: |
-          SRC_DIR="android/app/src/main/java/fr/keo/tv"
-          mkdir -p "$SRC_DIR"
-          cp native-android/MainActivity.java "$SRC_DIR/MainActivity.java"
-          cp native-android/NativePlayerPlugin.java "$SRC_DIR/NativePlayerPlugin.java"
-          cp native-android/NativeDatabasePlugin.java "$SRC_DIR/NativeDatabasePlugin.java"
-          cp native-android/PlayerActivity.java "$SRC_DIR/PlayerActivity.java"
-
-          GRADLE="android/app/build.gradle"
-          if ! grep -q "androidx.media3" "$GRADLE"; then
-            sed -i '/^dependencies {/a\    implementation "androidx.media3:media3-exoplayer:1.5.1"\n    implementation "androidx.media3:media3-exoplayer-hls:1.5.1"\n    implementation "androidx.media3:media3-ui:1.5.1"' "$GRADLE"
-          fi
-          if ! grep -q "abortOnError" "$GRADLE"; then
-            sed -i '/^android {/a\    lint {\n        abortOnError false\n        checkReleaseBuilds false\n    }' "$GRADLE"
-          fi
-
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if ! grep -q "fr.keo.tv.PlayerActivity\|\.PlayerActivity" "$MANIFEST"; then
-            sed -i 's#</application>#        <activity android:name=".PlayerActivity" android:exported="false" android:screenOrientation="sensor" android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout" android:theme="@style/Theme.AppCompat.NoActionBar" />\n    </application>#' "$MANIFEST"
-          fi
-
-          echo "--- build.gradle (extrait) ---"
-          grep -n "media3\|abortOnError" "$GRADLE" || true
-          echo "--- AndroidManifest ---"
-          cat "$MANIFEST"
-
-      - name: Configuration du support Android TV (Leanback & Banner)
-        run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          
-          # Ajout des déclarations Leanback (TV) non restrictives pour garder le support smartphone
-          if ! grep -q "android.software.leanback" "$MANIFEST"; then
-            sed -i '/<application/i \    <uses-feature android:name="android.software.leanback" android:required="false" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />' "$MANIFEST"
-          fi
-
-          # Ajout de la catégorie LEANBACK_LAUNCHER pour que l'app apparaisse sur le launcher Android TV
-          if ! grep -q "android.intent.category.LEANBACK_LAUNCHER" "$MANIFEST"; then
-            sed -i '/android.intent.category.LAUNCHER/a \                <category android:name="android.intent.category.LEANBACK_LAUNCHER" />' "$MANIFEST"
-          fi
-
-          # Ajout de la bannière TV dans la balise application
-          if ! grep -q "android:banner" "$MANIFEST"; then
-            sed -i 's/<application/<application android:banner="@drawable\/tv_banner"/' "$MANIFEST"
-          fi
-
-          # Autoriser les flux HTTP non-chiffrés indispensables pour les serveurs IPTV Xtream
-          if ! grep -q "android:usesCleartextTraffic" "$MANIFEST"; then
-            sed -i 's/<application/<application android:usesCleartextTraffic="true"/' "$MANIFEST"
-          fi
-
-          # Permettre la rotation dynamique par capteur sur smartphone/tablette et paysage forcé sur TV
-          sed -i 's/android:screenOrientation="portrait"/android:screenOrientation="sensor"/g' "$MANIFEST"
-          sed -i 's/android:screenOrientation="unspecified"/android:screenOrientation="sensor"/g' "$MANIFEST"
-
-      - name: Génération automatique des icônes Android et de la Bannière Android TV
+      - name: Génération des icônes et de la Bannière Android TV
         run: |
           sudo apt-get update && sudo apt-get install -y librsvg2-bin
           mkdir -p android/app/src/main/res/drawable
           # Bannière Android TV 16:9 (320x180)
           rsvg-convert -w 320 -h 180 public/icon.svg -o android/app/src/main/res/drawable/tv_banner.png
 
-          # Générer le Splash Screen officiel KeoTV en haute résolution
-          rsvg-convert -w 512 -h 512 public/icon.svg -o android/app/src/main/res/drawable/splash.png
-
-          # Remplacer TOUS les splash.png dans tous les sous-dossiers res (drawable, drawable-land, drawable-port, etc.)
-          find android/app/src/main/res -name "*splash*.png" -exec cp android/app/src/main/res/drawable/splash.png {} \;
-
-          # Supprimer les éventuels fichiers XML splash (layer-list Capacitor qui prévalent sur les PNG)
-          find android/app/src/main/res -name "*splash*.xml" -delete || true
-
-          # Garantir la présence de splash.png dans drawable-land (TV) et drawable-port
-          mkdir -p android/app/src/main/res/drawable-land android/app/src/main/res/drawable-port
-          cp android/app/src/main/res/drawable/splash.png android/app/src/main/res/drawable-land/splash.png
-          cp android/app/src/main/res/drawable/splash.png android/app/src/main/res/drawable-port/splash.png
-
-          # Définir le fond de splash Android (values et values-v31) en noir OLED (#080c14)
-          for f in $(find android/app/src/main/res/values* -name "styles.xml" -o -name "colors.xml"); do
-            sed -i 's/<color name="splashBackground">.*<\/color>/<color name="splashBackground">#080c14<\/color>/g' "$f" || true
-            sed -i 's/<item name="android:windowSplashScreenBackground">.*<\/item>/<item name="android:windowSplashScreenBackground">#080c14<\/item>/g' "$f" || true
-          done
-
-          # Supprimer le dossier anydpi-v26 pour éviter que l'icône adaptative par défaut de Capacitor masque notre icône
-          rm -rf android/app/src/main/res/mipmap-anydpi-v26
-
-          # Générer les icônes standard, rondes et premier plan (foreground) pour toutes les densités
+          # Générer les icônes standard et rondes pour toutes les densités
           for density_spec in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
             density="${density_spec%%:*}"
             size="${density_spec##*:}"
@@ -149,19 +44,18 @@ jobs:
             mkdir -p "$target_dir"
             rsvg-convert -w "$size" -h "$size" public/icon.svg -o "$target_dir/ic_launcher.png"
             rsvg-convert -w "$size" -h "$size" public/icon.svg -o "$target_dir/ic_launcher_round.png"
-            rsvg-convert -w "$size" -h "$size" public/icon.svg -o "$target_dir/ic_launcher_foreground.png"
           done
 
       - name: Configuration de la version Android strictement incrémentale
         run: |
           sed -i 's/versionCode [0-9]\+/versionCode ${{ github.run_number }}/g' android/app/build.gradle
-          sed -i 's/versionName "[0-9.]\+"/versionName "1.3.${{ github.run_number }}"/g' android/app/build.gradle
+          sed -i 's/versionName "[0-9.]\+"/versionName "1.4.${{ github.run_number }}"/g' android/app/build.gradle
 
       - name: Compilation Release et Signature Cryptographique Officielle Permanente
         working-directory: android
         run: |
           chmod +x ./gradlew
-          echo "🚀 Compilation Release officielle avec Gradle..."
+          echo "🚀 Compilation Release officielle native avec Gradle..."
           ./gradlew assembleRelease --stacktrace --info || { echo "❌ Gradle compilation failed!"; exit 1; }
 
           UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
@@ -207,19 +101,17 @@ jobs:
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main'
         with:
-          tag_name: v1.3.${{ github.run_number }}-build.${{ github.run_number }}
-          name: "KeoTV v1.3.${{ github.run_number }} (Build ${{ github.run_number }})"
+          tag_name: v1.4.${{ github.run_number }}-build.${{ github.run_number }}
+          name: "KeoTV 100% Natif v1.4.${{ github.run_number }} (Build ${{ github.run_number }})"
           body: |
-            ### 📺 KeoTV v1.3.${{ github.run_number }} (Build ${{ github.run_number }})
-            Cliquez sur le fichier **KeoTV-Build-${{ github.run_number }}.apk** ci-dessous pour installer ou mettre à jour directement votre application.
+            ### 📺 KeoTV v1.4.${{ github.run_number }} (Architecture 100% Native Android)
+            Cliquez sur le fichier **KeoTV-Build-${{ github.run_number }}.apk** ci-dessous pour installer l'application 100% native sur votre Android TV.
 
-            #### 🚀 Nouveautés & Correctifs Majeurs (Build ${{ github.run_number }}) :
-            - **Architecture TiviMate (TV en direct)** : Suppression du panneau de droite et affichage d'une ligne chronologique EPG (`Passé / Direct / Futur`) directement sur chaque ligne de chaîne, accompagnée d'un bandeau supérieur détaillé.
-            - **Navigation TiviMate D-Pad (`DPAD_RIGHT` & Appui long `DPAD_LEFT`)** : Appuyez sur `Droite` depuis la liste des chaînes pour masquer les bouquets et naviguer dans les programmes futurs ; maintenez `Gauche` appuyé sur le programme en direct pour débloquer les programmes passés (Replay) !
-            - **Réparation du Replay Multi-Formats Xtream Codes** : Format de date standard `YYYY-MM-DD:HH-mm` et cascade automatique de secours (`.ts`, `.m3u8`, UTC, `/streaming/timeshift.php`, timestamp) dans ExoPlayer.
-            - **Contrôles du Lecteur Vidéo & Touche Retour (`BACK`)** : Quand les contrôles sont affichés, `Haut`/`Bas` naviguent exclusivement dans les contrôles sans changer de chaîne, et `Retour` masque les contrôles sans quitter le lecteur.
-            - **Réparation de l'Interface Mobile** : Correction de la détection User-Agent `KeoTV-Mobile` pour rétablir l'interface portrait/paysage sur smartphone.
-            - **Code Downloader Android TV** : `4317787` (`https://tinyurl.com/keo-apk`).
+            #### 🚀 Nouvelle Fondation Native (Zéro WebView) :
+            - **Moteur 100% Natif (Modèle TiviMate)** : Suppression totale de la WebView et de JavaScript. Exécution directe sur la puce Android TV.
+            - **Base de Données SQLite WAL Native** : Enregistrement et lecture en tâche de fond (multi-thread) sans aucun freeze d'interface.
+            - **Navigation D-Pad Matérielle** : Navigation directe télécommande Android dans les bouquets et les chaînes.
+            - **Lecteur AndroidX Media3 (ExoPlayer)** : Décodage matériel direct, zapping ultra-rapide.
           files: |
             KeoTV.apk
             KeoTV-Build-${{ github.run_number }}.apk
