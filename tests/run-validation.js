@@ -5,7 +5,7 @@ const ts = require('typescript');
 console.log('🔍 [TEST] Lancement de la validation automatique du pipeline IPTV KeoTV...');
 
 try {
-  const source = fs.readFileSync('lib/iptv-service.ts', 'utf8');
+  const source = fs.readFileSync('lib/iptv-utils.ts', 'utf8');
 
   // Transpilation TypeScript officielle via le compilateur TypeScript natif
   const transpiled = ts.transpileModule(source, {
@@ -15,24 +15,10 @@ try {
     },
   }).outputText;
 
-  // Exécution du code transpilé dans un contexte CommonJS isolé
+  // Exécution du code transpilé dans un contexte CommonJS isolé (zero dependency)
   const moduleObj = { exports: {} };
-  const fn = new Function('exports', 'module', 'require', transpiled);
-
-  const mockRequire = (id) => {
-    if (id.includes('capacitor')) {
-      return {
-        Capacitor: { isNativePlatform: () => false },
-        CapacitorHttp: { get: async () => ({ status: 200, data: [] }) },
-      };
-    }
-    if (id.includes('db')) {
-      return { db: {} };
-    }
-    return {};
-  };
-
-  fn(moduleObj.exports, moduleObj, mockRequire);
+  const fn = new Function('exports', 'module', transpiled);
+  fn(moduleObj.exports, moduleObj);
 
   const {
     isSeparatorChannel,
