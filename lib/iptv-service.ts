@@ -863,6 +863,12 @@ export async function fetchCategoryStreamsOnDemand(params: FetchCategoryStreamsP
       : type === 'series'
       ? `Série ${i + 1}`
       : `Chaîne ${i + 1}`;
+
+    // Radical separator elimination: Never treat separators as channels!
+    if (isSeparatorChannel({ name: itemName, stream_url: streamUrl } as any)) {
+      continue;
+    }
+
     const logo = item.stream_icon || item.cover || '';
     const itemCatId = item.category_id ? String(item.category_id).trim() : rawCatId;
 
@@ -1227,11 +1233,7 @@ export async function fetchAllLiveStreamsBulk(params: {
     } catch {}
   }
 
-  const favIds = new Set<string>();
-  try {
-    const favs = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
-    favs.forEach((c) => favIds.add(c.id));
-  } catch {}
+  const favIds = await getFavoriteChannelIds().catch(() => new Set<string>());
 
   const channels: Channel[] = [];
   for (let i = 0; i < liveList.length; i++) {
@@ -1239,6 +1241,13 @@ export async function fetchAllLiveStreamsBulk(params: {
     if (!item) continue;
     const streamId = item.stream_id || item.id || i + 1;
     const itemName = String(item.name || `Chaîne ${i + 1}`).trim();
+    const streamUrl = `${server}/live/${encUser}/${encPass}/${streamId}.m3u8`;
+
+    // Radical separator elimination: Never treat separators as channels!
+    if (isSeparatorChannel({ name: itemName, stream_url: streamUrl } as any)) {
+      continue;
+    }
+
     const logo = item.stream_icon || '';
     const rawCat = item.category_id ? String(item.category_id).trim() : 'all';
     const groupId = `grp_live_${rawCat}`;
@@ -1251,7 +1260,7 @@ export async function fetchAllLiveStreamsBulk(params: {
       num: typeof item.num === 'number' && item.num > 0 ? item.num : i + 1,
       name: itemName,
       logo: logo ? String(logo).trim() : '',
-      stream_url: `${server}/live/${encUser}/${encPass}/${streamId}.m3u8`,
+      stream_url: streamUrl,
       stream_type: 'live',
       group_id: groupId,
       group_name: catNames.get(groupId) || 'Direct TV',
@@ -1260,7 +1269,7 @@ export async function fetchAllLiveStreamsBulk(params: {
       is_hidden: false,
       custom_order: i + 1,
       resolution: detectResolution(itemName),
-      is_separator: isSeparatorChannel({ name: itemName, stream_url: `${server}/live/${encUser}/${encPass}/${streamId}.m3u8` } as any),
+      is_separator: false,
       stream_id: streamId,
       has_archive: hasArchive,
       archive_days: archiveDays,
@@ -1314,11 +1323,7 @@ export async function fetchAllVodStreamsBulk(params: {
     } catch {}
   }
 
-  const favIds = new Set<string>();
-  try {
-    const favs = await db.channels.filter((c) => Boolean(c.is_favorite)).toArray();
-    favs.forEach((c) => favIds.add(c.id));
-  } catch {}
+  const favIds = await getFavoriteChannelIds().catch(() => new Set<string>());
 
   const channels: Channel[] = [];
   for (let i = 0; i < vodList.length; i++) {
@@ -1327,6 +1332,13 @@ export async function fetchAllVodStreamsBulk(params: {
     const streamId = m.stream_id || m.id || i + 1;
     const ext = m.container_extension || 'mp4';
     const mName = String(m.name || `Film ${i + 1}`).trim();
+    const streamUrl = `${server}/movie/${encUser}/${encPass}/${streamId}.${ext}`;
+
+    // Radical separator elimination: Never treat separators as channels!
+    if (isSeparatorChannel({ name: mName, stream_url: streamUrl } as any)) {
+      continue;
+    }
+
     const rawCat = m.category_id ? String(m.category_id).trim() : 'all';
     const groupId = `grp_vod_${rawCat}`;
     const id = `ch_xtream_vod_${streamId}`;
@@ -1336,7 +1348,7 @@ export async function fetchAllVodStreamsBulk(params: {
       num: typeof m.num === 'number' && m.num > 0 ? m.num : i + 1,
       name: mName,
       logo: m.stream_icon || m.cover || '',
-      stream_url: `${server}/movie/${encUser}/${encPass}/${streamId}.${ext}`,
+      stream_url: streamUrl,
       stream_type: 'vod',
       group_id: groupId,
       group_name: catNames.get(groupId) || 'Films VOD',
@@ -1345,7 +1357,7 @@ export async function fetchAllVodStreamsBulk(params: {
       is_hidden: false,
       custom_order: i + 1,
       resolution: detectResolution(mName),
-      is_separator: isSeparatorChannel({ name: mName, stream_url: `${server}/movie/${encUser}/${encPass}/${streamId}.${ext}` } as any),
+      is_separator: false,
       added: Number(m.added) > 0 ? Number(m.added) : undefined,
     });
   }
@@ -1892,6 +1904,12 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
       }
 
 
+      // Radical separator elimination: Never treat separators as channels!
+      if (isSeparatorChannel({ name: currentExtInf.name, stream_url: streamUrl } as any)) {
+        currentExtInf = null;
+        continue;
+      }
+
       categoryCounts.set(groupId, (categoryCounts.get(groupId) || 0) + 1);
 
       channels.push({
@@ -1908,7 +1926,7 @@ export async function parseM3UPlaylist(params: M3USyncParams): Promise<{
         is_hidden: false,
         custom_order: channels.length + 1, // Strict M3U appearance order
         resolution: detectResolution(currentExtInf.name),
-        is_separator: isSeparatorChannel({ name: currentExtInf.name, stream_url: streamUrl } as any),
+        is_separator: false,
         has_archive: streamType === 'live' ? Boolean(currentExtInf.hasArchive) : false,
         archive_days: streamType === 'live' ? (currentExtInf.archiveDays || 0) : 0,
       });

@@ -714,7 +714,7 @@ export default function KeoTVHome() {
         if (sorted.length > 0) {
           setActiveChannel((prev) => {
             if (prev && !prev.is_separator && !isSeparatorChannel(prev)) return prev;
-            return sorted.find((c) => !c.is_separator && !isSeparatorChannel(c)) || sorted[0];
+            return sorted.find((c) => !c.is_separator && !isSeparatorChannel(c)) || null;
           });
         }
       } catch (err) {
@@ -847,14 +847,15 @@ export default function KeoTVHome() {
           null;
 
         if (firstCat) {
+          const firstCatIndex = loadedCats.findIndex((c) => c.id === firstCat.id);
           setSelectedCategory(firstCat);
-          setFocusedCategoryIndex(0);
+          setFocusedCategoryIndex(firstCatIndex >= 0 ? firstCatIndex : 0);
           setFocusedChannelIndex(0);
           await loadCategoryChannels(firstCat, channelSort);
 
           try {
             const catChannels = await db.channels.where('group_id').equals(firstCat.id).toArray();
-            const firstPlayable = catChannels.find((c) => !c.is_separator && !isSeparatorChannel(c)) || catChannels[0] || null;
+            const firstPlayable = catChannels.find((c) => !c.is_separator && !isSeparatorChannel(c)) || null;
             if (firstPlayable) {
               setActiveChannel(firstPlayable);
               setCurrentEpg({
@@ -1148,6 +1149,17 @@ export default function KeoTVHome() {
         // Always purge demo / mock data on boot
         await purgeDemoData();
 
+        // Auto-purge any residual separator channels from database (e.g. from previous builds)
+        try {
+          const sepChannels = await db.channels.filter((c) => isSeparatorChannel(c)).toArray();
+          if (sepChannels.length > 0) {
+            console.log(`[INIT] Purging ${sepChannels.length} residual separator channels from database...`);
+            await db.channels.bulkDelete(sepChannels.map((c) => c.id));
+          }
+        } catch (sepPurgeErr) {
+          console.warn('Separator purge warning:', sepPurgeErr);
+        }
+
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
         const loadedPlaylists = await db.playlists.toArray();
 
@@ -1174,8 +1186,9 @@ export default function KeoTVHome() {
           loadedCats[0] ||
           null;
 
+        const initialCatIndex = initialCat ? loadedCats.findIndex((c) => c.id === initialCat.id) : 0;
         setSelectedCategory(initialCat);
-        setFocusedCategoryIndex(0);
+        setFocusedCategoryIndex(initialCatIndex >= 0 ? initialCatIndex : 0);
         setFocusedChannelIndex(0);
 
         // Dismiss splash screen immediately so the UI is interactive right away!
@@ -1189,7 +1202,7 @@ export default function KeoTVHome() {
           await loadCategoryChannels(initialCat, savedChSort);
           try {
             const catChannels = await db.channels.where('group_id').equals(initialCat.id).toArray();
-            const firstPlayable = catChannels.find((c) => !c.is_separator && !isSeparatorChannel(c)) || catChannels[0] || null;
+            const firstPlayable = catChannels.find((c) => !c.is_separator && !isSeparatorChannel(c)) || null;
             if (firstPlayable) {
               setActiveChannel(firstPlayable);
               const progs = await EPGService.getProgramsForChannel(firstPlayable.id);
@@ -2717,7 +2730,7 @@ export default function KeoTVHome() {
 
       try {
         const catChannels = await db.channels.where('group_id').equals(firstCat.id).toArray();
-        const firstPlayable = catChannels.find((c) => !c.is_separator && !isSeparatorChannel(c)) || catChannels[0] || null;
+        const firstPlayable = catChannels.find((c) => !c.is_separator && !isSeparatorChannel(c)) || null;
         if (firstPlayable) {
           setActiveChannel(firstPlayable);
           setCurrentEpg({

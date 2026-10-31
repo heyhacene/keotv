@@ -1293,9 +1293,7 @@ export const TVGuide: React.FC<TVGuideProps> = ({
               {/* Row 1: Program Title + Favorite Star on far right */}
               <div className="flex items-start justify-between gap-4">
                 <h2 className="text-xl xl:text-2xl font-bold text-white truncate leading-tight">
-                  {isSep
-                    ? cleanSeparatorName(focusedChannel?.name || 'Section')
-                    : activeDisplayedProgram?.title || focusedChannel?.name || "Pas d'information"}
+                  {activeDisplayedProgram?.title || focusedChannel?.name || "Pas d'information"}
                 </h2>
 
                 {focusedChannel && !isSep && (
@@ -1359,12 +1357,10 @@ export const TVGuide: React.FC<TVGuideProps> = ({
 
               {/* Row 3: Multi-line Program Synopsis (3-4 lines just like TiviMate photo) */}
               <p className="text-xs xl:text-[13px] text-slate-300 line-clamp-4 leading-relaxed">
-                {isSep
-                  ? 'Séparateur thématique de bouquet.'
-                  : activeDisplayedProgram?.description ||
-                    (focusedChannel
-                      ? `Diffusion en direct sur ${focusedChannel.name}. Utilisez les flèches Droite (▶) pour consulter les programmes à venir et maintenez Gauche (◀) enfoncé pour débloquer les programmes passés en Replay.`
-                      : 'Sélectionnez une chaîne pour afficher le résumé du programme.')}
+                {activeDisplayedProgram?.description ||
+                  (focusedChannel
+                    ? `Diffusion en direct sur ${focusedChannel.name}. Utilisez les flèches Droite (▶) pour consulter les programmes à venir et maintenez Gauche (◀) enfoncé pour débloquer les programmes passés en Replay.`
+                    : 'Sélectionnez une chaîne pour afficher le résumé du programme.')}
               </p>
             </div>
           </div>

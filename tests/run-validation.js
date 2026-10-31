@@ -92,6 +92,20 @@ try {
   assert.strictEqual(dbSource.includes('NativeDatabase.bulkInsertChannels'), false, 'Présence résiduelle de double écriture SQLite native dans db.ts');
   assert.strictEqual(dbSource.includes('class KeoTVDatabase extends Dexie'), true, 'La base Dexie KeoTVDatabase doit être la source unique');
 
+  // 9. Test de vérification de l'éradication complète des séparateurs dans l'interface
+  console.log('  -> Test 9 : Vérification de l\'absence de texte de faux canal dans l\'interface...');
+  const tvGuideSource = fs.readFileSync('components/TVGuide.tsx', 'utf8');
+  assert.strictEqual(tvGuideSource.includes('Séparateur thématique de bouquet'), false, 'Le texte "Séparateur thématique de bouquet" ne doit plus jamais apparaître');
+
+  // 10. Test de vérification du filtrage des séparateurs à l'ingestion
+  console.log('  -> Test 10 : Vérification du filtrage des séparateurs dès l\'ingestion...');
+  const iptvServiceSource = fs.readFileSync('lib/iptv-service.ts', 'utf8');
+  assert.strictEqual(
+    /isSeparatorChannel\(\{\s*name:\s*itemName,\s*stream_url:\s*streamUrl\s*\}\s*as\s*any\)\)\s*\{\s*continue;/.test(iptvServiceSource),
+    true,
+    'Les flux live séparateurs doivent être ignorés dès l\'ingestion'
+  );
+
   console.log('🎉 TOUS LES TESTS DE VALIDATION IPTV ONT RÉUSSI AVEC SUCCÈS !');
 } catch (err) {
   console.error('❌ ÉCHEC DE LA VALIDATION AUTOMATIQUE :');
