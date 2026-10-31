@@ -1,32 +1,17 @@
 const fs = require('fs');
 const assert = require('assert');
-const ts = require('typescript');
+const iptvUtils = require('../lib/iptv-utils.js');
 
 console.log('🔍 [TEST] Lancement de la validation automatique du pipeline IPTV KeoTV...');
 
 try {
-  const source = fs.readFileSync('lib/iptv-utils.ts', 'utf8');
-
-  // Transpilation TypeScript officielle via le compilateur TypeScript natif
-  const transpiled = ts.transpileModule(source, {
-    compilerOptions: {
-      target: ts.ScriptTarget.ES2022,
-      module: ts.ModuleKind.CommonJS,
-    },
-  }).outputText;
-
-  // Exécution du code transpilé dans un contexte CommonJS isolé (zero dependency)
-  const moduleObj = { exports: {} };
-  const fn = new Function('exports', 'module', transpiled);
-  fn(moduleObj.exports, moduleObj);
-
   const {
     isSeparatorChannel,
     cleanSeparatorName,
     isAdultCategoryName,
     detectResolution,
     shouldExcludeChannelByPrefix,
-  } = moduleObj.exports;
+  } = iptvUtils;
 
   // 1. Test des séparateurs
   console.log('  -> Test 1 : Détection et élimination des faux canaux (séparateurs)...');
