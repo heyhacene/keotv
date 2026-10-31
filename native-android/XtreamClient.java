@@ -1,7 +1,10 @@
 package fr.keo.tv;
 
+import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Base64;
+import android.util.Log;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -16,8 +19,11 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -27,8 +33,6 @@ import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
-
-import android.util.Log;
 
 public class XtreamClient {
 
@@ -153,6 +157,7 @@ public class XtreamClient {
                         String catName = getOptString(obj, "category_name", "Bouquet");
                         if (catId == null || catId.isEmpty()) continue;
 
+                        boolean isAdult = isAdultCategory(catName);
                         KeoDatabase.CategoryItem c = new KeoDatabase.CategoryItem(
                                 "grp_live_" + catId,
                                 catName,
@@ -160,6 +165,7 @@ public class XtreamClient {
                                 0,
                                 order++
                         );
+                        c.isAdult = isAdult;
                         liveCategories.add(c);
                     }
                     db.bulkInsertCategories(liveCategories, "live");
@@ -178,6 +184,9 @@ public class XtreamClient {
                         String catId = getOptString(obj, "category_id", "");
                         int num = getOptInt(obj, "num", liveChannels.size() + 1);
                         String logo = getOptString(obj, "stream_icon", "");
+                        int tvArchive = getOptInt(obj, "tv_archive", 0);
+                        int tvArchiveDuration = getOptInt(obj, "tv_archive_duration", 0);
+                        String epgChannelId = getOptString(obj, "epg_channel_id", "");
 
                         if (streamId.isEmpty() || isSeparatorChannel(name)) {
                             continue;
@@ -197,6 +206,10 @@ public class XtreamClient {
                         ch.isFav = false;
                         ch.resolution = detectResolution(name);
                         ch.isSeparator = false;
+                        ch.streamId = streamId;
+                        ch.tvArchive = tvArchive;
+                        ch.tvArchiveDuration = tvArchiveDuration;
+                        ch.epgChannelId = epgChannelId;
 
                         liveChannels.add(ch);
                     }
@@ -215,13 +228,15 @@ public class XtreamClient {
                             String catId = getOptString(obj, "category_id", null);
                             String catName = getOptString(obj, "category_name", "Films");
                             if (catId == null || catId.isEmpty()) continue;
-                            vodCategories.add(new KeoDatabase.CategoryItem(
+                            KeoDatabase.CategoryItem c = new KeoDatabase.CategoryItem(
                                     "grp_vod_" + catId,
                                     catName,
                                     "vod",
                                     0,
                                     vodOrder++
-                            ));
+                            );
+                            c.isAdult = isAdultCategory(catName);
+                            vodCategories.add(c);
                         }
                         db.bulkInsertCategories(vodCategories, "vod");
 
@@ -256,6 +271,7 @@ public class XtreamClient {
                             ch.isFav = false;
                             ch.resolution = detectResolution(name);
                             ch.isSeparator = false;
+                            ch.streamId = streamId;
 
                             vodMovies.add(ch);
                         }
@@ -278,13 +294,15 @@ public class XtreamClient {
                             String catId = getOptString(obj, "category_id", null);
                             String catName = getOptString(obj, "category_name", "Séries");
                             if (catId == null || catId.isEmpty()) continue;
-                            seriesCategories.add(new KeoDatabase.CategoryItem(
+                            KeoDatabase.CategoryItem c = new KeoDatabase.CategoryItem(
                                     "grp_series_" + catId,
                                     catName,
                                     "series",
                                     0,
                                     seriesOrder++
-                            ));
+                            );
+                            c.isAdult = isAdultCategory(catName);
+                            seriesCategories.add(c);
                         }
                         db.bulkInsertCategories(seriesCategories, "series");
 
@@ -314,6 +332,7 @@ public class XtreamClient {
                             ch.isFav = false;
                             ch.resolution = "HD";
                             ch.isSeparator = false;
+                            ch.streamId = seriesId;
 
                             seriesList.add(ch);
                         }
@@ -512,6 +531,13 @@ public class XtreamClient {
         return false;
     }
 
+    public static boolean isAdultCategory(String name) {
+        if (name == null) return false;
+        String lower = name.toLowerCase(Locale.ROOT);
+        return lower.contains("xxx") || lower.contains("adult") || lower.contains("18+")
+                || lower.contains("pour adulte") || lower.contains("charme") || lower.contains("for adult");
+    }
+
     public static String detectResolution(String name) {
         if (name == null) return "HD";
         String upper = name.toUpperCase();
@@ -520,5 +546,236 @@ public class XtreamClient {
         if (upper.contains("HD") || upper.contains("720")) return "HD";
         if (upper.contains("SD") || upper.contains("576")) return "SD";
         return "HD";
+    }
+
+    public static class EpgProgram {
+        public String id;
+        public String title;
+        public String desc;
+        public String start; // e.g. "2026-11-01 20:50:00"
+        public String stop;  // e.g. "2026-11-01 22:45:00"
+        public long startTimestamp;
+        public long stopTimestamp;
+        public int durationMinutes;
+
+        public String getFormattedTime() {
+            try {
+                if (start != null && start.length() >= 16) {
+                    String timeStart = start.substring(11, 16);
+                    if (stop != null && stop.length() >= 16) {
+                        return timeStart + " - " + stop.substring(11, 16);
+                    }
+                    return timeStart;
+                }
+            } catch (Exception ignored) {}
+            return "";
+        }
+    }
+
+    public interface EpgCallback {
+        void onSuccess(List<EpgProgram> programs, EpgProgram current, EpgProgram next);
+        void onError(String error);
+    }
+
+    public interface CatchupCallback {
+        void onSuccess(List<EpgProgram> pastPrograms);
+        void onError(String error);
+    }
+
+    public static String decodeBase64IfEncoded(String text) {
+        if (text == null || text.trim().isEmpty()) return "";
+        String trimmed = text.trim();
+        try {
+            if (!trimmed.contains(" ") && trimmed.length() % 4 == 0) {
+                byte[] decoded = Base64.decode(trimmed, Base64.DEFAULT);
+                String utf8 = new String(decoded, StandardCharsets.UTF_8);
+                if (utf8.length() > 0 && !utf8.contains("\uFFFD")) {
+                    return utf8;
+                }
+            }
+        } catch (Exception ignored) {}
+        return text;
+    }
+
+    public static void fetchShortEpg(final Context context, final String serverUrl, final String username, final String password, final String streamId, final EpgCallback callback) {
+        if (streamId == null || streamId.isEmpty() || serverUrl == null) {
+            if (callback != null) callback.onError("Paramètres EPG manquants");
+            return;
+        }
+
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                String encUser = URLEncoder.encode(username != null ? username : "", "UTF-8");
+                String encPass = URLEncoder.encode(password != null ? password : "", "UTF-8");
+                String server = serverUrl.replaceAll("/+$", "");
+                String epgUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_short_epg&stream_id=" + streamId + "&limit=10";
+
+                String jsonStr = fetchUrl(epgUrl);
+                JsonObject root = JsonParser.parseString(jsonStr).getAsJsonObject();
+                List<EpgProgram> list = new ArrayList<>();
+                EpgProgram current = null;
+                EpgProgram next = null;
+                long nowSec = System.currentTimeMillis() / 1000L;
+
+                if (root.has("epg_listings") && root.get("epg_listings").isJsonArray()) {
+                    SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+                    for (JsonElement el : root.getAsJsonArray("epg_listings")) {
+                        if (!el.isJsonObject()) continue;
+                        JsonObject obj = el.getAsJsonObject();
+                        EpgProgram p = new EpgProgram();
+                        p.id = getOptString(obj, "id", "");
+                        p.title = decodeBase64IfEncoded(getOptString(obj, "title", "Programme TV"));
+                        p.desc = decodeBase64IfEncoded(getOptString(obj, "description", ""));
+                        p.start = getOptString(obj, "start", "");
+                        p.stop = getOptString(obj, "end", "");
+
+                        try {
+                            if (obj.has("start_timestamp")) {
+                                p.startTimestamp = obj.get("start_timestamp").getAsLong();
+                            } else if (!p.start.isEmpty()) {
+                                Date d = sdf.parse(p.start);
+                                if (d != null) p.startTimestamp = d.getTime() / 1000L;
+                            }
+                            if (obj.has("stop_timestamp")) {
+                                p.stopTimestamp = obj.get("stop_timestamp").getAsLong();
+                            } else if (!p.stop.isEmpty()) {
+                                Date d = sdf.parse(p.stop);
+                                if (d != null) p.stopTimestamp = d.getTime() / 1000L;
+                            }
+                            if (p.stopTimestamp > p.startTimestamp) {
+                                p.durationMinutes = (int) ((p.stopTimestamp - p.startTimestamp) / 60);
+                            }
+                        } catch (Exception ignored) {}
+
+                        list.add(p);
+                        if (nowSec >= p.startTimestamp && nowSec <= p.stopTimestamp) {
+                            current = p;
+                        } else if (nowSec < p.startTimestamp && next == null) {
+                            next = p;
+                        }
+                    }
+                }
+
+                if (current == null && !list.isEmpty()) {
+                    current = list.get(0);
+                }
+                if (next == null && list.size() > 1) {
+                    next = list.get(1);
+                }
+
+                final List<EpgProgram> finalList = list;
+                final EpgProgram finalCurrent = current;
+                final EpgProgram finalNext = next;
+
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    if (callback != null) callback.onSuccess(finalList, finalCurrent, finalNext);
+                });
+            } catch (Exception e) {
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    if (callback != null) callback.onError(e.getMessage());
+                });
+            }
+        });
+    }
+
+    public static void fetchCatchupPrograms(final Context context, final String serverUrl, final String username, final String password, final String streamId, final CatchupCallback callback) {
+        if (streamId == null || streamId.isEmpty() || serverUrl == null) {
+            if (callback != null) callback.onError("Paramètres Replay manquants");
+            return;
+        }
+
+        Executors.newSingleThreadExecutor().execute(() -> {
+            try {
+                String encUser = URLEncoder.encode(username != null ? username : "", "UTF-8");
+                String encPass = URLEncoder.encode(password != null ? password : "", "UTF-8");
+                String server = serverUrl.replaceAll("/+$", "");
+                String catchupUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_simple_data_table&stream_id=" + streamId;
+
+                String jsonStr = fetchUrl(catchupUrl);
+                JsonObject root = JsonParser.parseString(jsonStr).getAsJsonObject();
+                List<EpgProgram> list = new ArrayList<>();
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+
+                if (root.has("epg_listings") && root.get("epg_listings").isJsonArray()) {
+                    for (JsonElement el : root.getAsJsonArray("epg_listings")) {
+                        if (!el.isJsonObject()) continue;
+                        JsonObject obj = el.getAsJsonObject();
+                        int hasArchive = getOptInt(obj, "has_archive", 1);
+                        if (hasArchive == 0) continue;
+
+                        EpgProgram p = new EpgProgram();
+                        p.id = getOptString(obj, "id", "");
+                        p.title = decodeBase64IfEncoded(getOptString(obj, "title", "Programme TV"));
+                        p.desc = decodeBase64IfEncoded(getOptString(obj, "description", ""));
+                        p.start = getOptString(obj, "start", "");
+                        p.stop = getOptString(obj, "end", "");
+
+                        try {
+                            if (obj.has("start_timestamp")) {
+                                p.startTimestamp = obj.get("start_timestamp").getAsLong();
+                            } else if (!p.start.isEmpty()) {
+                                Date d = sdf.parse(p.start);
+                                if (d != null) p.startTimestamp = d.getTime() / 1000L;
+                            }
+                            if (obj.has("stop_timestamp")) {
+                                p.stopTimestamp = obj.get("stop_timestamp").getAsLong();
+                            } else if (!p.stop.isEmpty()) {
+                                Date d = sdf.parse(p.stop);
+                                if (d != null) p.stopTimestamp = d.getTime() / 1000L;
+                            }
+                            if (p.stopTimestamp > p.startTimestamp) {
+                                p.durationMinutes = (int) ((p.stopTimestamp - p.startTimestamp) / 60);
+                            }
+                        } catch (Exception ignored) {}
+
+                        list.add(p);
+                    }
+                }
+
+                // If get_simple_data_table returned no archives, try short EPG
+                if (list.isEmpty()) {
+                    String shortUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_short_epg&stream_id=" + streamId + "&limit=20";
+                    String shortJson = fetchUrl(shortUrl);
+                    JsonObject shortRoot = JsonParser.parseString(shortJson).getAsJsonObject();
+                    if (shortRoot.has("epg_listings") && shortRoot.get("epg_listings").isJsonArray()) {
+                        long nowSec = System.currentTimeMillis() / 1000L;
+                        for (JsonElement el : shortRoot.getAsJsonArray("epg_listings")) {
+                            if (!el.isJsonObject()) continue;
+                            JsonObject obj = el.getAsJsonObject();
+                            EpgProgram p = new EpgProgram();
+                            p.id = getOptString(obj, "id", "");
+                            p.title = decodeBase64IfEncoded(getOptString(obj, "title", "Programme TV"));
+                            p.desc = decodeBase64IfEncoded(getOptString(obj, "description", ""));
+                            p.start = getOptString(obj, "start", "");
+                            p.stop = getOptString(obj, "end", "");
+                            try {
+                                if (obj.has("start_timestamp")) {
+                                    p.startTimestamp = obj.get("start_timestamp").getAsLong();
+                                }
+                                if (obj.has("stop_timestamp")) {
+                                    p.stopTimestamp = obj.get("stop_timestamp").getAsLong();
+                                }
+                                if (p.stopTimestamp > p.startTimestamp) {
+                                    p.durationMinutes = (int) ((p.stopTimestamp - p.startTimestamp) / 60);
+                                }
+                            } catch (Exception ignored) {}
+
+                            if (p.stopTimestamp > 0 && p.stopTimestamp <= nowSec) {
+                                list.add(p);
+                            }
+                        }
+                    }
+                }
+
+                final List<EpgProgram> finalList = list;
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    if (callback != null) callback.onSuccess(finalList);
+                });
+            } catch (Exception e) {
+                new Handler(Looper.getMainLooper()).post(() -> {
+                    if (callback != null) callback.onError(e.getMessage());
+                });
+            }
+        });
     }
 }

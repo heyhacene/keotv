@@ -16,6 +16,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -39,8 +40,13 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -69,6 +75,8 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvDetailEpg;
     private Button btnWatchFullscreen;
     private Button btnToggleFav;
+    private Button btnReplay;
+    private final Map<String, String> epgCurrentTitleCache = new ConcurrentHashMap<>();
 
     private CategoriesAdapter categoriesAdapter;
     private ChannelsAdapter channelsAdapter;
@@ -154,6 +162,10 @@ public class MainActivity extends AppCompatActivity {
         tvDetailEpg = findViewById(R.id.tv_detail_epg);
         btnWatchFullscreen = findViewById(R.id.btn_watch_fullscreen);
         btnToggleFav = findViewById(R.id.btn_toggle_fav);
+        btnReplay = findViewById(R.id.btn_replay);
+        if (btnReplay != null) {
+            btnReplay.setOnClickListener(v -> showCatchupDialog(activeChannel));
+        }
 
         // Top bar buttons click listeners
         View btnCloud = findViewById(R.id.btn_header_cloud);
@@ -166,7 +178,7 @@ public class MainActivity extends AppCompatActivity {
         if (btnSync != null) btnSync.setOnClickListener(v -> triggerSync());
 
         View btnDiagnostic = findViewById(R.id.btn_header_diagnostic);
-        if (btnDiagnostic != null) btnDiagnostic.setOnClickListener(v -> showDiagnosticDialog());
+        if (btnDiagnostic != null) btnDiagnostic.setOnClickListener(v -> showSettingsDialog());
 
         View btnLogin = findViewById(R.id.btn_header_login);
         if (btnLogin != null) btnLogin.setOnClickListener(v -> showLoginDialog());
@@ -503,16 +515,64 @@ public class MainActivity extends AppCompatActivity {
         if (tvDetailResolution != null) {
             tvDetailResolution.setText(ch.resolution != null ? ch.resolution : "HD");
         }
+
+        // Show replay button if catchup is available on this channel
+        if (btnReplay != null) {
+            btnReplay.setVisibility(ch.tvArchive == 1 ? View.VISIBLE : View.GONE);
+        }
+
         if (tvDetailEpg != null) {
             if ("vod".equals(ch.streamType)) {
-                tvDetailEpg.setText("Film VOD - Lecture à la demande");
+                tvDetailEpg.setText("🎬 Film VOD - Lecture complète à la demande\nQualité : " + ch.resolution);
             } else if ("series".equals(ch.streamType)) {
-                tvDetailEpg.setText("Série TV - Appuyez sur OK pour voir les épisodes");
+                tvDetailEpg.setText("🍿 Série TV - Cliquez pour voir les épisodes et saisons");
             } else {
-                tvDetailEpg.setText("Direct TV (" + ch.resolution + ")");
+                String cached = epgCurrentTitleCache.get(ch.id);
+                if (cached != null) {
+                    tvDetailEpg.setText("🔴 " + cached);
+                } else {
+                    tvDetailEpg.setText("Direct TV (" + ch.resolution + ")\nRecherche du guide EPG...");
+                }
+                fetchEpgForChannel(ch);
             }
         }
         updateFavButtonLabel(ch.isFav);
+    }
+
+    private void fetchEpgForChannel(final KeoDatabase.ChannelItem ch) {
+        if (ch == null || !"live".equals(ch.streamType) || ch.streamId == null || ch.streamId.isEmpty()) {
+            return;
+        }
+
+        final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
+        if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) return;
+
+        XtreamClient.fetchShortEpg(this, pl.serverUrl, pl.username, pl.password, ch.streamId, new XtreamClient.EpgCallback() {
+            @Override
+            public void onSuccess(List<XtreamClient.EpgProgram> programs, XtreamClient.EpgProgram current, XtreamClient.EpgProgram next) {
+                if (isFinishing() || isDestroyed()) return;
+                if (current != null) {
+                    epgCurrentTitleCache.put(ch.id, current.getFormattedTime() + " • " + current.title);
+                    if (activeChannel != null && activeChannel.id.equals(ch.id) && tvDetailEpg != null) {
+                        StringBuilder sb = new StringBuilder();
+                        sb.append("🔴 EN CE MOMENT (").append(current.getFormattedTime()).append(")\n");
+                        sb.append(current.title);
+                        if (current.desc != null && !current.desc.trim().isEmpty()) {
+                            sb.append("\n\n").append(current.desc.trim());
+                        }
+                        if (next != null) {
+                            sb.append("\n\n⏭️ À SUIVRE (").append(next.getFormattedTime()).append(")\n").append(next.title);
+                        }
+                        tvDetailEpg.setText(sb.toString());
+                    }
+                }
+            }
+
+            @Override
+            public void onError(String error) {
+                // Ignore silent EPG error
+            }
+        });
     }
 
     private void launchPlayerFullscreen() {
@@ -699,6 +759,258 @@ public class MainActivity extends AppCompatActivity {
         tvHeaderSyncInfo.setText(pl.name + " (" + pl.serverUrl + ") | Exp: " + pl.expDate + " | Synchro: " + pl.lastSyncAt);
     }
 
+    private void showCatchupDialog(final KeoDatabase.ChannelItem ch) {
+        if (ch == null || isFinishing() || isDestroyed()) return;
+        final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
+        if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) {
+            Toast.makeText(this, "Compte IPTV non configuré", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        Toast.makeText(this, "Chargement du Replay pour " + ch.name + "...", Toast.LENGTH_SHORT).show();
+
+        XtreamClient.fetchCatchupPrograms(this, pl.serverUrl, pl.username, pl.password, ch.streamId, new XtreamClient.CatchupCallback() {
+            @Override
+            public void onSuccess(List<XtreamClient.EpgProgram> pastPrograms) {
+                if (isFinishing() || isDestroyed()) return;
+                if (pastPrograms == null || pastPrograms.isEmpty()) {
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("🔄 Replay - " + ch.name)
+                            .setMessage("Aucun enregistrement disponible pour cette chaîne sur le serveur IPTV.\n\nAssurez-vous que l'archive est activée chez votre fournisseur pour cette chaîne (tv_archive = 1).")
+                            .setPositiveButton("Fermer", null)
+                            .show();
+                    return;
+                }
+
+                String[] titles = new String[pastPrograms.size()];
+                for (int i = 0; i < pastPrograms.size(); i++) {
+                    XtreamClient.EpgProgram p = pastPrograms.get(i);
+                    String timeLabel = (p.start != null && p.start.length() >= 16) ? p.start.substring(5, 16) : "";
+                    titles[i] = (timeLabel.isEmpty() ? "" : "[" + timeLabel + "] ") + p.title + " (" + (p.durationMinutes > 0 ? p.durationMinutes : 60) + " min)";
+                }
+
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("🔄 Replay : " + ch.name + " (" + pastPrograms.size() + " émissions disponibles)")
+                        .setItems(titles, (d, which) -> {
+                            XtreamClient.EpgProgram prog = pastPrograms.get(which);
+                            playCatchupStream(ch, prog, pl);
+                        })
+                        .setNegativeButton("Fermer", null)
+                        .show();
+            }
+
+            @Override
+            public void onError(String error) {
+                if (isFinishing() || isDestroyed()) return;
+                Toast.makeText(MainActivity.this, "Erreur chargement Replay : " + error, Toast.LENGTH_LONG).show();
+            }
+        });
+    }
+
+    private void playCatchupStream(KeoDatabase.ChannelItem ch, XtreamClient.EpgProgram prog, KeoDatabase.PlaylistItem pl) {
+        try {
+            String server = pl.serverUrl.replaceAll("/+$", "");
+            String encUser = URLEncoder.encode(pl.username != null ? pl.username : "", "UTF-8");
+            String encPass = URLEncoder.encode(pl.password != null ? pl.password : "", "UTF-8");
+
+            String startFormatted;
+            if (prog.start != null && prog.start.length() >= 16) {
+                startFormatted = prog.start.substring(0, 10) + ":" + prog.start.substring(11, 13) + "-" + prog.start.substring(14, 16);
+            } else {
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
+                startFormatted = sdf.format(new Date(prog.startTimestamp > 0 ? prog.startTimestamp * 1000L : System.currentTimeMillis()));
+            }
+
+            int duration = prog.durationMinutes > 0 ? prog.durationMinutes : 60;
+
+            String timeshiftUrl = server + "/timeshift/" + encUser + "/" + encPass + "/" + duration + "/" + startFormatted + "/" + ch.streamId + ".m3u8";
+            String fallbackUrl = server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + ch.streamId + "&duration=" + duration + "&start=" + startFormatted;
+
+            List<String> urls = new ArrayList<>();
+            urls.add(timeshiftUrl);
+            urls.add(fallbackUrl);
+
+            List<String> titles = new ArrayList<>();
+            titles.add("[Replay] " + ch.name + " - " + prog.title);
+
+            PlayerActivity.pendingUrls = urls;
+            PlayerActivity.pendingTitles = titles;
+            PlayerActivity.pendingIndex = 0;
+            PlayerActivity.pendingIsLive = false;
+            PlayerActivity.pendingSingleStreamMode = true;
+            PlayerActivity.pendingCurrentProgramTitle = prog.title;
+            PlayerActivity.pendingCurrentProgramDesc = prog.desc;
+            PlayerActivity.pendingCurrentProgramTime = prog.getFormattedTime();
+
+            Intent intent = new Intent(this, PlayerActivity.class);
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(this, "Erreur lecture Replay : " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void showSettingsDialog() {
+        if (isFinishing() || isDestroyed()) return;
+
+        try {
+            final String[] items = {
+                    "🛡️ Contrôle Parental & Code PIN Adulte",
+                    "☁️ Compte & Synchronisation Cloud",
+                    "📺 Lecteur Vidéo & Performances (Media3)",
+                    "🧹 Vider le Cache & Resynchroniser",
+                    "🔄 Rechercher des Mises à Jour (OTA)",
+                    "📊 Diagnostic & État du Système",
+                    "⚠️ Réinitialisation Usine Complète"
+            };
+
+            new AlertDialog.Builder(this)
+                    .setTitle("⚙️ PARAMÈTRES KEOTV")
+                    .setItems(items, (dialog, which) -> {
+                        switch (which) {
+                            case 0:
+                                showParentalControlDialog();
+                                break;
+                            case 1:
+                                showCloudSyncDialog();
+                                break;
+                            case 2:
+                                showPlayerSettingsDialog();
+                                break;
+                            case 3:
+                                Toast.makeText(this, "Purge du cache...", Toast.LENGTH_SHORT).show();
+                                db.purgeCache(true);
+                                loadLocalData();
+                                triggerSync();
+                                break;
+                            case 4:
+                                UpdateManager.checkForUpdates(this, true);
+                                break;
+                            case 5:
+                                showDiagnosticDialog();
+                                break;
+                            case 6:
+                                performFactoryReset();
+                                break;
+                        }
+                    })
+                    .setNegativeButton("Fermer", null)
+                    .show();
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to show settings dialog", t);
+        }
+    }
+
+    private void showParentalControlDialog() {
+        if (isFinishing() || isDestroyed()) return;
+        final String savedPin = db.getSetting("parental_pin", "0000");
+        final boolean isLocked = "true".equals(db.getSetting("parental_locked", "false"));
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(32, 24, 32, 24);
+
+        TextView tvInfo = new TextView(this);
+        tvInfo.setText("Statut actuel : " + (isLocked ? "🔒 BOUQUETS ADULTES VERROUILLÉS" : "🔓 DÉVERROUILLÉ") + "\n\nEntrez le code PIN parental à 4 chiffres (défaut: 0000) :");
+        tvInfo.setTextColor(0xFFCBD5E1);
+        tvInfo.setTextSize(12);
+        tvInfo.setPadding(0, 0, 0, 16);
+        layout.addView(tvInfo);
+
+        final EditText etPin = new EditText(this);
+        etPin.setHint("Code PIN (4 chiffres)");
+        etPin.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        layout.addView(etPin);
+
+        new AlertDialog.Builder(this)
+                .setTitle("🛡️ Contrôle Parental")
+                .setView(layout)
+                .setPositiveButton(isLocked ? "Déverrouiller" : "Verrouiller", (d, w) -> {
+                    String entered = etPin.getText().toString().trim();
+                    if (entered.equals(savedPin)) {
+                        boolean newLocked = !isLocked;
+                        db.setSetting("parental_locked", String.valueOf(newLocked));
+                        Toast.makeText(this, newLocked ? "Bouquets adultes verrouillés" : "Bouquets adultes déverrouillés", Toast.LENGTH_SHORT).show();
+                        loadLocalData();
+                    } else {
+                        Toast.makeText(this, "Code PIN incorrect !", Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNeutralButton("Changer le PIN", (d, w) -> showChangePinDialog())
+                .setNegativeButton("Annuler", null)
+                .show();
+    }
+
+    private void showChangePinDialog() {
+        if (isFinishing() || isDestroyed()) return;
+        final String savedPin = db.getSetting("parental_pin", "0000");
+
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(32, 24, 32, 24);
+
+        final EditText etOld = new EditText(this);
+        etOld.setHint("Ancien code PIN");
+        etOld.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        layout.addView(etOld);
+
+        final EditText etNew = new EditText(this);
+        etNew.setHint("Nouveau code PIN (4 chiffres)");
+        etNew.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        layout.addView(etNew);
+
+        new AlertDialog.Builder(this)
+                .setTitle("Modifier le Code PIN Parental")
+                .setView(layout)
+                .setPositiveButton("Enregistrer", (d, w) -> {
+                    String oldP = etOld.getText().toString().trim();
+                    String newP = etNew.getText().toString().trim();
+                    if (!oldP.equals(savedPin)) {
+                        Toast.makeText(this, "Ancien PIN incorrect", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    if (newP.length() < 4) {
+                        Toast.makeText(this, "Le PIN doit contenir 4 chiffres", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    db.setSetting("parental_pin", newP);
+                    Toast.makeText(this, "Code PIN mis à jour avec succès !", Toast.LENGTH_LONG).show();
+                })
+                .setNegativeButton("Annuler", null)
+                .show();
+    }
+
+    private void showPlayerSettingsDialog() {
+        if (isFinishing() || isDestroyed()) return;
+        final SharedPreferences prefs = getSharedPreferences("keotv_player_prefs", MODE_PRIVATE);
+        boolean hwAccel = prefs.getBoolean("hw_accel", true);
+        String bufferSize = prefs.getString("buffer_sec", "15");
+
+        String[] options = {
+                "Accélération Matérielle : " + (hwAccel ? "✅ Activée" : "❌ Désactivée"),
+                "Tampon de diffusion : " + bufferSize + " secondes (Recommandé: 15s)"
+        };
+
+        new AlertDialog.Builder(this)
+                .setTitle("📺 Préférences Lecteur Vidéo (Media3 ExoPlayer)")
+                .setItems(options, (d, which) -> {
+                    if (which == 0) {
+                        prefs.edit().putBoolean("hw_accel", !hwAccel).apply();
+                        Toast.makeText(this, "Accélération matérielle : " + (!hwAccel ? "Activée" : "Désactivée"), Toast.LENGTH_SHORT).show();
+                    } else if (which == 1) {
+                        String[] buffers = {"5 secondes (Faible latence)", "15 secondes (Standard)", "30 secondes (Connexion lente)"};
+                        new AlertDialog.Builder(this)
+                                .setTitle("Taille du Tampon Vidéo")
+                                .setItems(buffers, (bd, bw) -> {
+                                    String val = bw == 0 ? "5" : (bw == 1 ? "15" : "30");
+                                    prefs.edit().putString("buffer_sec", val).apply();
+                                    Toast.makeText(this, "Tampon défini à " + val + " secondes", Toast.LENGTH_SHORT).show();
+                                }).show();
+                    }
+                })
+                .setNegativeButton("Fermer", null)
+                .show();
+    }
+
     private void showDiagnosticDialog() {
         if (isFinishing() || isDestroyed()) return;
 
@@ -782,21 +1094,21 @@ public class MainActivity extends AppCompatActivity {
 
         try {
             final SharedPreferences prefs = getSharedPreferences("keotv_prefs", MODE_PRIVATE);
-            String lastUser = prefs.getString("cloud_username", "hacene");
+            String lastUser = prefs.getString("cloud_username", "heyhacene@gmail.com");
 
             android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
             layout.setOrientation(android.widget.LinearLayout.VERTICAL);
             layout.setPadding(32, 24, 32, 24);
 
             TextView tvInfo = new TextView(this);
-            tvInfo.setText("Récupérez instantanément vos abonnements IPTV enregistrés sur le portail Web (https://keotv.vercel.app/sync).\n\nSaisissez votre identifiant ou adresse email :");
+            tvInfo.setText("Récupérez instantanément vos abonnements IPTV enregistrés sur le portail Web (https://keotv.vercel.app/sync).\n\nSaisissez votre adresse email ou identifiant :");
             tvInfo.setTextColor(0xFFCBD5E1);
             tvInfo.setTextSize(12);
             tvInfo.setPadding(0, 0, 0, 16);
             layout.addView(tvInfo);
 
             final EditText etUser = new EditText(this);
-            etUser.setHint("Identifiant ou email (ex: hacene)");
+            etUser.setHint("Adresse email (ex: heyhacene@gmail.com)");
             etUser.setText(lastUser);
             layout.addView(etUser);
 
@@ -1094,6 +1406,25 @@ public class MainActivity extends AppCompatActivity {
                 holder.tvFavStar.setVisibility(item.isFav ? View.VISIBLE : View.GONE);
             }
 
+            // Replay badge
+            if (holder.tvReplayBadge != null) {
+                holder.tvReplayBadge.setVisibility(item.tvArchive == 1 ? View.VISIBLE : View.GONE);
+            }
+
+            // EPG title in list
+            if (holder.tvEpg != null) {
+                String cachedEpg = epgCurrentTitleCache.get(item.id);
+                if (cachedEpg != null && !cachedEpg.isEmpty()) {
+                    holder.tvEpg.setText(cachedEpg);
+                } else if ("vod".equals(item.streamType)) {
+                    holder.tvEpg.setText("Film VOD");
+                } else if ("series".equals(item.streamType)) {
+                    holder.tvEpg.setText("Série TV");
+                } else {
+                    holder.tvEpg.setText("Direct TV");
+                }
+            }
+
             // Resolution color styling
             if ("4K".equalsIgnoreCase(item.resolution) || "UHD".equalsIgnoreCase(item.resolution)) {
                 holder.tvRes.setTextColor(0xFFF59E0B); // Amber / Gold
@@ -1160,7 +1491,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         class ViewHolder extends RecyclerView.ViewHolder {
-            TextView tvNum, tvName, tvEpg, tvRes, tvFavStar;
+            TextView tvNum, tvName, tvEpg, tvRes, tvFavStar, tvReplayBadge;
             ViewHolder(View v) {
                 super(v);
                 tvNum = v.findViewById(R.id.tv_channel_num);
@@ -1168,6 +1499,7 @@ public class MainActivity extends AppCompatActivity {
                 tvEpg = v.findViewById(R.id.tv_channel_epg);
                 tvRes = v.findViewById(R.id.tv_channel_res);
                 tvFavStar = v.findViewById(R.id.tv_channel_fav_star);
+                tvReplayBadge = v.findViewById(R.id.tv_channel_replay_badge);
             }
         }
     }

@@ -13,7 +13,7 @@ import java.util.List;
 public class KeoDatabase extends SQLiteOpenHelper {
 
     private static final String DB_NAME = "keotv_native.db";
-    private static final int DB_VERSION = 2;
+    private static final int DB_VERSION = 3;
     private static KeoDatabase instance;
 
     public static synchronized KeoDatabase getInstance(Context context) {
@@ -36,38 +36,39 @@ public class KeoDatabase extends SQLiteOpenHelper {
     @Override
     public void onOpen(SQLiteDatabase db) {
         super.onOpen(db);
-        ensureColumnsExist(db);
+        if (!db.isReadOnly()) {
+            ensureColumnsExist(db);
+        }
     }
 
-    private void ensureColumnsExist(SQLiteDatabase db) {
-        ensureColumnExists(db, "channels", "is_fav", "INTEGER DEFAULT 0");
-        ensureColumnExists(db, "channels", "resolution", "TEXT");
-        ensureColumnExists(db, "channels", "is_separator", "INTEGER DEFAULT 0");
-        ensureColumnExists(db, "channels", "logo", "TEXT");
-        ensureColumnExists(db, "categories", "is_adult", "INTEGER DEFAULT 0");
-        ensureColumnExists(db, "categories", "is_hidden", "INTEGER DEFAULT 0");
+    public synchronized void ensureColumnsExist(SQLiteDatabase db) {
+        if (db == null || db.isReadOnly()) return;
+        safeEnsureColumn(db, "channels", "is_fav", "INTEGER DEFAULT 0");
+        safeEnsureColumn(db, "channels", "resolution", "TEXT");
+        safeEnsureColumn(db, "channels", "is_separator", "INTEGER DEFAULT 0");
+        safeEnsureColumn(db, "channels", "logo", "TEXT");
+        safeEnsureColumn(db, "channels", "stream_id", "TEXT");
+        safeEnsureColumn(db, "channels", "tv_archive", "INTEGER DEFAULT 0");
+        safeEnsureColumn(db, "channels", "tv_archive_duration", "INTEGER DEFAULT 0");
+        safeEnsureColumn(db, "channels", "epg_channel_id", "TEXT");
+        safeEnsureColumn(db, "categories", "is_adult", "INTEGER DEFAULT 0");
+        safeEnsureColumn(db, "categories", "is_hidden", "INTEGER DEFAULT 0");
     }
 
-    private void ensureColumnExists(SQLiteDatabase db, String table, String column, String typeDef) {
+    private void safeEnsureColumn(SQLiteDatabase db, String table, String column, String typeDef) {
         Cursor c = null;
         try {
-            c = db.rawQuery("PRAGMA table_info(" + table + ")", null);
-            boolean exists = false;
-            if (c != null) {
-                int nameIdx = c.getColumnIndex("name");
-                while (c.moveToNext()) {
-                    if (nameIdx >= 0 && column.equalsIgnoreCase(c.getString(nameIdx))) {
-                        exists = true;
-                        break;
-                    }
-                }
-            }
-            if (!exists) {
+            c = db.rawQuery("SELECT " + column + " FROM " + table + " LIMIT 0", null);
+        } catch (Exception notFound) {
+            try {
                 db.execSQL("ALTER TABLE " + table + " ADD COLUMN " + column + " " + typeDef);
+            } catch (Exception e) {
+                android.util.Log.w("KeoDatabase", "safeEnsureColumn " + table + "." + column + " failed: " + e.getMessage());
             }
-        } catch (Exception ignored) {
         } finally {
-            if (c != null) c.close();
+            if (c != null) {
+                try { c.close(); } catch (Exception ignored) {}
+            }
         }
     }
 
@@ -107,7 +108,11 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 + "logo TEXT, "
                 + "is_fav INTEGER DEFAULT 0, "
                 + "resolution TEXT, "
-                + "is_separator INTEGER DEFAULT 0)");
+                + "is_separator INTEGER DEFAULT 0, "
+                + "stream_id TEXT, "
+                + "tv_archive INTEGER DEFAULT 0, "
+                + "tv_archive_duration INTEGER DEFAULT 0, "
+                + "epg_channel_id TEXT)");
 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_ch_group ON channels(group_id)");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_ch_type ON channels(stream_type)");
@@ -174,6 +179,10 @@ public class KeoDatabase extends SQLiteOpenHelper {
         public boolean isFav;
         public String resolution;
         public boolean isSeparator;
+        public String streamId;
+        public int tvArchive;
+        public int tvArchiveDuration;
+        public String epgChannelId;
 
         public ChannelItem() {}
     }
@@ -237,7 +246,11 @@ public class KeoDatabase extends SQLiteOpenHelper {
             }
         }
 
+        boolean isParentalLocked = "true".equals(getSetting("parental_locked", "false"));
         String sql = "SELECT id, name, type, count, custom_order, is_hidden, is_adult FROM categories WHERE is_hidden = 0";
+        if (isParentalLocked) {
+            sql += " AND is_adult = 0";
+        }
         String[] args = null;
         if (type != null && !type.isEmpty()) {
             sql += " AND type = ?";
@@ -270,7 +283,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
         List<ChannelItem> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator "
+        Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id "
                 + "FROM channels WHERE group_id = ? AND is_separator = 0 ORDER BY num ASC, name ASC", new String[]{groupId});
 
         while (c.moveToNext()) {
@@ -286,6 +299,10 @@ public class KeoDatabase extends SQLiteOpenHelper {
             item.isFav = c.getInt(8) == 1;
             item.resolution = c.getString(9);
             item.isSeparator = c.getInt(10) == 1;
+            item.streamId = c.getString(11);
+            item.tvArchive = c.getInt(12);
+            item.tvArchiveDuration = c.getInt(13);
+            item.epgChannelId = c.getString(14);
             list.add(item);
         }
         c.close();
@@ -295,7 +312,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
     public List<ChannelItem> getFavoriteChannels() {
         List<ChannelItem> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator "
+        Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id "
                 + "FROM channels WHERE is_fav = 1 AND is_separator = 0 ORDER BY name ASC", null);
 
         while (c.moveToNext()) {
@@ -311,6 +328,10 @@ public class KeoDatabase extends SQLiteOpenHelper {
             item.isFav = true;
             item.resolution = c.getString(9);
             item.isSeparator = c.getInt(10) == 1;
+            item.streamId = c.getString(11);
+            item.tvArchive = c.getInt(12);
+            item.tvArchiveDuration = c.getInt(13);
+            item.epgChannelId = c.getString(14);
             list.add(item);
         }
         c.close();
@@ -331,7 +352,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
         if (query == null || query.trim().isEmpty()) return list;
         SQLiteDatabase db = getReadableDatabase();
         String q = "%" + query.trim() + "%";
-        String sql = "SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator "
+        String sql = "SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id "
                 + "FROM channels WHERE name LIKE ? AND is_separator = 0";
         String[] args;
         if (streamType != null && !streamType.isEmpty()) {
@@ -356,6 +377,10 @@ public class KeoDatabase extends SQLiteOpenHelper {
             item.isFav = c.getInt(8) == 1;
             item.resolution = c.getString(9);
             item.isSeparator = c.getInt(10) == 1;
+            item.streamId = c.getString(11);
+            item.tvArchive = c.getInt(12);
+            item.tvArchiveDuration = c.getInt(13);
+            item.epgChannelId = c.getString(14);
             list.add(item);
         }
         c.close();
@@ -398,14 +423,15 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
     public void bulkInsertChannels(List<ChannelItem> channels, String typeToClear) {
         SQLiteDatabase db = getWritableDatabase();
+        ensureColumnsExist(db);
         db.beginTransaction();
         try {
             if (typeToClear != null && !typeToClear.isEmpty()) {
                 db.execSQL("DELETE FROM channels WHERE stream_type = ?", new String[]{typeToClear});
             }
             SQLiteStatement stmt = db.compileStatement(
-                    "INSERT OR REPLACE INTO channels (id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator) "
-                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    "INSERT OR REPLACE INTO channels (id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
             for (ChannelItem ch : channels) {
                 stmt.bindString(1, ch.id);
@@ -419,6 +445,10 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 stmt.bindLong(9, ch.isFav ? 1 : 0);
                 stmt.bindString(10, ch.resolution != null ? ch.resolution : "HD");
                 stmt.bindLong(11, ch.isSeparator ? 1 : 0);
+                stmt.bindString(12, ch.streamId != null ? ch.streamId : "");
+                stmt.bindLong(13, ch.tvArchive);
+                stmt.bindLong(14, ch.tvArchiveDuration);
+                stmt.bindString(15, ch.epgChannelId != null ? ch.epgChannelId : "");
                 stmt.executeInsert();
             }
             db.setTransactionSuccessful();

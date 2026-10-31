@@ -54,6 +54,15 @@
                 android:layout_marginStart="4dp"
                 android:visibility="gone" />
 
+            <TextView
+                android:id="@+id/tv_channel_replay_badge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="🔄"
+                android:textSize="11sp"
+                android:layout_marginStart="4dp"
+                android:visibility="gone" />
+
         </LinearLayout>
 
         <TextView
