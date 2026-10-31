@@ -825,6 +825,8 @@ export default function KeoTVHome() {
         setSyncStatusBanner(`Enregistrement de ${result.channels.length} chaînes...`);
 
         await purgeDemoData();
+        await db.categories.clear();
+        await db.channels.clear();
         await db.playlists.put(result.playlist);
         await saveBulkCategories(result.categories);
         await saveBulkChannels(result.channels);
@@ -1224,18 +1226,9 @@ export default function KeoTVHome() {
           );
           if (xtreamPl) {
             refreshXtreamAccountInfo(xtreamPl).catch(() => {});
-            const needsCatalogUpgrade = typeof window !== 'undefined' && localStorage.getItem('keotv_v4_catalog_sync') !== 'true';
-            const localVodCount = await db.channels.where('stream_type').equals('vod').count();
-            if (needsCatalogUpgrade || localVodCount === 0) {
-              if (typeof window !== 'undefined') {
-                localStorage.setItem('keotv_v4_catalog_sync', 'true');
-              }
-              handleResyncPlaylist(xtreamPl);
-            } else {
-              const localLiveCount = await db.channels.where('stream_type').equals('live').count();
-              if (localLiveCount === 0) {
-                startBackgroundLiveLoad(xtreamPl, loadedCats);
-              }
+            const localLiveCount = await db.channels.where('stream_type').equals('live').count();
+            if (localLiveCount === 0) {
+              startBackgroundLiveLoad(xtreamPl, loadedCats);
             }
           }
 

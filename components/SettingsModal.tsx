@@ -21,6 +21,8 @@ import {
   Pencil,
   Clock,
   Tv,
+  Activity,
+  Database,
 } from 'lucide-react';
 import { PlaylistConfig } from '@/types/iptv';
 import { submitAppFeedback, getActiveKeoUser, logoutKeoUser, KeoUserAccount } from '@/lib/supabase';
@@ -70,8 +72,9 @@ interface SettingsModalProps {
   onUpdateExcludedPrefixes?: (prefixes: string[]) => void;
 }
 
-const TABS: Array<{ id: 'playlists' | 'controls' | 'categories' | 'parental' | 'player' | 'sync' | 'update' | 'feedback'; label: string; icon: any }> = [
+const TABS: Array<{ id: 'playlists' | 'diagnostic' | 'controls' | 'categories' | 'parental' | 'player' | 'sync' | 'update' | 'feedback'; label: string; icon: any }> = [
   { id: 'playlists', label: 'Playlists & Abonnements', icon: Server },
+  { id: 'diagnostic', label: 'Diagnostic & Santé', icon: Activity },
   { id: 'categories', label: 'Ordre & Bouquets', icon: Sliders },
   { id: 'parental', label: 'Contrôle Parental', icon: ShieldCheck },
   { id: 'controls', label: 'Télécommande & Zapping', icon: Radio },
@@ -121,7 +124,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   excludedPrefixes = [],
   onUpdateExcludedPrefixes,
 }) => {
-  const [activeTab, setActiveTab] = useState<'playlists' | 'controls' | 'categories' | 'parental' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
+  const [activeTab, setActiveTab] = useState<'playlists' | 'diagnostic' | 'controls' | 'categories' | 'parental' | 'sync' | 'update' | 'feedback' | 'player'>('playlists');
   const [localPlaylists, setLocalPlaylists] = useState<PlaylistConfig[]>(playlists);
 
   useEffect(() => {
@@ -162,6 +165,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
 
   const [totalLoadedStreams, setTotalLoadedStreams] = useState<number>(0);
+  const [totalCategories, setTotalCategories] = useState<number>(0);
   const [streamCountsByType, setStreamCountsByType] = useState<{ live: number; vod: number; series: number }>({
     live: 0,
     vod: 0,
@@ -199,6 +203,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         }
       }).catch(() => {});
       db.channels.count().then((cnt) => setTotalLoadedStreams(cnt)).catch(() => {});
+      db.categories.count().then((cnt) => setTotalCategories(cnt)).catch(() => {});
       Promise.all([
         db.channels.where('stream_type').equals('live').count(),
         db.channels.where('stream_type').equals('vod').count(),
@@ -961,8 +966,129 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
 
           {/* ============================================================== */}
-          {/* TAB: ORDRE & BOUQUETS                                          */}
+          {/* TAB: DIAGNOSTIC & SANTÉ DU SYSTÈME                             */}
           {/* ============================================================== */}
+          {activeTab === 'diagnostic' && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center space-x-2">
+                  <Activity className="w-4 h-4 text-tv-accent" />
+                  <span>Diagnostic &amp; Santé du Système KeoTV</span>
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Prenez cet écran en photo si vous rencontrez un souci : il affiche les chiffres réels de votre appareil.
+                </p>
+              </div>
+
+              {/* Grid 1: Version & Architecture */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="p-4 bg-tv-card/70 rounded-xl border border-tv-border/80">
+                  <span className="text-[11px] text-slate-400 uppercase font-mono tracking-wider block mb-1">Version Installée</span>
+                  <div className="text-base font-extrabold text-white font-mono">Build {currentBuildNumber}</div>
+                  <span className="text-[10px] text-tv-accent font-semibold">v1.3.{currentBuildNumber}</span>
+                </div>
+                <div className="p-4 bg-tv-card/70 rounded-xl border border-tv-border/80">
+                  <span className="text-[11px] text-slate-400 uppercase font-mono tracking-wider block mb-1">Moteur Base Locale</span>
+                  <div className="text-base font-extrabold text-white font-mono flex items-center space-x-1.5">
+                    <Database className="w-4 h-4 text-emerald-400" />
+                    <span>KeoTVDB (Dexie)</span>
+                  </div>
+                  <span className="text-[10px] text-emerald-400 font-semibold">Source unique certifiée</span>
+                </div>
+                <div className="p-4 bg-tv-card/70 rounded-xl border border-tv-border/80">
+                  <span className="text-[11px] text-slate-400 uppercase font-mono tracking-wider block mb-1">Environnement</span>
+                  <div className="text-base font-extrabold text-white font-mono">
+                    {Capacitor.isNativePlatform() ? 'Android TV (Natif)' : 'Navigateur Web'}
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-semibold">ExoPlayer Media3</span>
+                </div>
+              </div>
+
+              {/* Grid 2: Real Database Counters */}
+              <div className="p-4 bg-tv-card/70 rounded-xl border border-tv-border/80 space-y-3">
+                <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Contenu Réellement Stocké en Mémoire Locale</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                  <div className="p-3 bg-sky-500/10 border border-sky-500/20 rounded-xl">
+                    <span className="text-xs text-sky-400 font-bold block">Chaînes TV Direct</span>
+                    <span className="text-2xl font-black text-white font-mono">{streamCountsByType.live}</span>
+                  </div>
+                  <div className="p-3 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+                    <span className="text-xs text-amber-400 font-bold block">Films VOD</span>
+                    <span className="text-2xl font-black text-white font-mono">{streamCountsByType.vod}</span>
+                  </div>
+                  <div className="p-3 bg-purple-500/10 border border-purple-500/20 rounded-xl">
+                    <span className="text-xs text-purple-400 font-bold block">Séries</span>
+                    <span className="text-2xl font-black text-white font-mono">{streamCountsByType.series}</span>
+                  </div>
+                  <div className="p-3 bg-white/5 border border-white/10 rounded-xl">
+                    <span className="text-xs text-slate-300 font-bold block">Bouquets / Catégories</span>
+                    <span className="text-2xl font-black text-white font-mono">{totalCategories}</span>
+                  </div>
+                </div>
+                <div className="text-[11px] text-slate-400 font-mono text-right">
+                  Total tous flux confondus : <strong className="text-white">{totalLoadedStreams}</strong> éléments enregistrés
+                </div>
+              </div>
+
+              {/* Grid 3: Active Playlist & Sync State */}
+              <div className="p-4 bg-tv-card/70 rounded-xl border border-tv-border/80 space-y-3">
+                <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">État de la Synchronisation &amp; Abonnement</h4>
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between py-1 border-b border-white/5">
+                    <span className="text-slate-400">Playlist active :</span>
+                    <span className="text-white font-bold">{localPlaylists[0]?.name || 'Aucune'} ({localPlaylists[0]?.type || 'N/A'})</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-white/5">
+                    <span className="text-slate-400">Serveur IPTV :</span>
+                    <span className="text-slate-200 font-mono truncate max-w-[280px]">{localPlaylists[0]?.server_url || 'Non configuré'}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-white/5">
+                    <span className="text-slate-400">Validité abonnement :</span>
+                    <span className="text-emerald-400 font-semibold">{localPlaylists[0]?.exp_date || 'Non renseignée'}</span>
+                  </div>
+                  <div className="flex justify-between py-1 border-b border-white/5">
+                    <span className="text-slate-400">Dernière synchronisation :</span>
+                    <span className="text-slate-300 font-mono">
+                      {localPlaylists[0]?.last_sync_at ? new Date(localPlaylists[0].last_sync_at).toLocaleString('fr-FR') : 'Jamais'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between py-1">
+                    <span className="text-slate-400">État du processus :</span>
+                    <span className={`font-bold ${isResyncing ? 'text-amber-400 animate-pulse' : 'text-emerald-400'}`}>
+                      {isResyncing ? '⏳ Synchronisation en cours...' : isSilentRefreshing ? '🔄 Actualisation arrière-plan...' : '✅ Prêt / Au repos'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Emergency Clean & Reset Button */}
+              <div className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-xs font-bold text-rose-300">Nettoyage d&apos;urgence du cache</h4>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Vide complètement la mémoire locale et recharge proprement votre playlist (résout tout conflit ou mélange).
+                  </p>
+                </div>
+                {localPlaylists[0] && onResyncPlaylist && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (window.confirm('Voulez-vous vider la mémoire locale et relancer une synchronisation propre ?')) {
+                        await db.categories.clear();
+                        await db.channels.clear();
+                        await onResyncPlaylist(localPlaylists[0]);
+                      }
+                    }}
+                    disabled={isResyncing}
+                    className="px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-rose-400"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isResyncing ? 'animate-spin' : ''}`} />
+                    <span>Vider et Réinitialiser</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
           {activeTab === 'categories' && (
             <div className="space-y-6">
               <div>

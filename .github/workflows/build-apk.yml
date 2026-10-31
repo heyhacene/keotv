@@ -37,6 +37,9 @@ jobs:
       - name: Installation des dépendances
         run: npm install
 
+      - name: Validation stricte et tests automatisÃ©s KeoTV (Bloquant)
+        run: node tests/run-validation.mjs
+
       - name: Construction de l'application Web (Next.js export)
         run: npm run build
         env:
