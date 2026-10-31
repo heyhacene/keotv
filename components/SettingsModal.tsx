@@ -1073,17 +1073,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   <button
                     type="button"
                     onClick={async () => {
-                      if (window.confirm('Voulez-vous vider la mémoire locale et relancer une synchronisation propre ?')) {
+                      try {
                         await db.categories.clear();
                         await db.channels.clear();
                         await onResyncPlaylist(localPlaylists[0]);
+                      } catch (err) {
+                        console.error('Manual resync error:', err);
                       }
                     }}
                     disabled={isResyncing}
                     className="px-4 py-2 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition flex items-center justify-center space-x-1.5 flex-shrink-0 focus:outline-none focus:ring-2 focus:ring-rose-400"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isResyncing ? 'animate-spin' : ''}`} />
-                    <span>Vider et Réinitialiser</span>
+                    <span>{isResyncing ? 'Nettoyage en cours...' : 'Vider et Réinitialiser'}</span>
                   </button>
                 )}
               </div>

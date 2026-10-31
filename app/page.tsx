@@ -1230,13 +1230,23 @@ export default function KeoTVHome() {
         setAutoRefreshInterval(savedAutoRefresh);
         setLastAutoRefreshAt(savedLastRefresh);
 
+        // One-time automatic clean database migration for Build 144 (purges old 28/10 cache)
+        const lastCleanBuild = await getSetting<number>('keotv_clean_sync_build', 0);
+        const xtreamPl = (await db.playlists.toArray()).find(
+          (p) => p.type === 'xtream' && p.server_url && p.username && p.password
+        );
+
+        if (lastCleanBuild < 144 && xtreamPl) {
+          console.log('[MIGRATION] Build 144 auto-purge: clearing old cached data from 28/10...');
+          await setSetting('keotv_clean_sync_build', 144);
+          await handleResyncPlaylist(xtreamPl);
+          return;
+        }
+
         if (resyncTarget) {
           handleResyncPlaylist(resyncTarget);
         } else {
           // Check background loading of all bouquets and refresh account info
-          const xtreamPl = (await db.playlists.toArray()).find(
-            (p) => p.type === 'xtream' && p.server_url && p.username && p.password
-          );
           if (xtreamPl) {
             refreshXtreamAccountInfo(xtreamPl).catch(() => {});
             const localLiveCount = await db.channels.where('stream_type').equals('live').count();
