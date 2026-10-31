@@ -981,7 +981,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               {/* Grid 1: Version & Architecture */}
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div tabIndex={0} className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-1 rounded-xl focus:outline-none focus:ring-2 focus:ring-tv-accent">
                 <div className="p-4 bg-tv-card/70 rounded-xl border border-tv-border/80">
                   <span className="text-[11px] text-slate-400 uppercase font-mono tracking-wider block mb-1">Version Installée</span>
                   <div className="text-base font-extrabold text-white font-mono">Build {currentBuildNumber}</div>
@@ -1005,7 +1005,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               {/* Grid 2: Real Database Counters */}
-              <div className="p-4 bg-tv-card/70 rounded-xl border border-tv-border/80 space-y-3">
+              <div tabIndex={0} className="p-4 bg-tv-card/70 rounded-xl border border-tv-border/80 space-y-3 focus:outline-none focus:ring-2 focus:ring-tv-accent">
                 <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">Contenu Réellement Stocké en Mémoire Locale</h4>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
                   <div className="p-3 bg-sky-500/10 border border-sky-500/20 rounded-xl">
@@ -1031,7 +1031,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               {/* Grid 3: Active Playlist & Sync State */}
-              <div className="p-4 bg-tv-card/70 rounded-xl border border-tv-border/80 space-y-3">
+              <div tabIndex={0} className="p-4 bg-tv-card/70 rounded-xl border border-tv-border/80 space-y-3 focus:outline-none focus:ring-2 focus:ring-tv-accent">
                 <h4 className="text-xs font-bold text-slate-200 uppercase tracking-wider">État de la Synchronisation &amp; Abonnement</h4>
                 <div className="space-y-2 text-xs">
                   <div className="flex justify-between py-1 border-b border-white/5">
