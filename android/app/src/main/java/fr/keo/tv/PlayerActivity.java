@@ -2042,7 +2042,7 @@ public class PlayerActivity extends AppCompatActivity {
         }
 
         CharSequence[] items = trackNames.toArray(new CharSequence[0]);
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        new AlertDialog.Builder(this)
                 .setTitle("Piste audio")
                 .setSingleChoiceItems(items, selectedIndex, (dialog, which) -> {
                     Tracks.Group chosenGroup = audioGroups.get(which);
@@ -2094,7 +2094,7 @@ public class PlayerActivity extends AppCompatActivity {
         }
 
         CharSequence[] items = trackNames.toArray(new CharSequence[0]);
-        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+        new AlertDialog.Builder(this)
                 .setTitle("Sous-titres")
                 .setSingleChoiceItems(items, selectedIndex, (dialog, which) -> {
                     if (which == 0) {

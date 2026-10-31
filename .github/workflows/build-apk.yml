@@ -44,6 +44,7 @@ jobs:
             mkdir -p "$target_dir"
             rsvg-convert -w "$size" -h "$size" public/icon.svg -o "$target_dir/ic_launcher.png"
             rsvg-convert -w "$size" -h "$size" public/icon.svg -o "$target_dir/ic_launcher_round.png"
+            rsvg-convert -w "$size" -h "$size" public/icon.svg -o "$target_dir/ic_launcher_foreground.png"
           done
 
       - name: Configuration de la version Android strictement incrémentale
@@ -56,7 +57,7 @@ jobs:
         run: |
           chmod +x ./gradlew
           echo "🚀 Compilation Release officielle native avec Gradle..."
-          ./gradlew assembleRelease --stacktrace --info || { echo "❌ Gradle compilation failed!"; exit 1; }
+          ./gradlew assembleRelease --stacktrace
 
           UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           echo "APK généré : $UNSIGNED_APK"
@@ -87,6 +88,15 @@ jobs:
           echo "🛡️ Validation de l'APK signé cryptographiquement :"
           $APKSIGNER verify --verbose ../KeoTV.apk
           cp ../KeoTV.apk "../KeoTV-Build-${{ github.run_number }}.apk"
+
+      - name: Sauvegarde des rapports de compilation en cas d'erreur
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-failure-reports
+          path: |
+            android/app/build/reports/
+            **/hs_err_pid*.log
 
       - name: Publication de l'APK en téléchargement (Artifacts)
         uses: actions/upload-artifact@v4

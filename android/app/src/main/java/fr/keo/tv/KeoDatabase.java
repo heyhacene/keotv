@@ -80,6 +80,22 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 + "value TEXT)");
     }
 
+    public void purgeCache(boolean keepPlaylist) {
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            db.execSQL("DELETE FROM categories");
+            db.execSQL("DELETE FROM channels");
+            if (!keepPlaylist) {
+                db.execSQL("DELETE FROM playlists");
+                db.execSQL("DELETE FROM settings");
+            }
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
         db.execSQL("DROP TABLE IF EXISTS playlists");

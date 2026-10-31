@@ -1,6 +1,6 @@
 package fr.keo.tv;
 
-import android.app.AlertDialog;
+import androidx.appcompat.app.AlertDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
@@ -230,7 +230,7 @@ public class MainActivity extends AppCompatActivity {
                 .setMessage(message)
                 .setPositiveButton("OK", null)
                 .setNeutralButton("Purger et Re-synchroniser", (dialog, which) -> {
-                    db.onUpgrade(db.getWritableDatabase(), 1, 1);
+                    db.purgeCache(true);
                     triggerSync();
                 })
                 .show();
