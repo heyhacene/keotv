@@ -857,64 +857,49 @@ export default function KeoTVHome() {
           }
         }
 
+        // Immediately clear the banner once saving is complete!
+        setSyncStatusBanner(null);
+
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
         const loadedPlaylists = await db.playlists.toArray();
-        // Auto-repair category counts from locally stored channels if any are 0
-        const chTotal = await db.channels.count();
-        if (chTotal > 0) {
-          const hasZeroCounts = loadedCats.some((c) => c.type === 'live' && !c.id.startsWith('fav') && (!c.count || c.count === 0));
-          if (hasZeroCounts) {
-            const countsMap = new Map<string, number>();
-            await db.channels.each((ch) => {
-              if (ch.group_id) {
-                countsMap.set(ch.group_id, (countsMap.get(ch.group_id) || 0) + 1);
-              }
-            });
-            let didChange = false;
-            await db.transaction('rw', db.categories, async () => {
-              for (const c of loadedCats) {
-                if (c.type !== 'live' || c.id.startsWith('fav')) continue;
-                const realCount = countsMap.get(c.id) || 0;
-                if (c.count !== realCount) {
-                  c.count = realCount;
-                  didChange = true;
-                  await db.categories.update(c.id, { count: realCount });
-                }
-              }
-            });
-            if (didChange) {
-              setCategories([...loadedCats]);
-            }
-          }
-        }
 
         setCategories(loadedCats);
         setPlaylists(loadedPlaylists);
         await updateFavoriteCounts();
-        startBackgroundLiveLoad(result.playlist, loadedCats);
 
-        let firstCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) || loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
+        let firstCat =
+          loadedCats.find((c) => c.type === 'live' && !c.id.startsWith('fav') && (c.count || 0) > 0) ||
+          loadedCats.find((c) => c.type === 'live' && !c.id.startsWith('fav')) ||
+          loadedCats.find((c) => !c.id.startsWith('fav') && (c.count || 0) > 0) ||
+          loadedCats[0] ||
+          null;
+
         if (firstCat) {
           setSelectedCategory(firstCat);
           setFocusedCategoryIndex(0);
           setFocusedChannelIndex(0);
           await loadCategoryChannels(firstCat, channelSort);
-        }
 
-        const firstChannel = result.channels[0];
-        if (firstChannel) {
-          setActiveChannel(firstChannel);
-          setCurrentEpg({
-            id: 'epg_' + firstChannel.id,
-            channel_id: firstChannel.id,
-            title: firstChannel.name + ' (En Direct)',
-            description: 'Flux en direct de ' + firstChannel.name,
-            start: new Date().toISOString(),
-            end: new Date(Date.now() + 7200000).toISOString(),
-            duration_min: 120,
-          });
-          setNextEpg(null);
-          setIsStopped(false);
+          try {
+            const catChannels = await db.channels.where('group_id').equals(firstCat.id).toArray();
+            const firstPlayable = catChannels.find((c) => !c.is_separator && !isSeparatorChannel(c)) || catChannels[0] || null;
+            if (firstPlayable) {
+              setActiveChannel(firstPlayable);
+              setCurrentEpg({
+                id: 'epg_' + firstPlayable.id,
+                channel_id: firstPlayable.id,
+                title: firstPlayable.name + ' (En Direct)',
+                description: 'Flux en direct de ' + firstPlayable.name,
+                start: new Date().toISOString(),
+                end: new Date(Date.now() + 7200000).toISOString(),
+                duration_min: 120,
+              });
+              setNextEpg(null);
+              setIsStopped(false);
+            }
+          } catch (e) {
+            console.warn('Channel selection error on resync:', e);
+          }
         }
       } catch (err: any) {
         console.error('Failed to resync playlist:', err);
@@ -1206,47 +1191,20 @@ export default function KeoTVHome() {
         }
         await updateFavoriteCounts();
 
-        // Auto-repair category counts from locally stored channels if any are 0
-        const chTotal = await db.channels.count();
-        if (chTotal > 0) {
-          const hasZeroCounts = loadedCats.some((c) => c.type === 'live' && !c.id.startsWith('fav') && (!c.count || c.count === 0));
-          if (hasZeroCounts) {
-            const countsMap = new Map<string, number>();
-            await db.channels.each((ch) => {
-              if (ch.group_id) {
-                countsMap.set(ch.group_id, (countsMap.get(ch.group_id) || 0) + 1);
-              }
-            });
-            let didChange = false;
-            await db.transaction('rw', db.categories, async () => {
-              for (const c of loadedCats) {
-                if (c.type !== 'live' || c.id.startsWith('fav')) continue;
-                const realCount = countsMap.get(c.id) || 0;
-                if (c.count !== realCount) {
-                  c.count = realCount;
-                  didChange = true;
-                  await db.categories.update(c.id, { count: realCount });
-                }
-              }
-            });
-            if (didChange) {
-              setCategories([...loadedCats]);
-            }
-          }
-        }
-
         setCategories(loadedCats);
         setPlaylists(loadedPlaylists);
 
         // Pick initial category: first active live category with channels
         let initialCat =
-          loadedCats.find((c) => c.type === 'live' && c.id !== 'fav' && (c.count || 0) > 0) ||
-          loadedCats.find((c) => c.type === 'live' && c.id !== 'fav') ||
-          loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) ||
+          loadedCats.find((c) => c.type === 'live' && !c.id.startsWith('fav') && (c.count || 0) > 0) ||
+          loadedCats.find((c) => c.type === 'live' && !c.id.startsWith('fav')) ||
+          loadedCats.find((c) => !c.id.startsWith('fav') && (c.count || 0) > 0) ||
           loadedCats[0] ||
           null;
 
         setSelectedCategory(initialCat);
+        setFocusedCategoryIndex(0);
+        setFocusedChannelIndex(0);
 
         // Dismiss splash screen immediately so the UI is interactive right away!
         clearTimeout(splashFailsafeTimer);
@@ -1257,20 +1215,21 @@ export default function KeoTVHome() {
 
         if (initialCat) {
           await loadCategoryChannels(initialCat, savedChSort);
-        }
-
-        // Pick initial channel
-        const firstCh = (await db.channels.orderBy('num').first()) || null;
-        if (firstCh) {
-          setActiveChannel(firstCh);
           try {
-            const progs = await EPGService.getProgramsForChannel(firstCh.id);
-            const nowIso = new Date().toISOString();
-            const curr = progs.find((p) => p.start <= nowIso && p.end > nowIso) || progs[0] || null;
-            const nxt = progs.find((p) => p.start >= (curr ? curr.end : nowIso)) || (progs.length > 1 ? progs[1] : null);
-            setCurrentEpg(curr);
-            setNextEpg(nxt);
-          } catch {}
+            const catChannels = await db.channels.where('group_id').equals(initialCat.id).toArray();
+            const firstPlayable = catChannels.find((c) => !c.is_separator && !isSeparatorChannel(c)) || catChannels[0] || null;
+            if (firstPlayable) {
+              setActiveChannel(firstPlayable);
+              const progs = await EPGService.getProgramsForChannel(firstPlayable.id);
+              const nowIso = new Date().toISOString();
+              const curr = progs.find((p) => p.start <= nowIso && p.end > nowIso) || progs[0] || null;
+              const nxt = progs.find((p) => p.start >= (curr ? curr.end : nowIso)) || (progs.length > 1 ? progs[1] : null);
+              setCurrentEpg(curr);
+              setNextEpg(nxt);
+            }
+          } catch (e) {
+            console.warn('Initial channel load error:', e);
+          }
         }
 
         // Load or create Sync Code
@@ -1454,20 +1413,20 @@ export default function KeoTVHome() {
       sectionCats.sort((a, b) => (a.custom_order || 0) - (b.custom_order || 0));
     }
 
-    // Prepend universe-specific favorites and smart categories
+    // Prepend universe-specific favorites only when user has favorited items in that universe
     if (activeSection === 'vod') {
       const vodSpecials = [vodForYouCategory, vodRecentCategory];
-      if (showFavoritesCategory) {
+      if (showFavoritesCategory && favCounts.vod > 0) {
         return [favVodCategory, ...vodSpecials, ...sectionCats];
       }
       return [...vodSpecials, ...sectionCats];
     }
 
     if (showFavoritesCategory) {
-      if (activeSection === 'live') {
+      if (activeSection === 'live' && favCounts.live > 0) {
         return [favLiveCategory, ...sectionCats];
       }
-      if (activeSection === 'series') {
+      if (activeSection === 'series' && favCounts.series > 0) {
         return [favSeriesCategory, ...sectionCats];
       }
     }
@@ -1535,11 +1494,11 @@ export default function KeoTVHome() {
         }
 
         if (section === 'series') {
-          targetCat = favCounts.series > 0 ? favSeriesCategory : matchingCats[0] || favSeriesCategory;
+          targetCat = favCounts.series > 0 ? favSeriesCategory : matchingCats[0] || null;
         } else if (section === 'vod') {
-          targetCat = favCounts.vod > 0 ? favVodCategory : matchingCats[0] || favVodCategory;
+          targetCat = favCounts.vod > 0 ? favVodCategory : matchingCats[0] || null;
         } else {
-          targetCat = favCounts.live > 0 ? favLiveCategory : matchingCats[0] || favLiveCategory;
+          targetCat = matchingCats[0] || (favCounts.live > 0 ? favLiveCategory : null);
         }
       }
 
@@ -2798,36 +2757,41 @@ export default function KeoTVHome() {
     setCategories(loadedCats);
     setPlaylists(loadedPlaylists);
     await updateFavoriteCounts();
-    startBackgroundLiveLoad(result.playlist, loadedCats);
 
-    // Pick first non-fav category with channels (count > 0)
-    let firstCat = loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0);
-    if (!firstCat) {
-      firstCat = loadedCats.find((c) => c.id !== 'fav') || loadedCats[0];
-    }
+    // Pick first real live category with channels
+    let firstCat =
+      loadedCats.find((c) => c.type === 'live' && !c.id.startsWith('fav') && (c.count || 0) > 0) ||
+      loadedCats.find((c) => c.type === 'live' && !c.id.startsWith('fav')) ||
+      loadedCats.find((c) => !c.id.startsWith('fav') && (c.count || 0) > 0) ||
+      loadedCats[0] ||
+      null;
 
     if (firstCat) {
       setSelectedCategory(firstCat);
       setFocusedCategoryIndex(0);
       setFocusedChannelIndex(0);
       await loadCategoryChannels(firstCat, channelSort);
-    }
 
-    // Select first real channel
-    const firstChannel = result.channels[0];
-    if (firstChannel) {
-      setActiveChannel(firstChannel);
-      setCurrentEpg({
-        id: 'epg_' + firstChannel.id,
-        channel_id: firstChannel.id,
-        title: firstChannel.name + ' (En Direct)',
-        description: 'Flux en direct de ' + firstChannel.name,
-        start: new Date().toISOString(),
-        end: new Date(Date.now() + 7200000).toISOString(),
-        duration_min: 120,
-      });
-      setNextEpg(null);
-      setIsStopped(false);
+      try {
+        const catChannels = await db.channels.where('group_id').equals(firstCat.id).toArray();
+        const firstPlayable = catChannels.find((c) => !c.is_separator && !isSeparatorChannel(c)) || catChannels[0] || null;
+        if (firstPlayable) {
+          setActiveChannel(firstPlayable);
+          setCurrentEpg({
+            id: 'epg_' + firstPlayable.id,
+            channel_id: firstPlayable.id,
+            title: firstPlayable.name + ' (En Direct)',
+            description: 'Flux en direct de ' + firstPlayable.name,
+            start: new Date().toISOString(),
+            end: new Date(Date.now() + 7200000).toISOString(),
+            duration_min: 120,
+          });
+          setNextEpg(null);
+          setIsStopped(false);
+        }
+      } catch (e) {
+        console.warn('Channel selection error on save:', e);
+      }
     }
 
     // Clear banner when save is fully finished

@@ -188,8 +188,19 @@ export function isSeparatorChannel(ch?: Channel | null): boolean {
     return true;
   }
 
+  // Unicode arrows, triangles, stars or boxes commonly used for IPTV category dividers: ▼, ▲, ▶, ◄, ═, ─, ★, etc.
+  if (/^[▼▲►◄▶◀★☆■□▪▫◆◇●○•\-=*#_~|.\s/\\+]{2,}/.test(name)) return true;
+  if (/[▼▲►◄▶◀★☆■□▪▫◆◇●○•\-=*#_~|.\s/\\+]{2,}$/.test(name) && (name.includes('|') || name.includes('---') || name.includes('===') || /VOD|SERIE|FILM|BOUQUET/i.test(name))) {
+    return true;
+  }
+
+  // Explicit indicator in name
+  if (/^[▼▲].+[▼▲]$/.test(name) || /Séparateur thématique/i.test(name)) {
+    return true;
+  }
+
   // Name consists solely of separator characters, spaces and punctuation
-  if (/^[-=*#_~|.\s/\\+]{3,}$/.test(name)) return true;
+  if (/^[-=*#_~|.\s/\\+▼▲►◄▶◀★☆■□▪▫◆◇●○•]{3,}$/.test(name)) return true;
 
   // Name is surrounded by repeated dashes, equals, asterisks, brackets e.g. "--- CANAL+ ---", "=== BEIN ==="
   if (/^[-=*#_~]{2,}\s*.+\s*[-=*#_~]{2,}$/.test(name)) return true;
@@ -1418,7 +1429,7 @@ export async function fetchAllLiveStreamsBulk(params: {
       is_hidden: false,
       custom_order: i + 1,
       resolution: detectResolution(itemName),
-      is_separator: false,
+      is_separator: isSeparatorChannel({ name: itemName, stream_url: `${server}/live/${encUser}/${encPass}/${streamId}.m3u8` } as any),
       stream_id: streamId,
       has_archive: hasArchive,
       archive_days: archiveDays,
@@ -1503,7 +1514,7 @@ export async function fetchAllVodStreamsBulk(params: {
       is_hidden: false,
       custom_order: i + 1,
       resolution: detectResolution(mName),
-      is_separator: false,
+      is_separator: isSeparatorChannel({ name: mName, stream_url: `${server}/movie/${encUser}/${encPass}/${streamId}.${ext}` } as any),
       added: Number(m.added) > 0 ? Number(m.added) : undefined,
     });
   }
