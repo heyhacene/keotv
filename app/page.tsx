@@ -712,7 +712,10 @@ export default function KeoTVHome() {
 
         setChannels(sorted);
         if (sorted.length > 0) {
-          setActiveChannel((prev) => prev || sorted[0]);
+          setActiveChannel((prev) => {
+            if (prev && !prev.is_separator && !isSeparatorChannel(prev)) return prev;
+            return sorted.find((c) => !c.is_separator && !isSeparatorChannel(c)) || sorted[0];
+          });
         }
       } catch (err) {
         if (categoryLoadTokenRef.current !== token) return;
@@ -1221,10 +1224,18 @@ export default function KeoTVHome() {
           );
           if (xtreamPl) {
             refreshXtreamAccountInfo(xtreamPl).catch(() => {});
-            // If local live channels are missing, fetch them in background
-            const localLiveCount = await db.channels.where('stream_type').equals('live').count();
-            if (localLiveCount === 0) {
-              startBackgroundLiveLoad(xtreamPl, loadedCats);
+            const needsCatalogUpgrade = typeof window !== 'undefined' && localStorage.getItem('keotv_v4_catalog_sync') !== 'true';
+            const localVodCount = await db.channels.where('stream_type').equals('vod').count();
+            if (needsCatalogUpgrade || localVodCount === 0) {
+              if (typeof window !== 'undefined') {
+                localStorage.setItem('keotv_v4_catalog_sync', 'true');
+              }
+              handleResyncPlaylist(xtreamPl);
+            } else {
+              const localLiveCount = await db.channels.where('stream_type').equals('live').count();
+              if (localLiveCount === 0) {
+                startBackgroundLiveLoad(xtreamPl, loadedCats);
+              }
             }
           }
 
@@ -1508,10 +1519,11 @@ export default function KeoTVHome() {
     }
   };
 
-  // Filtered channels for currently active category (excluding hidden channels & configured prefixes)
+  // Filtered channels for currently active category (excluding hidden channels, separators & configured prefixes)
   const filteredChannels = useMemo(() => {
     return channels.filter((ch) => {
       if (ch.is_hidden || hiddenChannelIds.has(ch.id)) return false;
+      if (ch.is_separator || isSeparatorChannel(ch)) return false;
       if (shouldExcludeChannelByPrefix(ch.name, excludedPrefixes)) return false;
       return true;
     });

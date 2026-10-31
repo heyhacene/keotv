@@ -1828,11 +1828,11 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
   pushCategories(rawSeriesCategories, 'series', 'Séries', 20000);
 
   // 4. Pre-fetch ALL live channels immediately in bulk so all TV bouquets are ready
-  onProgress?.('Étape 3/3 : Téléchargement des chaînes TV en direct...');
-  let channels: Channel[] = [];
+  onProgress?.('Étape 3/4 : Téléchargement des chaînes TV en direct...');
+  let liveChannels: Channel[] = [];
 
   try {
-    channels = await fetchAllLiveStreamsBulk({
+    liveChannels = await fetchAllLiveStreamsBulk({
       serverUrl: server,
       username: cleanUsername,
       password: cleanPassword,
@@ -1842,43 +1842,43 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     console.warn('Bulk live stream fetch failed during sync:', bulkErr);
   }
 
-  // Fallback: If bulk fetch failed (common on some Xtream panels), download live categories in parallel!
-  if (channels.length === 0) {
-    onProgress?.('Téléchargement rapide des bouquets TV...');
-    const liveCats = categories.filter((c) => c.type === 'live' && c.id !== 'fav');
-    let cursor = 0;
-    const CONCURRENCY = 4;
-    const workers = Array.from({ length: CONCURRENCY }, async () => {
-      while (cursor < liveCats.length) {
-        const cat = liveCats[cursor++];
-        if (!cat) break;
-        const rawCatId = cat.id.replace(/^grp_live_/, '');
-        try {
-          const streams = await fetchCategoryStreamsOnDemand({
-            serverUrl: server,
-            username: cleanUsername,
-            password: cleanPassword,
-            categoryId: rawCatId,
-            categoryName: cat.name,
-            streamType: 'live',
-          });
-          if (streams.length > 0) {
-            channels.push(...streams);
-            cat.count = streams.length;
-          }
-        } catch {}
-      }
-    });
-    await Promise.all(workers);
+  // 5. Pre-fetch VOD & Series catalogs so all movies and series are indexed
+  onProgress?.('Étape 4/4 : Indexation du catalogue Films & Séries...');
+  let vodChannels: Channel[] = [];
+  let seriesChannels: Channel[] = [];
+
+  const [vodRes, seriesRes] = await Promise.allSettled([
+    fetchAllVodStreamsBulk({
+      serverUrl: server,
+      username: cleanUsername,
+      password: cleanPassword,
+      categories,
+    }),
+    fetchAllSeriesCatalog({
+      serverUrl: server,
+      username: cleanUsername,
+      password: cleanPassword,
+    }),
+  ]);
+
+  if (vodRes.status === 'fulfilled') {
+    vodChannels = vodRes.value;
+  }
+  if (seriesRes.status === 'fulfilled') {
+    seriesChannels = seriesRes.value;
   }
 
-  // Update counts on live categories from downloaded channels
+  const channels: Channel[] = [...liveChannels, ...vodChannels, ...seriesChannels];
+
+  // Update counts on all categories from downloaded channels
   const countsByGroup = new Map<string, number>();
   for (const ch of channels) {
-    countsByGroup.set(ch.group_id, (countsByGroup.get(ch.group_id) || 0) + 1);
+    if (!ch.is_separator) {
+      countsByGroup.set(ch.group_id, (countsByGroup.get(ch.group_id) || 0) + 1);
+    }
   }
   for (const c of categories) {
-    if (c.type === 'live' && countsByGroup.has(c.id)) {
+    if (countsByGroup.has(c.id)) {
       c.count = countsByGroup.get(c.id)!;
     }
   }
@@ -1909,7 +1909,9 @@ export async function syncXtreamPlaylist(params: XtreamSyncParams): Promise<{
     password: cleanPassword,
     status: 'active',
     channel_count: channels.length,
-    live_count: channels.length,
+    live_count: liveChannels.length,
+    vod_count: vodChannels.length,
+    series_count: seriesChannels.length,
     exp_date: expDateStr,
     max_connections: userInfo?.max_connections ? String(userInfo.max_connections) : undefined,
     account_status: userInfo?.status ? String(userInfo.status) : undefined,

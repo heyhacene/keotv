@@ -345,34 +345,8 @@ const TiviMateTimelineRow = React.memo<TiviMateTimelineRowProps>(
     onOpenContextMenu,
   }) => {
     const isSep = channel.is_separator ?? isSeparatorChannel(channel);
+    if (isSep) return null;
     const hasReplay = Boolean(channel.has_archive);
-
-    if (isSep) {
-      const cleanLabel = cleanSeparatorName(channel.name);
-      return (
-        <div
-          id={`channel-item-${index}`}
-          onClick={() => onSelectChannel(channel, index)}
-          onContextMenu={(e) => {
-            e.preventDefault();
-            onOpenContextMenu?.(channel);
-          }}
-          className={`flex items-center justify-between px-3.5 h-[44px] mx-2 my-0.5 rounded-md select-none cursor-default transition-transform duration-75 ${
-            isChannelFocused || isEpgRowFocused
-              ? 'bg-sky-500 text-white font-bold ring-2 ring-white shadow-md'
-              : 'bg-white/[0.04] border border-white/5 text-slate-400 font-semibold'
-          }`}
-        >
-          <div className="flex items-center space-x-2 truncate">
-            <Layers className="w-3.5 h-3.5 text-sky-400 flex-shrink-0" />
-            <span className="text-xs uppercase tracking-wider truncate font-bold">{cleanLabel}</span>
-          </div>
-          <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono uppercase tracking-widest flex-shrink-0 ml-2">
-            Section
-          </span>
-        </div>
-      );
-    }
 
     // Determine flex weights proportional to program duration so blocks look like TiviMate's timeline
     const getSlotWeight = (offset: number, prog?: EpgProgram) => {
@@ -547,29 +521,7 @@ interface ChannelRowProps {
 const ChannelRow = React.memo<ChannelRowProps>(
   ({ channel, index, isFocused, isActive, onSelect, onToggleFavorite, onOpenContextMenu }) => {
     const isSep = channel.is_separator ?? isSeparatorChannel(channel);
-
-    if (isSep) {
-      const cleanLabel = cleanSeparatorName(channel.name);
-      return (
-        <div
-          id={`channel-item-${index}`}
-          onClick={() => onSelect(channel, index)}
-          className={`flex items-center justify-between px-3.5 py-1.5 mx-2 my-1 rounded-xl select-none cursor-default transition-transform duration-75 ${
-            isFocused
-              ? 'bg-tv-focus text-white font-bold ring-2 ring-tv-accent shadow-md'
-              : 'bg-white/5 border border-white/5 text-slate-400 font-semibold hover:bg-white/10'
-          }`}
-        >
-          <div className="flex items-center space-x-2 truncate">
-            <Layers className="w-3.5 h-3.5 text-tv-accent flex-shrink-0" />
-            <span className="text-xs uppercase tracking-wider truncate font-bold">{cleanLabel}</span>
-          </div>
-          <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-mono uppercase tracking-widest flex-shrink-0 ml-2">
-            Section
-          </span>
-        </div>
-      );
-    }
+    if (isSep) return null;
 
     return (
       <div
@@ -788,8 +740,8 @@ export const TVGuide: React.FC<TVGuideProps> = ({
     setCategoryBounce(null);
   }, [focusedCategoryIndex]);
 
-  const focusedChannel = channels[focusedChannelIndex] || activeChannel;
-  const isSep = isSeparatorChannel(focusedChannel);
+  const focusedChannel = channels.length > 0 ? (channels[focusedChannelIndex] || channels[0]) : null;
+  const isSep = focusedChannel ? isSeparatorChannel(focusedChannel) : false;
 
   // Determine if we are in Live TV TiviMate Timeline Mode vs VOD/Series Mode
   const isVodOrSeriesSection =
