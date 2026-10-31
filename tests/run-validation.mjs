@@ -1,42 +1,45 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
+import ts from 'typescript';
 
-console.log('🔍 Validation automatique du pipeline IPTV KeoTV...');
+console.log('🔍 Lancement de la validation automatique du pipeline IPTV KeoTV...');
 
 const source = fs.readFileSync('lib/iptv-service.ts', 'utf8');
 
-// Extraction et compilation sécurisée des fonctions TypeScript sans dépendance externe
-function extractFunction(src, fnName) {
-  const start = src.indexOf(`function ${fnName}`);
-  if (start === -1) throw new Error(`Fonction ${fnName} introuvable dans lib/iptv-service.ts`);
-  let depth = 0;
-  let end = -1;
-  const bodyStart = src.indexOf('{', start);
-  for (let i = bodyStart; i < src.length; i++) {
-    if (src[i] === '{') depth++;
-    else if (src[i] === '}') {
-      depth--;
-      if (depth === 0) {
-        end = i + 1;
-        break;
-      }
-    }
-  }
-  let fnDef = src.slice(start, end);
-  // Nettoyage des annotations de type TypeScript
-  fnDef = fnDef
-    .replace(/:\s*[A-Za-z0-9_\[\]|<?>\s'"]+?(?=[,)=])/g, '')
-    .replace(/<.*?>/g, '')
-    .replace(/as\s+[a-zA-Z0-9_]+/g, '')
-    .replace(/export\s+/g, '');
-  return new Function(`return (${fnDef});`)();
-}
+// Transpilation TypeScript officielle via le compilateur TypeScript natif
+const transpiled = ts.transpileModule(source, {
+  compilerOptions: {
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.CommonJS,
+  },
+}).outputText;
 
-const isSeparatorChannel = extractFunction(source, 'isSeparatorChannel');
-const cleanSeparatorName = extractFunction(source, 'cleanSeparatorName');
-const isAdultCategoryName = extractFunction(source, 'isAdultCategoryName');
-const detectResolution = extractFunction(source, 'detectResolution');
-const shouldExcludeChannelByPrefix = extractFunction(source, 'shouldExcludeChannelByPrefix');
+// Exécution du code transpilé dans un contexte CommonJS isolé
+const moduleObj = { exports: {} };
+const fn = new Function('exports', 'module', 'require', transpiled);
+
+const mockRequire = (id) => {
+  if (id.includes('capacitor')) {
+    return {
+      Capacitor: { isNativePlatform: () => false },
+      CapacitorHttp: { get: async () => ({ status: 200, data: [] }) },
+    };
+  }
+  if (id.includes('db')) {
+    return { db: {} };
+  }
+  return {};
+};
+
+fn(moduleObj.exports, moduleObj, mockRequire);
+
+const {
+  isSeparatorChannel,
+  cleanSeparatorName,
+  isAdultCategoryName,
+  detectResolution,
+  shouldExcludeChannelByPrefix,
+} = moduleObj.exports;
 
 // 1. Test des séparateurs
 console.log('  -> Test 1 : Détection et élimination des faux canaux (séparateurs)...');
