@@ -67,6 +67,9 @@ public class MainActivity extends AppCompatActivity {
         setupAdapters();
         loadLocalData();
 
+        // Silent background check for updates on startup
+        UpdateManager.checkForUpdates(this, false);
+
         // Check if playlist configured, otherwise prompt cloud sync from website
         KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
         if (pl != null && pl.serverUrl != null && !pl.serverUrl.isEmpty()) {
@@ -90,6 +93,10 @@ public class MainActivity extends AppCompatActivity {
         btnToggleFav = findViewById(R.id.btn_toggle_fav);
 
         findViewById(R.id.btn_header_cloud).setOnClickListener(v -> showCloudSyncDialog());
+        View btnUpdate = findViewById(R.id.btn_header_update);
+        if (btnUpdate != null) {
+            btnUpdate.setOnClickListener(v -> UpdateManager.checkForUpdates(this, true));
+        }
         findViewById(R.id.btn_header_sync).setOnClickListener(v -> triggerSync());
         findViewById(R.id.btn_header_diagnostic).setOnClickListener(v -> showDiagnosticDialog());
         findViewById(R.id.btn_header_login).setOnClickListener(v -> showLoginDialog());
@@ -201,13 +208,21 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(MainActivity.this, "Synchronisation réussie : " + channelCount + " chaînes", Toast.LENGTH_LONG).show();
                 updateHeaderPlaylistInfo(db.getActivePlaylist());
                 loadLocalData();
+
+        // Silent background check for updates on startup
+        UpdateManager.checkForUpdates(this, false);
             }
 
             @Override
             public void onError(String error) {
                 tvStatusBadge.setText("⚠️ Erreur");
                 tvStatusBadge.setBackgroundColor(0xFF7F1D1D); // red
-                Toast.makeText(MainActivity.this, "Erreur synchro : " + error, Toast.LENGTH_LONG).show();
+                new AlertDialog.Builder(MainActivity.this)
+                        .setTitle("⚠️ Erreur de synchronisation IPTV")
+                        .setMessage("Impossible de synchroniser avec le serveur IPTV :\n\n" + error + "\n\n💡 Vérifiez l'adresse de votre serveur (ex: http://domaine:port), votre identifiant et mot de passe.")
+                        .setPositiveButton("Vérifier le compte", (dialog, which) -> showLoginDialog())
+                        .setNegativeButton("Fermer", null)
+                        .show();
             }
         });
     }
@@ -227,7 +242,7 @@ public class MainActivity extends AppCompatActivity {
         long maxMb = rt.maxMemory() / (1024 * 1024);
 
         String message = "📊 DIAGNOSTIC & SANTÉ DU SYSTÈME KEOTV\n\n"
-                + "• Version : Build 146 (100% Natif Android)\n"
+                + "• Version : Build " + UpdateManager.getAppVersionCode(this) + " (100% Natif Android)\n"
                 + "• Moteur : SQLite WAL Natif (Zéro WebView / Zéro Dexie)\n"
                 + "• Chaînes TV en mémoire : " + liveCount + "\n"
                 + "• Bouquets TV : " + catCount + "\n"
