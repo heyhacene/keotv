@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { db, getSetting, setSetting, getFavoriteChannelIds, saveFavoriteChannelId } from '@/lib/db';
-import { INITIAL_CATEGORIES, INITIAL_CHANNELS, getMockEpgForChannel } from '@/lib/mock-data';
+import { getMockEpgForChannel } from '@/lib/mock-data';
 import { Channel, Category, EpgProgram, NavigationPane, PlaylistConfig } from '@/types/iptv';
 import { useTVNavigation } from '@/lib/use-tv-navigation';
 import { NavigationSidebar } from '@/components/NavigationSidebar';
@@ -44,7 +44,6 @@ import {
   fetchAllVodStreamsBulk,
   fetchRecentlyAddedVod,
   refreshXtreamAccountInfo,
-  fetchVodAndSeriesCategoryCounts,
   SeriesEpisode,
   isSeparatorChannel,
   isAdultCategoryName,
@@ -69,6 +68,10 @@ export const DEMO_CATEGORY_IDS = new Set([
   'cinema',
   'news',
   'doc',
+  'fav_all',
+  'fav_live',
+  'fav_vod',
+  'fav_series',
 ]);
 
 const DEMO_CHANNEL_IDS = new Set([
@@ -96,11 +99,17 @@ export async function purgeDemoData() {
     await db.playlists.delete('pl_demo_france');
     await db.categories.where('id').anyOf(Array.from(DEMO_CATEGORY_IDS)).delete();
     await db.channels.filter((c) =>
+      !c.group_id?.startsWith('grp_') ||
       DEMO_CATEGORY_IDS.has(c.group_id) ||
       DEMO_CHANNEL_IDS.has(c.id) ||
       c.id.startsWith('ch_demo_') ||
       c.id.startsWith('vod_') ||
-      c.id.startsWith('series_')
+      c.id.startsWith('series_') ||
+      c.group_id === 'france_direct' ||
+      c.group_id === 'sport' ||
+      c.group_id === 'regions' ||
+      c.group_id === 'films_vod' ||
+      c.group_id === 'series_vod'
     ).delete();
   } catch (err) {
     console.warn('Error purging demo data:', err);
@@ -634,6 +643,11 @@ export default function KeoTVHome() {
             if (activePl && activePl.server_url && activePl.username && activePl.password) {
               if (categoryLoadTokenRef.current !== token) return;
               const cleanRawCatId = cat.id.replace(/^grp_(?:live_|vod_|series_)?/, '').trim();
+              if (!cat.id.startsWith('grp_') || !/^\d+$/.test(cleanRawCatId)) {
+                setChannels([]);
+                setIsLoadingCategory(false);
+                return;
+              }
               const catType: 'live' | 'vod' | 'series' = cat.id.startsWith('grp_vod_')
                 ? 'vod'
                 : cat.id.startsWith('grp_series_')
@@ -777,37 +791,7 @@ export default function KeoTVHome() {
     }
   }, []);
 
-  // Silent background indexing of VOD & Series category counts if needed
-  const syncVodAndSeriesCounts = useCallback(async (pl: PlaylistConfig) => {
-    if (pl.type !== 'xtream' || !pl.server_url || !pl.username || !pl.password) return;
-    try {
-      const { vodCounts, seriesCounts, totalVod, totalSeries } = await fetchVodAndSeriesCategoryCounts({
-        serverUrl: pl.server_url,
-        username: pl.username,
-        password: pl.password,
-      });
 
-      if (vodCounts.size > 0 || seriesCounts.size > 0) {
-        await db.transaction('rw', db.categories, db.playlists, async () => {
-          for (const [catId, count] of vodCounts.entries()) {
-            await db.categories.update(catId, { count });
-          }
-          for (const [catId, count] of seriesCounts.entries()) {
-            await db.categories.update(catId, { count });
-          }
-          await db.playlists.update(pl.id, {
-            vod_count: totalVod,
-            series_count: totalSeries,
-          });
-        });
-
-        const refreshedCats = await db.categories.orderBy('custom_order').toArray();
-        setCategories(refreshedCats);
-      }
-    } catch (err) {
-      console.warn('Silent sync of VOD/series counts error:', err);
-    }
-  }, []);
 
   // Re-synchronize existing playlist and reload all channels safely into Dexie
   const handleResyncPlaylist = useCallback(
@@ -840,7 +824,7 @@ export default function KeoTVHome() {
 
         setSyncStatusBanner(`Enregistrement de ${result.channels.length} chaînes...`);
 
-        // Safe upsert without deleting existing VOD or series in Dexie!
+        await purgeDemoData();
         await db.playlists.put(result.playlist);
         await db.categories.bulkPut(result.categories);
 
@@ -878,7 +862,7 @@ export default function KeoTVHome() {
         // Auto-repair category counts from locally stored channels if any are 0
         const chTotal = await db.channels.count();
         if (chTotal > 0) {
-          const hasZeroCounts = loadedCats.some((c) => !c.id.startsWith('fav') && (!c.count || c.count === 0));
+          const hasZeroCounts = loadedCats.some((c) => c.type === 'live' && !c.id.startsWith('fav') && (!c.count || c.count === 0));
           if (hasZeroCounts) {
             const countsMap = new Map<string, number>();
             await db.channels.each((ch) => {
@@ -889,7 +873,7 @@ export default function KeoTVHome() {
             let didChange = false;
             await db.transaction('rw', db.categories, async () => {
               for (const c of loadedCats) {
-                if (c.id.startsWith('fav')) continue;
+                if (c.type !== 'live' || c.id.startsWith('fav')) continue;
                 const realCount = countsMap.get(c.id) || 0;
                 if (c.count !== realCount) {
                   c.count = realCount;
@@ -1004,7 +988,7 @@ export default function KeoTVHome() {
         // Auto-repair category counts from locally stored channels if any are 0
         const chTotal = await db.channels.count();
         if (chTotal > 0) {
-          const hasZeroCounts = loadedCats.some((c) => !c.id.startsWith('fav') && (!c.count || c.count === 0));
+          const hasZeroCounts = loadedCats.some((c) => c.type === 'live' && !c.id.startsWith('fav') && (!c.count || c.count === 0));
           if (hasZeroCounts) {
             const countsMap = new Map<string, number>();
             await db.channels.each((ch) => {
@@ -1015,7 +999,7 @@ export default function KeoTVHome() {
             let didChange = false;
             await db.transaction('rw', db.categories, async () => {
               for (const c of loadedCats) {
-                if (c.id.startsWith('fav')) continue;
+                if (c.type !== 'live' || c.id.startsWith('fav')) continue;
                 const realCount = countsMap.get(c.id) || 0;
                 if (c.count !== realCount) {
                   c.count = realCount;
@@ -1204,45 +1188,8 @@ export default function KeoTVHome() {
           }
         }
 
-        // Check if user has non-demo categories or real playlists
-        const hasRealCats = allDbCats.some(
-          (c) => !DEMO_CATEGORY_IDS.has(c.id) && c.id !== 'fav'
-        );
-        const hasRealPl = activePlaylists.some((p) => !p.id.startsWith('pl_demo_'));
-
-        if (hasRealCats || hasRealPl) {
-          await purgeDemoData();
-        }
-
-        // Only install demo channels on fresh first-time installation (NEVER overwrite user setup!)
-        const hasAnyUserConfig =
-          (await getSetting<boolean>('has_configured_playlist', false)) ||
-          Boolean(backupPlJson) ||
-          Boolean(backupXtreamJson) ||
-          Boolean(savedXtreamConfig) ||
-          activePlaylists.some((p) => !p.id.startsWith('pl_demo_'));
-
-        if (!hasAnyUserConfig && chCount === 0 && catCount === 0) {
-          const userHasDeletedAll = await getSetting<boolean>('user_deleted_all_playlists', false);
-          if (!userHasDeletedAll) {
-            await db.categories.bulkAdd(INITIAL_CATEGORIES);
-            await db.channels.bulkAdd(INITIAL_CHANNELS);
-
-            const demoPlaylist: PlaylistConfig = {
-              id: 'pl_demo_france',
-              name: '📺 Démo France (Direct, VOD & Séries)',
-              type: 'm3u',
-              server_url: '/playlist-demo.m3u',
-              status: 'active',
-              channel_count: INITIAL_CHANNELS.length,
-              live_count: INITIAL_CHANNELS.filter((c) => c.stream_type === 'live').length,
-              vod_count: INITIAL_CHANNELS.filter((c) => c.stream_type === 'vod').length,
-              series_count: INITIAL_CHANNELS.filter((c) => c.stream_type === 'series').length,
-              last_sync_at: new Date().toISOString(),
-            };
-            await db.playlists.put(demoPlaylist);
-          }
-        }
+        // Always purge demo / mock data on boot
+        await purgeDemoData();
 
         const loadedCats = await db.categories.orderBy('custom_order').toArray();
         const loadedPlaylists = await db.playlists.toArray();
@@ -1262,7 +1209,7 @@ export default function KeoTVHome() {
         // Auto-repair category counts from locally stored channels if any are 0
         const chTotal = await db.channels.count();
         if (chTotal > 0) {
-          const hasZeroCounts = loadedCats.some((c) => !c.id.startsWith('fav') && (!c.count || c.count === 0));
+          const hasZeroCounts = loadedCats.some((c) => c.type === 'live' && !c.id.startsWith('fav') && (!c.count || c.count === 0));
           if (hasZeroCounts) {
             const countsMap = new Map<string, number>();
             await db.channels.each((ch) => {
@@ -1273,7 +1220,7 @@ export default function KeoTVHome() {
             let didChange = false;
             await db.transaction('rw', db.categories, async () => {
               for (const c of loadedCats) {
-                if (c.id.startsWith('fav')) continue;
+                if (c.type !== 'live' || c.id.startsWith('fav')) continue;
                 const realCount = countsMap.get(c.id) || 0;
                 if (c.count !== realCount) {
                   c.count = realCount;
@@ -1291,16 +1238,15 @@ export default function KeoTVHome() {
         setCategories(loadedCats);
         setPlaylists(loadedPlaylists);
 
-        // Pick initial category: france_direct if available, else first non-fav category
-        let initialCat = loadedCats.find((c) => c.id === 'france_direct' || c.id === 'tnt');
-        if (!initialCat) {
-          initialCat =
-            loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) ||
-            loadedCats.find((c) => c.id !== 'fav') ||
-            loadedCats[0];
-        }
+        // Pick initial category: first active live category with channels
+        let initialCat =
+          loadedCats.find((c) => c.type === 'live' && c.id !== 'fav' && (c.count || 0) > 0) ||
+          loadedCats.find((c) => c.type === 'live' && c.id !== 'fav') ||
+          loadedCats.find((c) => c.id !== 'fav' && (c.count || 0) > 0) ||
+          loadedCats[0] ||
+          null;
 
-        setSelectedCategory(initialCat || null);
+        setSelectedCategory(initialCat);
 
         // Dismiss splash screen immediately so the UI is interactive right away!
         clearTimeout(splashFailsafeTimer);
@@ -1353,13 +1299,6 @@ export default function KeoTVHome() {
             const localLiveCount = await db.channels.where('stream_type').equals('live').count();
             if (localLiveCount === 0) {
               startBackgroundLiveLoad(xtreamPl, loadedCats);
-            }
-            // If VOD categories have 0 counts, update them silently in background
-            const zeroVodCats = loadedCats.filter((c) => c.type === 'vod' && (c.count || 0) === 0);
-            if (zeroVodCats.length > 5) {
-              setTimeout(() => {
-                syncVodAndSeriesCounts(xtreamPl);
-              }, 1200);
             }
           }
 
@@ -3013,13 +2952,9 @@ export default function KeoTVHome() {
   const handleDeletePlaylist = async (id: string) => {
     bgLoadTokenRef.current++;
     await db.playlists.delete(id);
+    await purgeDemoData();
     const remainingPlaylists = await db.playlists.toArray();
     setPlaylists(remainingPlaylists);
-
-    // If deleting demo playlist
-    if (id.startsWith('pl_demo_') || id === 'pl_demo_france' || id === 'pl_demo_default') {
-      await purgeDemoData();
-    }
 
     // Sync deletion to cloud account so it doesn't resurrect on next sync
     if (activeUser && activeUser.playlists) {
@@ -3059,50 +2994,9 @@ export default function KeoTVHome() {
     }
   };
 
-  // Restore demo playlist handler
+  // Restore demo playlist handler (deprecated in TiviMate architecture)
   const handleRestoreDemoPlaylist = async () => {
-    await setSetting('user_deleted_all_playlists', false);
-    await db.categories.clear();
-    await db.channels.clear();
-    await db.categories.bulkAdd(INITIAL_CATEGORIES);
-    await db.channels.bulkAdd(INITIAL_CHANNELS);
-
-    const demoPlaylist: PlaylistConfig = {
-      id: 'pl_demo_france',
-      name: '📺 Démo France (Direct, VOD & Séries)',
-      type: 'm3u',
-      server_url: '/playlist-demo.m3u',
-      status: 'active',
-      channel_count: INITIAL_CHANNELS.length,
-      live_count: INITIAL_CHANNELS.filter((c) => c.stream_type === 'live').length,
-      vod_count: INITIAL_CHANNELS.filter((c) => c.stream_type === 'vod').length,
-      series_count: INITIAL_CHANNELS.filter((c) => c.stream_type === 'series').length,
-      last_sync_at: new Date().toISOString(),
-    };
-    await db.playlists.put(demoPlaylist);
-
-    const loadedCats = await db.categories.orderBy('custom_order').toArray();
-    const loadedPlaylists = await db.playlists.toArray();
-
-    setCategories(loadedCats);
-    setPlaylists(loadedPlaylists);
-    setFavCount(INITIAL_CHANNELS.filter((c) => c.is_favorite).length);
-
-    const initialCat = loadedCats.find((c) => c.id === 'france_direct') || loadedCats.find((c) => c.type === 'live') || loadedCats[0];
-    setSelectedCategory(initialCat || null);
-    if (initialCat) {
-      await loadCategoryChannels(initialCat, channelSort);
-    }
-
-    const initialChannel = INITIAL_CHANNELS.find((ch) => ch.id === 'ch_bfm') || INITIAL_CHANNELS[0];
-    if (initialChannel) {
-      setActiveChannel(initialChannel);
-      const epg = getMockEpgForChannel(initialChannel.id);
-      setCurrentEpg(epg.current);
-      setNextEpg(epg.next);
-      setIsStopped(false);
-    }
-    toast.success('Playlist Démo France chargée avec succès !');
+    showToast('Mode démo désactivé - veuillez configurer un compte Xtream ou une URL M3U.');
   };
 
   // User Account Sync Handler (username + password account login / registration)
@@ -3205,11 +3099,11 @@ export default function KeoTVHome() {
           saveUserCloudSync(cleanUser).catch(() => {});
         }
 
-        // ONLY trigger resync on brand new first-time setup (local DB has 0 channels)!
+        // Automatically trigger sync if no local channels or user initiated account sync
         const totalLocalChannels = await db.channels.count();
-        if (totalLocalChannels === 0 && freshPls[0]) {
+        if (freshPls[0] && (totalLocalChannels === 0 || !silent)) {
           handleResyncPlaylist(freshPls[0]).catch((resyncErr) => {
-            console.warn('Auto-resync on fresh account setup:', resyncErr);
+            console.warn('Auto-resync on account sync:', resyncErr);
           });
         }
       }
