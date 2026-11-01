@@ -275,6 +275,55 @@ public class KeoDatabase extends SQLiteOpenHelper {
         return list;
     }
 
+    public List<CategoryItem> getReplayCategories() {
+        List<CategoryItem> list = new ArrayList<>();
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT c.id, c.name, c.type, count(ch.id) as cnt, c.custom_order "
+                + "FROM categories c JOIN channels ch ON c.id = ch.group_id "
+                + "WHERE ch.tv_archive = 1 AND ch.is_separator = 0 "
+                + "GROUP BY c.id ORDER BY c.custom_order ASC, c.name ASC", null);
+        while (c.moveToNext()) {
+            CategoryItem item = new CategoryItem(
+                    c.getString(0),
+                    c.getString(1),
+                    c.getString(2),
+                    c.getInt(3),
+                    c.getInt(4)
+            );
+            list.add(item);
+        }
+        c.close();
+        return list;
+    }
+
+    public List<ChannelItem> getReplayChannelsByGroup(String groupId) {
+        List<ChannelItem> list = new ArrayList<>();
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id "
+                + "FROM channels WHERE group_id = ? AND tv_archive = 1 AND is_separator = 0 ORDER BY num ASC, name ASC", new String[]{groupId});
+        while (c.moveToNext()) {
+            ChannelItem item = new ChannelItem();
+            item.id = c.getString(0);
+            item.name = c.getString(1);
+            item.num = c.getInt(2);
+            item.groupId = c.getString(3);
+            item.groupName = c.getString(4);
+            item.streamUrl = c.getString(5);
+            item.streamType = c.getString(6);
+            item.logo = c.getString(7);
+            item.isFav = c.getInt(8) == 1;
+            item.resolution = c.getString(9);
+            item.isSeparator = c.getInt(10) == 1;
+            item.streamId = c.getString(11);
+            item.tvArchive = c.getInt(12);
+            item.tvArchiveDuration = c.getInt(13);
+            item.epgChannelId = c.getString(14);
+            list.add(item);
+        }
+        c.close();
+        return list;
+    }
+
     // Channels queries
     public List<ChannelItem> getChannelsByGroup(String groupId) {
         if ("grp_favs".equals(groupId)) {

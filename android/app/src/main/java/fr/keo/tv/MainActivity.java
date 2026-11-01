@@ -8,6 +8,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.TextWatcher;
 import android.util.Log;
 import android.view.KeyEvent;
@@ -16,6 +17,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -55,20 +57,50 @@ public class MainActivity extends AppCompatActivity {
     private final XtreamClient xtreamClient = new XtreamClient();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-    // UI elements
+    // UI elements - Header & Sidebar
+    private TextView tvSectionTitle;
     private TextView tvStatusBadge;
     private TextView tvHeaderSyncInfo;
     private TextView tvBouquetsHeader;
     private TextView tvChannelsHeader;
     private EditText etSearch;
 
+    // Sidebar navigation buttons (v1.3 Layout)
+    private Button btnNavLive;
+    private Button btnNavReplay;
+    private Button btnNavVod;
+    private Button btnNavSeries;
+    private Button btnNavFavs;
+    private Button btnNavSearch;
+    private Button btnNavSettings;
+    private Button btnNavSync;
+
+    // Mobile Portrait tabs compatibility
     private Button tabLive;
     private Button tabVod;
     private Button tabSeries;
 
+    // Content containers
+    private View layoutContentSplit;
+    private View panelSearch;
+
+    // Global Search UI
+    private EditText etGlobalSearch;
+    private Button btnSearchClear;
+    private Button btnSearchFilterAll;
+    private Button btnSearchFilterLive;
+    private Button btnSearchFilterVod;
+    private Button btnSearchFilterSeries;
+    private TextView tvSearchResultsCount;
+    private RecyclerView recyclerSearchResults;
+    private ChannelsAdapter searchResultsAdapter;
+    private String globalSearchFilter = "all";
+
+    // Recyclers
     private RecyclerView recyclerCategories;
     private RecyclerView recyclerChannels;
 
+    // Detail Panel compatibility (if present)
     private TextView tvDetailName;
     private TextView tvDetailGroup;
     private TextView tvDetailResolution;
@@ -76,12 +108,13 @@ public class MainActivity extends AppCompatActivity {
     private Button btnWatchFullscreen;
     private Button btnToggleFav;
     private Button btnReplay;
+
     private final Map<String, String> epgCurrentTitleCache = new ConcurrentHashMap<>();
 
     private CategoriesAdapter categoriesAdapter;
     private ChannelsAdapter channelsAdapter;
 
-    private String currentType = "live"; // "live", "vod", "series"
+    private String currentType = "live"; // "live", "replay", "vod", "series", "favs", "search"
     private KeoDatabase.CategoryItem selectedCategory = null;
     private KeoDatabase.ChannelItem activeChannel = null;
     private boolean isSearching = false;
@@ -143,19 +176,36 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initViews() {
+        tvSectionTitle = findViewById(R.id.tv_section_title);
         tvStatusBadge = findViewById(R.id.tv_status_badge);
         tvHeaderSyncInfo = findViewById(R.id.tv_header_sync_info);
         tvBouquetsHeader = findViewById(R.id.tv_bouquets_header);
         tvChannelsHeader = findViewById(R.id.tv_channels_header);
         etSearch = findViewById(R.id.et_search);
 
+        layoutContentSplit = findViewById(R.id.layout_content_split);
+        panelSearch = findViewById(R.id.panel_search);
+
+        // Sidebar buttons
+        btnNavLive = findViewById(R.id.btn_nav_live);
+        btnNavReplay = findViewById(R.id.btn_nav_replay);
+        btnNavVod = findViewById(R.id.btn_nav_vod);
+        btnNavSeries = findViewById(R.id.btn_nav_series);
+        btnNavFavs = findViewById(R.id.btn_nav_favs);
+        btnNavSearch = findViewById(R.id.btn_nav_search);
+        btnNavSettings = findViewById(R.id.btn_nav_settings);
+        btnNavSync = findViewById(R.id.btn_nav_sync);
+
+        // Mobile portrait tabs
         tabLive = findViewById(R.id.tab_live);
         tabVod = findViewById(R.id.tab_vod);
         tabSeries = findViewById(R.id.tab_series);
 
+        // Recyclers
         recyclerCategories = findViewById(R.id.recycler_categories);
         recyclerChannels = findViewById(R.id.recycler_channels);
 
+        // Detail panel (if present in layout)
         tvDetailName = findViewById(R.id.tv_detail_name);
         tvDetailGroup = findViewById(R.id.tv_detail_group);
         tvDetailResolution = findViewById(R.id.tv_detail_resolution);
@@ -166,6 +216,16 @@ public class MainActivity extends AppCompatActivity {
         if (btnReplay != null) {
             btnReplay.setOnClickListener(v -> showCatchupDialog(activeChannel));
         }
+
+        // Global search panel views
+        etGlobalSearch = findViewById(R.id.et_global_search);
+        btnSearchClear = findViewById(R.id.btn_search_clear);
+        btnSearchFilterAll = findViewById(R.id.btn_search_filter_all);
+        btnSearchFilterLive = findViewById(R.id.btn_search_filter_live);
+        btnSearchFilterVod = findViewById(R.id.btn_search_filter_vod);
+        btnSearchFilterSeries = findViewById(R.id.btn_search_filter_series);
+        tvSearchResultsCount = findViewById(R.id.tv_search_results_count);
+        recyclerSearchResults = findViewById(R.id.recycler_search_results);
 
         // Top bar buttons click listeners
         View btnCloud = findViewById(R.id.btn_header_cloud);
@@ -183,112 +243,84 @@ public class MainActivity extends AppCompatActivity {
         View btnLogin = findViewById(R.id.btn_header_login);
         if (btnLogin != null) btnLogin.setOnClickListener(v -> showLoginDialog());
 
-        // Header DPAD-Down navigation override: forces focus out of the top bar down to tabs/categories
-        View.OnKeyListener headerDownListener = (v, keyCode, event) -> {
-            if (event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                int id = v.getId();
-                if (id == R.id.btn_header_diagnostic && tabVod != null && tabVod.isShown()) {
-                    tabVod.requestFocus();
-                    return true;
-                } else if (id == R.id.btn_header_update && tabSeries != null && tabSeries.isShown()) {
-                    tabSeries.requestFocus();
-                    return true;
-                } else if (id == R.id.btn_header_login) {
-                    if (btnWatchFullscreen != null && btnWatchFullscreen.isShown()) {
-                        btnWatchFullscreen.requestFocus();
-                        return true;
-                    } else {
-                        focusChannelsList();
-                        return true;
-                    }
+        // Sidebar Navigation click listeners
+        if (btnNavLive != null) btnNavLive.setOnClickListener(v -> switchSection("live"));
+        if (btnNavReplay != null) btnNavReplay.setOnClickListener(v -> switchSection("replay"));
+        if (btnNavVod != null) btnNavVod.setOnClickListener(v -> switchSection("vod"));
+        if (btnNavSeries != null) btnNavSeries.setOnClickListener(v -> switchSection("series"));
+        if (btnNavFavs != null) btnNavFavs.setOnClickListener(v -> switchSection("favs"));
+        if (btnNavSearch != null) btnNavSearch.setOnClickListener(v -> switchSection("search"));
+        if (btnNavSettings != null) btnNavSettings.setOnClickListener(v -> showSettingsDialog());
+        if (btnNavSync != null) btnNavSync.setOnClickListener(v -> showCloudSyncDialog());
+
+        // Sidebar D-Pad right handler: navigates from sidebar into categories or search
+        View.OnKeyListener navRightListener = (v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                if ("search".equals(currentType) && etGlobalSearch != null) {
+                    etGlobalSearch.requestFocus();
                 } else {
-                    if (tabLive != null && tabLive.isShown()) {
-                        tabLive.requestFocus();
-                        return true;
-                    } else {
-                        focusCategoriesList();
-                        return true;
-                    }
-                }
-            }
-            return false;
-        };
-
-        if (btnCloud != null) btnCloud.setOnKeyListener(headerDownListener);
-        if (btnSync != null) btnSync.setOnKeyListener(headerDownListener);
-        if (btnDiagnostic != null) btnDiagnostic.setOnKeyListener(headerDownListener);
-        if (btnUpdate != null) btnUpdate.setOnKeyListener(headerDownListener);
-        if (btnLogin != null) btnLogin.setOnKeyListener(headerDownListener);
-
-        // Mode tabs (TV / Films / Séries) click & DPAD navigation
-        if (tabLive != null) tabLive.setOnClickListener(v -> switchContentType("live"));
-        if (tabVod != null) tabVod.setOnClickListener(v -> switchContentType("vod"));
-        if (tabSeries != null) tabSeries.setOnClickListener(v -> switchContentType("series"));
-
-        View.OnKeyListener tabKeyListener = (v, keyCode, event) -> {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                     focusCategoriesList();
-                    return true;
-                } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                    int id = v.getId();
-                    if (id == R.id.tab_vod && btnSync != null) {
-                        btnSync.requestFocus();
-                    } else if (id == R.id.tab_series && btnDiagnostic != null) {
-                        btnDiagnostic.requestFocus();
-                    } else if (btnCloud != null) {
-                        btnCloud.requestFocus();
-                    }
-                    return true;
-                } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v.getId() == R.id.tab_series) {
-                    focusChannelsList();
-                    return true;
                 }
+                return true;
             }
             return false;
         };
 
-        if (tabLive != null) tabLive.setOnKeyListener(tabKeyListener);
-        if (tabVod != null) tabVod.setOnKeyListener(tabKeyListener);
-        if (tabSeries != null) tabSeries.setOnKeyListener(tabKeyListener);
+        if (btnNavLive != null) btnNavLive.setOnKeyListener(navRightListener);
+        if (btnNavReplay != null) btnNavReplay.setOnKeyListener(navRightListener);
+        if (btnNavVod != null) btnNavVod.setOnKeyListener(navRightListener);
+        if (btnNavSeries != null) btnNavSeries.setOnKeyListener(navRightListener);
+        if (btnNavFavs != null) btnNavFavs.setOnKeyListener(navRightListener);
+        if (btnNavSearch != null) btnNavSearch.setOnKeyListener(navRightListener);
+        if (btnNavSettings != null) btnNavSettings.setOnKeyListener(navRightListener);
+        if (btnNavSync != null) btnNavSync.setOnKeyListener(navRightListener);
 
-        btnWatchFullscreen.setOnClickListener(v -> launchPlayerFullscreen());
-        btnToggleFav.setOnClickListener(v -> {
-            if (activeChannel != null) {
-                db.toggleFavorite(activeChannel.id);
-                activeChannel.isFav = !activeChannel.isFav;
-                updateFavButtonLabel(activeChannel.isFav);
-                channelsAdapter.notifyDataSetChanged();
+        // Mobile portrait tabs click listeners
+        if (tabLive != null) tabLive.setOnClickListener(v -> switchSection("live"));
+        if (tabVod != null) tabVod.setOnClickListener(v -> switchSection("vod"));
+        if (tabSeries != null) tabSeries.setOnClickListener(v -> switchSection("series"));
 
-                // Refresh categories to update the ⭐ Favoris count
-                List<KeoDatabase.CategoryItem> cats = db.getCategories(currentType);
-                categoriesAdapter.setItems(cats);
+        // Global Search setup
+        if (etGlobalSearch != null) {
+            etGlobalSearch.addTextChangedListener(new TextWatcher() {
+                @Override
+                public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
 
-                if (selectedCategory != null && "grp_favs".equals(selectedCategory.id)) {
-                    List<KeoDatabase.ChannelItem> favChannels = db.getFavoriteChannels();
-                    channelsAdapter.setItems(favChannels);
+                @Override
+                public void onTextChanged(CharSequence s, int start, int before, int count) {
+                    performGlobalSearch(s != null ? s.toString() : "", globalSearchFilter);
                 }
-            }
-        });
 
-        View.OnKeyListener detailKeyListener = (v, keyCode, event) -> {
-            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                    focusChannelsList();
-                    return true;
-                } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP && v.getId() == R.id.btn_watch_fullscreen) {
-                    if (btnLogin != null) {
-                        btnLogin.requestFocus();
-                        return true;
-                    }
-                }
-            }
-            return false;
+                @Override
+                public void afterTextChanged(Editable s) {}
+            });
+        }
+
+        if (btnSearchClear != null) {
+            btnSearchClear.setOnClickListener(v -> {
+                if (etGlobalSearch != null) etGlobalSearch.setText("");
+                performGlobalSearch("", globalSearchFilter);
+            });
+        }
+
+        View.OnClickListener filterListener = v -> {
+            int id = v.getId();
+            if (id == R.id.btn_search_filter_all) globalSearchFilter = "all";
+            else if (id == R.id.btn_search_filter_live) globalSearchFilter = "live";
+            else if (id == R.id.btn_search_filter_vod) globalSearchFilter = "vod";
+            else if (id == R.id.btn_search_filter_series) globalSearchFilter = "series";
+
+            updateSearchFilterTabs();
+            String q = (etGlobalSearch != null) ? etGlobalSearch.getText().toString() : "";
+            performGlobalSearch(q, globalSearchFilter);
         };
-        btnWatchFullscreen.setOnKeyListener(detailKeyListener);
-        btnToggleFav.setOnKeyListener(detailKeyListener);
 
-        // Instant search / filtering with DPAD key listener to prevent trapping focus
+        if (btnSearchFilterAll != null) btnSearchFilterAll.setOnClickListener(filterListener);
+        if (btnSearchFilterLive != null) btnSearchFilterLive.setOnClickListener(filterListener);
+        if (btnSearchFilterVod != null) btnSearchFilterVod.setOnClickListener(filterListener);
+        if (btnSearchFilterSeries != null) btnSearchFilterSeries.setOnClickListener(filterListener);
+
+        // Quick in-bouquet search
         if (etSearch != null) {
             etSearch.addTextChangedListener(new TextWatcher() {
                 @Override
@@ -311,50 +343,129 @@ public class MainActivity extends AppCompatActivity {
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                         focusCategoriesList();
                         return true;
-                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                        if (tabSeries != null) {
-                            tabSeries.requestFocus();
-                            return true;
-                        }
                     }
                 }
                 return false;
             });
         }
+
+        // Compatibility buttons
+        if (btnWatchFullscreen != null) {
+            btnWatchFullscreen.setOnClickListener(v -> launchPlayerFullscreen());
+        }
+        if (btnToggleFav != null) {
+            btnToggleFav.setOnClickListener(v -> {
+                if (activeChannel != null) {
+                    db.toggleFavorite(activeChannel.id);
+                    activeChannel.isFav = !activeChannel.isFav;
+                    updateFavButtonLabel(activeChannel.isFav);
+                    channelsAdapter.notifyDataSetChanged();
+                }
+            });
+        }
+
+        updateSidebarHighlights();
     }
 
-    private void switchContentType(String type) {
-        currentType = type;
-        updateTabStyles();
+    private int dpToPx(int dp) {
+        return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
+    }
 
-        if (etSearch != null) {
-            etSearch.setText("");
-        }
-        isSearching = false;
+    public void switchSection(String section) {
+        currentType = section;
+        updateSidebarHighlights();
 
-        if (tvBouquetsHeader != null) {
-            if ("vod".equals(type)) {
-                tvBouquetsHeader.setText("CATÉGORIES FILMS (VOD)");
-            } else if ("series".equals(type)) {
-                tvBouquetsHeader.setText("CATÉGORIES SÉRIES");
-            } else {
-                tvBouquetsHeader.setText("BOUQUETS TV EN DIRECT");
+        if ("search".equals(section)) {
+            if (panelSearch != null) panelSearch.setVisibility(View.VISIBLE);
+            if (layoutContentSplit != null) layoutContentSplit.setVisibility(View.GONE);
+            if (tvSectionTitle != null) tvSectionTitle.setText("🔍 RECHERCHE GLOBALE");
+            if (etGlobalSearch != null) {
+                etGlobalSearch.requestFocus();
             }
+            return;
+        }
+
+        if (panelSearch != null) panelSearch.setVisibility(View.GONE);
+        if (layoutContentSplit != null) layoutContentSplit.setVisibility(View.VISIBLE);
+
+        if ("replay".equals(section)) {
+            if (tvSectionTitle != null) tvSectionTitle.setText("🔄 REPLAY / RATTRAPAGE");
+            if (tvBouquetsHeader != null) tvBouquetsHeader.setText("BOUQUETS REPLAY");
+            if (tvChannelsHeader != null) tvChannelsHeader.setText("CHAÎNES AVEC REPLAY");
+        } else if ("vod".equals(section)) {
+            if (tvSectionTitle != null) tvSectionTitle.setText("🎬 FILMS VOD");
+            if (tvBouquetsHeader != null) tvBouquetsHeader.setText("CATÉGORIES FILMS");
+            if (tvChannelsHeader != null) tvChannelsHeader.setText("CATALOGUE FILMS");
+        } else if ("series".equals(section)) {
+            if (tvSectionTitle != null) tvSectionTitle.setText("🍿 SÉRIES TV");
+            if (tvBouquetsHeader != null) tvBouquetsHeader.setText("CATÉGORIES SÉRIES");
+            if (tvChannelsHeader != null) tvChannelsHeader.setText("CATALOGUE SÉRIES");
+        } else if ("favs".equals(section)) {
+            if (tvSectionTitle != null) tvSectionTitle.setText("⭐ FAVORIS");
+            if (tvBouquetsHeader != null) tvBouquetsHeader.setText("SECTIONS FAVORIS");
+            if (tvChannelsHeader != null) tvChannelsHeader.setText("VOS FAVORIS");
+        } else {
+            if (tvSectionTitle != null) tvSectionTitle.setText("📺 DIRECT TV");
+            if (tvBouquetsHeader != null) tvBouquetsHeader.setText("BOUQUETS TV");
+            if (tvChannelsHeader != null) tvChannelsHeader.setText("CHAÎNES & PROGRAMMES");
         }
 
         loadLocalData();
     }
 
-    private void updateTabStyles() {
-        if (tabLive != null) {
-            tabLive.setSelected("live".equals(currentType));
+    private void switchToSearch(String query) {
+        switchSection("search");
+        if (etGlobalSearch != null) {
+            etGlobalSearch.setText(query);
+            etGlobalSearch.setSelection(query.length());
         }
-        if (tabVod != null) {
-            tabVod.setSelected("vod".equals(currentType));
+    }
+
+    private void updateSidebarHighlights() {
+        if (btnNavLive != null) btnNavLive.setSelected("live".equals(currentType));
+        if (btnNavReplay != null) btnNavReplay.setSelected("replay".equals(currentType));
+        if (btnNavVod != null) btnNavVod.setSelected("vod".equals(currentType));
+        if (btnNavSeries != null) btnNavSeries.setSelected("series".equals(currentType));
+        if (btnNavFavs != null) btnNavFavs.setSelected("favs".equals(currentType));
+        if (btnNavSearch != null) btnNavSearch.setSelected("search".equals(currentType));
+
+        // Mobile tabs highlight
+        if (tabLive != null) tabLive.setSelected("live".equals(currentType));
+        if (tabVod != null) tabVod.setSelected("vod".equals(currentType));
+        if (tabSeries != null) tabSeries.setSelected("series".equals(currentType));
+    }
+
+    private void updateSearchFilterTabs() {
+        if (btnSearchFilterAll != null) btnSearchFilterAll.setSelected("all".equals(globalSearchFilter));
+        if (btnSearchFilterLive != null) btnSearchFilterLive.setSelected("live".equals(globalSearchFilter));
+        if (btnSearchFilterVod != null) btnSearchFilterVod.setSelected("vod".equals(globalSearchFilter));
+        if (btnSearchFilterSeries != null) btnSearchFilterSeries.setSelected("series".equals(globalSearchFilter));
+    }
+
+    private void performGlobalSearch(String query, String filter) {
+        String q = query.trim();
+        if (q.isEmpty()) {
+            if (tvSearchResultsCount != null) {
+                tvSearchResultsCount.setText("Saisissez un texte pour rechercher dans tous les catalogues.");
+            }
+            if (searchResultsAdapter != null) {
+                searchResultsAdapter.setItems(new ArrayList<>());
+            }
+            return;
         }
-        if (tabSeries != null) {
-            tabSeries.setSelected("series".equals(currentType));
-        }
+
+        new Thread(() -> {
+            String streamTypeFilter = "all".equals(filter) ? null : filter;
+            final List<KeoDatabase.ChannelItem> results = db.searchChannels(q, streamTypeFilter);
+            runOnUiThread(() -> {
+                if (tvSearchResultsCount != null) {
+                    tvSearchResultsCount.setText(results.size() + " résultat(s) trouvé(s) pour '" + q + "'");
+                }
+                if (searchResultsAdapter != null) {
+                    searchResultsAdapter.setItems(results);
+                }
+            });
+        }).start();
     }
 
     private void updateFavButtonLabel(boolean isFav) {
@@ -379,14 +490,18 @@ public class MainActivity extends AppCompatActivity {
             }
         } else {
             isSearching = true;
-            List<KeoDatabase.ChannelItem> results = db.searchChannels(q, currentType);
-            if (tvChannelsHeader != null) {
-                tvChannelsHeader.setText("RÉSULTATS (" + results.size() + ")");
-            }
-            channelsAdapter.setItems(results);
-            if (!results.isEmpty()) {
-                selectChannel(results.get(0));
-            }
+            new Thread(() -> {
+                final List<KeoDatabase.ChannelItem> results = db.searchChannels(q, "replay".equals(currentType) ? "live" : currentType);
+                runOnUiThread(() -> {
+                    if (tvChannelsHeader != null) {
+                        tvChannelsHeader.setText("RÉSULTATS (" + results.size() + ")");
+                    }
+                    channelsAdapter.setItems(results);
+                    if (!results.isEmpty()) {
+                        activeChannel = results.get(0);
+                    }
+                });
+            }).start();
         }
     }
 
@@ -406,6 +521,12 @@ public class MainActivity extends AppCompatActivity {
         recyclerChannels.setLayoutManager(new LinearLayoutManager(this));
         channelsAdapter = new ChannelsAdapter();
         recyclerChannels.setAdapter(channelsAdapter);
+
+        if (recyclerSearchResults != null) {
+            recyclerSearchResults.setLayoutManager(new LinearLayoutManager(this));
+            searchResultsAdapter = new ChannelsAdapter();
+            recyclerSearchResults.setAdapter(searchResultsAdapter);
+        }
     }
 
     private void focusRecyclerViewItem(RecyclerView rv, int position) {
@@ -434,6 +555,15 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void focusActiveSidebarButton() {
+        if ("replay".equals(currentType) && btnNavReplay != null) btnNavReplay.requestFocus();
+        else if ("vod".equals(currentType) && btnNavVod != null) btnNavVod.requestFocus();
+        else if ("series".equals(currentType) && btnNavSeries != null) btnNavSeries.requestFocus();
+        else if ("favs".equals(currentType) && btnNavFavs != null) btnNavFavs.requestFocus();
+        else if ("search".equals(currentType) && btnNavSearch != null) btnNavSearch.requestFocus();
+        else if (btnNavLive != null) btnNavLive.requestFocus();
+    }
+
     private void focusCategoriesList() {
         if (recyclerCategories == null || categoriesAdapter == null || categoriesAdapter.getItemCount() == 0) return;
         int target = Math.max(0, Math.min(categoriesAdapter.getSelectedPos(), categoriesAdapter.getItemCount() - 1));
@@ -459,118 +589,99 @@ public class MainActivity extends AppCompatActivity {
     private void selectCategoryDebounced(KeoDatabase.CategoryItem cat) {
         pendingCategoryToLoad = cat;
         mainHandler.removeCallbacks(categoryDebounceRunnable);
-        mainHandler.postDelayed(categoryDebounceRunnable, 120);
+        mainHandler.postDelayed(categoryDebounceRunnable, 140);
     }
 
     private void loadLocalData() {
-        try {
-            updateTabStyles();
-            List<KeoDatabase.CategoryItem> cats = db.getCategories(currentType);
-            categoriesAdapter.setItems(cats);
-
-            if (!cats.isEmpty()) {
-                selectCategory(cats.get(0));
-                // Set default focus on the first category item on TV
-                recyclerCategories.postDelayed(this::focusCategoriesList, 150);
+        new Thread(() -> {
+            final List<KeoDatabase.CategoryItem> cats;
+            if ("replay".equals(currentType)) {
+                cats = db.getReplayCategories();
+            } else if ("favs".equals(currentType)) {
+                cats = new ArrayList<>();
+                int favCount = db.getFavoriteCount();
+                cats.add(new KeoDatabase.CategoryItem("grp_favs", "⭐ Tous les favoris", "favs", favCount, 0));
             } else {
-                tvDetailName.setText("Aucun contenu dans cette section. Lancez une synchronisation.");
-                if (tvDetailGroup != null) tvDetailGroup.setText("-");
-                if (tvDetailResolution != null) tvDetailResolution.setText("-");
-                if (tvDetailEpg != null) tvDetailEpg.setText("-");
-                if (tabLive != null) tabLive.requestFocus();
+                cats = db.getCategories(currentType);
             }
-        } catch (Throwable t) {
-            Log.e(TAG, "Error loading local data", t);
-        }
+
+            runOnUiThread(() -> {
+                categoriesAdapter.setItems(cats);
+                if (!cats.isEmpty()) {
+                    selectCategory(cats.get(0));
+                } else {
+                    channelsAdapter.setItems(new ArrayList<>());
+                    if (tvChannelsHeader != null) {
+                        tvChannelsHeader.setText("Aucun élément disponible dans cette section.");
+                    }
+                }
+            });
+        }).start();
     }
 
     private void selectCategory(KeoDatabase.CategoryItem cat) {
-        if (cat == null) return;
         selectedCategory = cat;
-        if (tvChannelsHeader != null && !isSearching) {
-            tvChannelsHeader.setText(cat.name.toUpperCase());
-        }
+        new Thread(() -> {
+            final List<KeoDatabase.ChannelItem> channels;
+            if ("replay".equals(currentType)) {
+                channels = db.getReplayChannelsByGroup(cat.id);
+            } else {
+                channels = db.getChannelsByGroup(cat.id);
+            }
 
-        List<KeoDatabase.ChannelItem> channels = db.getChannelsByGroup(cat.id);
-        channelsAdapter.setItems(channels);
-
-        if (!channels.isEmpty()) {
-            selectChannel(channels.get(0));
-        } else {
-            activeChannel = null;
-            tvDetailName.setText("Aucun élément dans cette catégorie");
-            if (tvDetailGroup != null) tvDetailGroup.setText(cat.name);
-            if (tvDetailResolution != null) tvDetailResolution.setText("-");
-            if (tvDetailEpg != null) tvDetailEpg.setText("-");
-        }
+            runOnUiThread(() -> {
+                channelsAdapter.setItems(channels);
+                if (tvChannelsHeader != null) {
+                    tvChannelsHeader.setText(cat.name.toUpperCase() + " (" + channels.size() + ")");
+                }
+                if (!channels.isEmpty()) {
+                    selectChannel(channels.get(0));
+                }
+            });
+        }).start();
     }
 
     private void selectChannel(KeoDatabase.ChannelItem ch) {
-        if (ch == null) return;
         activeChannel = ch;
-        tvDetailName.setText(ch.name);
+        if (ch == null) return;
+
+        if (tvDetailName != null) tvDetailName.setText(ch.name);
         if (tvDetailGroup != null) {
             tvDetailGroup.setText(selectedCategory != null ? selectedCategory.name : "Direct TV");
         }
         if (tvDetailResolution != null) {
             tvDetailResolution.setText(ch.resolution != null ? ch.resolution : "HD");
         }
+        updateFavButtonLabel(ch.isFav);
 
-        // Show replay button if catchup is available on this channel
         if (btnReplay != null) {
             btnReplay.setVisibility(ch.tvArchive == 1 ? View.VISIBLE : View.GONE);
         }
 
-        if (tvDetailEpg != null) {
-            if ("vod".equals(ch.streamType)) {
-                tvDetailEpg.setText("🎬 Film VOD - Lecture complète à la demande\nQualité : " + ch.resolution);
-            } else if ("series".equals(ch.streamType)) {
-                tvDetailEpg.setText("🍿 Série TV - Cliquez pour voir les épisodes et saisons");
-            } else {
-                String cached = epgCurrentTitleCache.get(ch.id);
-                if (cached != null) {
-                    tvDetailEpg.setText("🔴 " + cached);
-                } else {
-                    tvDetailEpg.setText("Direct TV (" + ch.resolution + ")\nRecherche du guide EPG...");
-                }
-                fetchEpgForChannel(ch);
-            }
+        // Asynchronously fetch short EPG for live channel
+        if ("live".equals(ch.streamType) || "replay".equals(ch.streamType)) {
+            fetchEpgForChannel(ch);
         }
-        updateFavButtonLabel(ch.isFav);
     }
 
     private void fetchEpgForChannel(final KeoDatabase.ChannelItem ch) {
-        if (ch == null || !"live".equals(ch.streamType) || ch.streamId == null || ch.streamId.isEmpty()) {
-            return;
-        }
-
-        final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
+        if (ch == null || ch.streamId == null || ch.streamId.isEmpty()) return;
+        KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
         if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) return;
 
-        XtreamClient.fetchShortEpg(this, pl.serverUrl, pl.username, pl.password, ch.streamId, new XtreamClient.EpgCallback() {
+        xtreamClient.fetchShortEpg(pl.serverUrl, pl.username, pl.password, ch.streamId, 3, new XtreamClient.EpgCallback() {
             @Override
             public void onSuccess(List<XtreamClient.EpgProgram> programs, XtreamClient.EpgProgram current, XtreamClient.EpgProgram next) {
                 if (isFinishing() || isDestroyed()) return;
-                if (current != null) {
-                    epgCurrentTitleCache.put(ch.id, current.getFormattedTime() + " • " + current.title);
-                    if (activeChannel != null && activeChannel.id.equals(ch.id) && tvDetailEpg != null) {
-                        StringBuilder sb = new StringBuilder();
-                        sb.append("🔴 EN CE MOMENT (").append(current.getFormattedTime()).append(")\n");
-                        sb.append(current.title);
-                        if (current.desc != null && !current.desc.trim().isEmpty()) {
-                            sb.append("\n\n").append(current.desc.trim());
-                        }
-                        if (next != null) {
-                            sb.append("\n\n⏭️ À SUIVRE (").append(next.getFormattedTime()).append(")\n").append(next.title);
-                        }
-                        tvDetailEpg.setText(sb.toString());
-                    }
+                if (current != null && current.title != null && !current.title.isEmpty()) {
+                    epgCurrentTitleCache.put(ch.id, current.title);
+                    channelsAdapter.notifyItemChangedById(ch.id);
                 }
             }
 
             @Override
             public void onError(String error) {
-                // Ignore silent EPG error
+                // Silently ignore background EPG failures
             }
         });
     }
@@ -581,13 +692,18 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        if ("vod".equals(activeChannel.streamType)) {
+            showMovieDetailDialog(activeChannel);
+            return;
+        }
+
         if ("series".equals(activeChannel.streamType)) {
-            openSeriesEpisodes(activeChannel);
+            showSeriesDetailDialog(activeChannel);
             return;
         }
 
         if (activeChannel.streamUrl == null || activeChannel.streamUrl.isEmpty()) {
-            Toast.makeText(this, "Flux vidéo non disponible pour ce programme", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Flux vidéo non disponible pour cette chaîne", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -615,185 +731,398 @@ public class MainActivity extends AppCompatActivity {
         startActivity(intent);
     }
 
-    private void openSeriesEpisodes(final KeoDatabase.ChannelItem seriesItem) {
-        if (seriesItem == null) return;
-        final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
-        if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) {
-            Toast.makeText(this, "Veuillez d'abord configurer votre compte IPTV", Toast.LENGTH_LONG).show();
-            return;
-        }
+    // --- FICHE FILM (VOD MOVIE DETAIL DIALOG) ---
+    private void showMovieDetailDialog(final KeoDatabase.ChannelItem movieItem) {
+        if (isFinishing() || isDestroyed() || movieItem == null) return;
 
-        final String rawId = seriesItem.id.replace("xtream_series_", "");
-        Toast.makeText(this, "Chargement des épisodes de " + seriesItem.name + "...", Toast.LENGTH_SHORT).show();
+        try {
+            final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
+            View view = LayoutInflater.from(this).inflate(R.layout.dialog_movie_detail, null);
 
-        xtreamClient.fetchSeriesInfo(pl.serverUrl, pl.username, pl.password, rawId, new XtreamClient.SeriesInfoCallback() {
-            @Override
-            public void onSuccess(JsonObject seriesDetails) {
-                if (isFinishing() || isDestroyed()) return;
+            TextView tvTitle = view.findViewById(R.id.tv_movie_title);
+            TextView tvRating = view.findViewById(R.id.tv_movie_rating);
+            TextView tvYear = view.findViewById(R.id.tv_movie_year);
+            TextView tvDuration = view.findViewById(R.id.tv_movie_duration);
+            TextView tvGenre = view.findViewById(R.id.tv_movie_genre);
+            ImageView ivPoster = view.findViewById(R.id.iv_movie_poster);
+            TextView tvPlot = view.findViewById(R.id.tv_movie_plot);
+            TextView tvDirector = view.findViewById(R.id.tv_movie_director);
+            TextView tvCast = view.findViewById(R.id.tv_movie_cast);
+            Button btnSearchActor = view.findViewById(R.id.btn_search_actor);
+            Button btnPlay = view.findViewById(R.id.btn_play_movie);
+            Button btnFav = view.findViewById(R.id.btn_fav_movie);
+            Button btnClose = view.findViewById(R.id.btn_close_movie);
 
-                if (!seriesDetails.has("episodes") || !seriesDetails.get("episodes").isJsonObject()) {
-                    Toast.makeText(MainActivity.this, "Aucun épisode trouvé pour cette série.", Toast.LENGTH_LONG).show();
-                    return;
-                }
-
-                JsonObject epObj = seriesDetails.getAsJsonObject("episodes");
-                final List<String> displayTitles = new ArrayList<>();
-                final List<String> streamUrls = new ArrayList<>();
-
-                String server = pl.serverUrl.trim().replaceAll("/+$", "");
-                if (!server.startsWith("http://") && !server.startsWith("https://")) server = "http://" + server;
-                String user = pl.username.trim();
-                String pass = pl.password.trim();
-
-                for (java.util.Map.Entry<String, JsonElement> seasonEntry : epObj.entrySet()) {
-                    String seasonKey = seasonEntry.getKey();
-                    if (!seasonEntry.getValue().isJsonArray()) continue;
-
-                    JsonArray eps = seasonEntry.getValue().getAsJsonArray();
-                    for (int i = 0; i < eps.size(); i++) {
-                        if (!eps.get(i).isJsonObject()) continue;
-                        JsonObject ep = eps.get(i).getAsJsonObject();
-                        String epId = XtreamClient.getOptString(ep, "id", "");
-                        int epNum = XtreamClient.getOptInt(ep, "episode_num", i + 1);
-                        String epTitle = XtreamClient.getOptString(ep, "title", "Épisode " + epNum);
-                        String ext = XtreamClient.getOptString(ep, "container_extension", "mkv");
-                        if (ext.isEmpty()) ext = "mkv";
-
-                        String url = server + "/series/" + user + "/" + pass + "/" + epId + "." + ext;
-                        String label = "S" + seasonKey + " E" + epNum + " - " + epTitle;
-
-                        displayTitles.add(label);
-                        streamUrls.add(url);
-                    }
-                }
-
-                if (displayTitles.isEmpty()) {
-                    Toast.makeText(MainActivity.this, "Aucun épisode disponible pour cette série.", Toast.LENGTH_LONG).show();
-                    return;
-                }
-
-                CharSequence[] items = displayTitles.toArray(new CharSequence[0]);
-                new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("🍿 " + seriesItem.name + " (" + displayTitles.size() + " épisodes)")
-                        .setItems(items, (dialog, which) -> {
-                            PlayerActivity.pendingUrls = streamUrls;
-                            PlayerActivity.pendingTitles = displayTitles;
-                            PlayerActivity.pendingIndex = which;
-                            PlayerActivity.pendingIsLive = false;
-                            PlayerActivity.pendingSeriesId = rawId;
-
-                            Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
-                            startActivity(intent);
-                        })
-                        .setNegativeButton("Fermer", null)
-                        .show();
+            tvTitle.setText(movieItem.name);
+            if (movieItem.logo != null && !movieItem.logo.isEmpty()) {
+                ImageLoader.load(this, movieItem.logo, ivPoster);
             }
 
-            @Override
-            public void onError(String error) {
-                if (isFinishing() || isDestroyed()) return;
-                Toast.makeText(MainActivity.this, "Erreur chargement série : " + error, Toast.LENGTH_LONG).show();
-            }
-        });
-    }
+            final AlertDialog dialog = new AlertDialog.Builder(this)
+                    .setView(view)
+                    .create();
 
-    private void triggerSync() {
-        KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
-        if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) {
-            showLoginDialog();
-            return;
-        }
-
-        tvStatusBadge.setText("⏳ Synchro...");
-        tvStatusBadge.setBackgroundColor(0xFF854D0E); // amber
-
-        xtreamClient.syncPlaylist(pl.serverUrl, pl.username, pl.password, db, new XtreamClient.SyncCallback() {
-            @Override
-            public void onProgress(String message) {
-                tvStatusBadge.setText("⏳ " + message);
+            if (dialog.getWindow() != null) {
+                dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             }
 
-            @Override
-            public void onSuccess(int liveCount, int vodCount, int seriesCount) {
-                tvStatusBadge.setText("✅ Prêt");
-                tvStatusBadge.setBackgroundColor(0xFF132E27); // green
-                String msg = "Synchronisation réussie !\n"
-                        + "• Direct TV : " + liveCount + " chaînes\n"
-                        + "• Films (VOD) : " + vodCount + " films\n"
-                        + "• Séries : " + seriesCount + " séries";
-                Toast.makeText(MainActivity.this, msg, Toast.LENGTH_LONG).show();
-                updateHeaderPlaylistInfo(db.getActivePlaylist());
-                loadLocalData();
-            }
+            final String[] firstActor = new String[]{""};
+            final String[] streamUrlHolder = new String[]{movieItem.streamUrl};
 
-            @Override
-            public void onError(String error) {
-                tvStatusBadge.setText("⚠️ Erreur");
-                tvStatusBadge.setBackgroundColor(0xFF7F1D1D); // red
-                if (isFinishing() || isDestroyed()) return;
+            if (pl != null && pl.serverUrl != null && !pl.serverUrl.isEmpty()) {
+                xtreamClient.fetchVodInfo(pl.serverUrl, pl.username, pl.password, movieItem.id, new XtreamClient.VodInfoCallback() {
+                    @Override
+                    public void onSuccess(JsonObject info, JsonObject movieData) {
+                        if (isFinishing() || isDestroyed()) return;
 
-                try {
-                    AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this)
-                            .setTitle("⚠️ Erreur de synchronisation IPTV")
-                            .setMessage("Impossible de synchroniser avec le serveur IPTV :\n\n" + error + "\n\n💡 Vérifiez l'adresse de votre serveur (ex: http://domaine:port), votre identifiant et mot de passe.")
-                            .setPositiveButton("Vérifier le compte", (dialog, which) -> showLoginDialog())
-                            .setNegativeButton("Fermer", null);
-
-                    if (error.contains("no column") || error.contains("SQLITE_ERROR")) {
-                        builder.setNeutralButton("Réparer la Base", (dialog, which) -> {
-                            db.purgeCache(true);
-                            triggerSync();
-                        });
+                        if (info.has("name") && !info.get("name").isJsonNull()) {
+                            tvTitle.setText(info.get("name").getAsString());
+                        }
+                        if (info.has("rating") && !info.get("rating").isJsonNull()) {
+                            tvRating.setText("⭐ " + info.get("rating").getAsString());
+                        }
+                        if (info.has("releasedate") && !info.get("releasedate").isJsonNull()) {
+                            tvYear.setText(info.get("releasedate").getAsString());
+                        } else if (info.has("year") && !info.get("year").isJsonNull()) {
+                            tvYear.setText(info.get("year").getAsString());
+                        }
+                        if (info.has("duration_secs") && !info.get("duration_secs").isJsonNull()) {
+                            try {
+                                int secs = Integer.parseInt(info.get("duration_secs").getAsString());
+                                int hours = secs / 3600;
+                                int mins = (secs % 3600) / 60;
+                                tvDuration.setText(" • " + (hours > 0 ? hours + "h " : "") + mins + "m");
+                            } catch (Exception ignored) {}
+                        }
+                        if (info.has("genre") && !info.get("genre").isJsonNull()) {
+                            tvGenre.setText(" • " + info.get("genre").getAsString());
+                        }
+                        if (info.has("plot") && !info.get("plot").isJsonNull()) {
+                            tvPlot.setText(info.get("plot").getAsString());
+                        }
+                        if (info.has("director") && !info.get("director").isJsonNull()) {
+                            tvDirector.setText("Réalisateur : " + info.get("director").getAsString());
+                        }
+                        if (info.has("cast") && !info.get("cast").isJsonNull()) {
+                            String castStr = info.get("cast").getAsString();
+                            tvCast.setText("Acteurs : " + castStr);
+                            if (castStr.contains(",")) {
+                                firstActor[0] = castStr.split(",")[0].trim();
+                            } else {
+                                firstActor[0] = castStr.trim();
+                            }
+                        }
+                        if (info.has("movie_image") && !info.get("movie_image").isJsonNull()) {
+                            ImageLoader.load(MainActivity.this, info.get("movie_image").getAsString(), ivPoster);
+                        }
+                        if (movieData.has("container_extension") && !movieData.get("container_extension").isJsonNull()) {
+                            String ext = movieData.get("container_extension").getAsString();
+                            String rawId = movieItem.id.replace("xtream_vod_", "");
+                            streamUrlHolder[0] = pl.serverUrl.replaceAll("/+$", "") + "/movie/" + pl.username + "/" + pl.password + "/" + rawId + "." + ext;
+                        }
                     }
 
-                    builder.show();
-                } catch (Throwable t) {
-                    Log.e(TAG, "Failed to show sync error dialog", t);
-                }
+                    @Override
+                    public void onError(String error) {
+                        Log.e(TAG, "Vod info error: " + error);
+                    }
+                });
             }
-        });
+
+            btnPlay.setOnClickListener(v -> {
+                dialog.dismiss();
+                List<String> urls = new ArrayList<>();
+                List<String> titles = new ArrayList<>();
+                urls.add(streamUrlHolder[0]);
+                titles.add(tvTitle.getText().toString());
+                PlayerActivity.pendingUrls = urls;
+                PlayerActivity.pendingTitles = titles;
+                PlayerActivity.pendingIndex = 0;
+                PlayerActivity.pendingIsLive = false;
+                PlayerActivity.pendingSeriesId = null;
+                startActivity(new Intent(MainActivity.this, PlayerActivity.class));
+            });
+
+            btnFav.setText(movieItem.isFav ? "★ Retirer favori" : "⭐ Favori");
+            btnFav.setOnClickListener(v -> {
+                db.toggleFavorite(movieItem.id);
+                movieItem.isFav = !movieItem.isFav;
+                btnFav.setText(movieItem.isFav ? "★ Retirer favori" : "⭐ Favori");
+                Toast.makeText(MainActivity.this, movieItem.isFav ? "Ajouté aux favoris" : "Retiré des favoris", Toast.LENGTH_SHORT).show();
+            });
+
+            btnSearchActor.setOnClickListener(v -> {
+                dialog.dismiss();
+                if (!firstActor[0].isEmpty()) {
+                    switchToSearch(firstActor[0]);
+                } else {
+                    switchToSearch(tvTitle.getText().toString());
+                }
+            });
+
+            btnClose.setOnClickListener(v -> dialog.dismiss());
+            dialog.show();
+            btnPlay.requestFocus();
+
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to show movie detail dialog", t);
+        }
     }
 
-    private void updateHeaderPlaylistInfo(KeoDatabase.PlaylistItem pl) {
-        if (pl == null) return;
-        tvHeaderSyncInfo.setText(pl.name + " (" + pl.serverUrl + ") | Exp: " + pl.expDate + " | Synchro: " + pl.lastSyncAt);
+    // --- FICHE SÉRIE (SERIES DETAIL DIALOG WITH SEASONS & EPISODES) ---
+    private void showSeriesDetailDialog(final KeoDatabase.ChannelItem seriesItem) {
+        if (isFinishing() || isDestroyed() || seriesItem == null) return;
+
+        try {
+            final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
+            View view = LayoutInflater.from(this).inflate(R.layout.dialog_series_detail, null);
+
+            TextView tvTitle = view.findViewById(R.id.tv_series_title);
+            TextView tvRating = view.findViewById(R.id.tv_series_rating);
+            TextView tvMeta = view.findViewById(R.id.tv_series_meta);
+            ImageView ivCover = view.findViewById(R.id.iv_series_cover);
+            TextView tvPlot = view.findViewById(R.id.tv_series_plot);
+            LinearLayout layoutSeasons = view.findViewById(R.id.layout_seasons);
+            RecyclerView recyclerEpisodes = view.findViewById(R.id.recycler_episodes);
+            Button btnClose = view.findViewById(R.id.btn_close_series);
+
+            recyclerEpisodes.setLayoutManager(new LinearLayoutManager(this));
+
+            tvTitle.setText(seriesItem.name);
+            if (seriesItem.logo != null && !seriesItem.logo.isEmpty()) {
+                ImageLoader.load(this, seriesItem.logo, ivCover);
+            }
+
+            final AlertDialog dialog = new AlertDialog.Builder(this)
+                    .setView(view)
+                    .create();
+
+            if (dialog.getWindow() != null) {
+                dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
+            }
+
+            if (pl != null && pl.serverUrl != null && !pl.serverUrl.isEmpty()) {
+                final String rawId = seriesItem.id.replace("xtream_series_", "");
+                xtreamClient.fetchSeriesInfo(pl.serverUrl, pl.username, pl.password, rawId, new XtreamClient.SeriesInfoCallback() {
+                    @Override
+                    public void onSuccess(JsonObject seriesDetails) {
+                        if (isFinishing() || isDestroyed()) return;
+
+                        JsonObject info = seriesDetails.has("info") && seriesDetails.get("info").isJsonObject()
+                                ? seriesDetails.getAsJsonObject("info") : new JsonObject();
+
+                        if (info.has("name") && !info.get("name").isJsonNull()) {
+                            tvTitle.setText(info.get("name").getAsString());
+                        }
+                        if (info.has("rating") && !info.get("rating").isJsonNull()) {
+                            tvRating.setText("⭐ " + info.get("rating").getAsString());
+                        }
+                        if (info.has("plot") && !info.get("plot").isJsonNull()) {
+                            tvPlot.setText(info.get("plot").getAsString());
+                        }
+                        if (info.has("cover") && !info.get("cover").isJsonNull()) {
+                            ImageLoader.load(MainActivity.this, info.get("cover").getAsString(), ivCover);
+                        }
+
+                        JsonObject episodesObj = seriesDetails.has("episodes") && seriesDetails.get("episodes").isJsonObject()
+                                ? seriesDetails.getAsJsonObject("episodes") : new JsonObject();
+
+                        layoutSeasons.removeAllViews();
+                        List<String> seasonKeys = new ArrayList<>(episodesObj.keySet());
+
+                        if (seasonKeys.isEmpty()) {
+                            tvPlot.setText("Aucun épisode disponible pour cette série.");
+                            return;
+                        }
+
+                        final Button[] seasonButtons = new Button[seasonKeys.size()];
+                        for (int s = 0; s < seasonKeys.size(); s++) {
+                            final int sIdx = s;
+                            final String seasonKey = seasonKeys.get(s);
+                            Button btnSeason = new Button(MainActivity.this);
+                            btnSeason.setText("Saison " + seasonKey);
+                            btnSeason.setTextSize(11);
+                            btnSeason.setTextColor(0xFFFFFFFF);
+                            btnSeason.setBackgroundResource(R.drawable.bg_tab_selector);
+                            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.WRAP_CONTENT, dpToPx(34));
+                            lp.setMarginEnd(dpToPx(8));
+                            btnSeason.setLayoutParams(lp);
+                            btnSeason.setFocusable(true);
+                            seasonButtons[s] = btnSeason;
+
+                            btnSeason.setOnClickListener(v -> {
+                                for (Button b : seasonButtons) if (b != null) b.setSelected(false);
+                                btnSeason.setSelected(true);
+                                loadEpisodesForSeason(episodesObj.getAsJsonArray(seasonKey), recyclerEpisodes, dialog, seriesItem.name, pl, rawId);
+                            });
+
+                            layoutSeasons.addView(btnSeason);
+                        }
+
+                        // Select first season by default
+                        if (seasonButtons[0] != null) {
+                            seasonButtons[0].setSelected(true);
+                            loadEpisodesForSeason(episodesObj.getAsJsonArray(seasonKeys.get(0)), recyclerEpisodes, dialog, seriesItem.name, pl, rawId);
+                        }
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        Toast.makeText(MainActivity.this, "Erreur épisodes : " + error, Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+
+            btnClose.setOnClickListener(v -> dialog.dismiss());
+            dialog.show();
+
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to show series detail dialog", t);
+        }
     }
 
+    private void loadEpisodesForSeason(JsonArray episodes, RecyclerView recycler, AlertDialog dialog, String seriesName, KeoDatabase.PlaylistItem pl, String seriesId) {
+        if (episodes == null || episodes.size() == 0) return;
+
+        final List<EpisodeItem> list = new ArrayList<>();
+        final List<String> streamUrls = new ArrayList<>();
+        final List<String> displayTitles = new ArrayList<>();
+
+        String server = pl.serverUrl.trim().replaceAll("/+$", "");
+        if (!server.startsWith("http://") && !server.startsWith("https://")) server = "http://" + server;
+        String user = pl.username.trim();
+        String pass = pl.password.trim();
+
+        for (int i = 0; i < episodes.size(); i++) {
+            if (!episodes.get(i).isJsonObject()) continue;
+            JsonObject ep = episodes.get(i).getAsJsonObject();
+            String epId = XtreamClient.getOptString(ep, "id", "");
+            int epNum = XtreamClient.getOptInt(ep, "episode_num", i + 1);
+            String epTitle = XtreamClient.getOptString(ep, "title", "Épisode " + epNum);
+            String ext = XtreamClient.getOptString(ep, "container_extension", "mkv");
+            if (ext.isEmpty()) ext = "mkv";
+
+            JsonObject info = ep.has("info") && ep.get("info").isJsonObject() ? ep.getAsJsonObject("info") : new JsonObject();
+            String plot = XtreamClient.getOptString(info, "plot", "");
+            String duration = XtreamClient.getOptString(info, "duration", "");
+
+            String streamUrl = server + "/series/" + user + "/" + pass + "/" + epId + "." + ext;
+            streamUrls.add(streamUrl);
+            displayTitles.add(seriesName + " - E" + epNum + " - " + epTitle);
+
+            EpisodeItem item = new EpisodeItem();
+            item.num = epNum;
+            item.title = epTitle;
+            item.plot = plot;
+            item.duration = duration;
+            item.url = streamUrl;
+            list.add(item);
+        }
+
+        recycler.setAdapter(new EpisodesAdapter(list, (clickedItem, index) -> {
+            dialog.dismiss();
+            PlayerActivity.pendingUrls = streamUrls;
+            PlayerActivity.pendingTitles = displayTitles;
+            PlayerActivity.pendingIndex = index;
+            PlayerActivity.pendingIsLive = false;
+            PlayerActivity.pendingSeriesId = seriesId;
+
+            Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
+            startActivity(intent);
+        }));
+    }
+
+    private static class EpisodeItem {
+        int num;
+        String title;
+        String plot;
+        String duration;
+        String url;
+    }
+
+    private interface OnEpisodeClickListener {
+        void onEpisodeClick(EpisodeItem item, int index);
+    }
+
+    private class EpisodesAdapter extends RecyclerView.Adapter<EpisodesAdapter.ViewHolder> {
+        private final List<EpisodeItem> episodes;
+        private final OnEpisodeClickListener listener;
+
+        EpisodesAdapter(List<EpisodeItem> episodes, OnEpisodeClickListener listener) {
+            this.episodes = episodes;
+            this.listener = listener;
+        }
+
+        @NonNull
+        @Override
+        public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_series_episode, parent, false);
+            return new ViewHolder(v);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
+            EpisodeItem item = episodes.get(position);
+            holder.tvNum.setText("E" + item.num);
+            holder.tvTitle.setText(item.title);
+            holder.tvPlot.setText(item.plot != null && !item.plot.isEmpty() ? item.plot : "Épisode de la série.");
+            holder.tvDuration.setText(item.duration != null && !item.duration.isEmpty() ? item.duration : "");
+
+            holder.itemView.setOnClickListener(v -> {
+                int pos = holder.getBindingAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION && listener != null) {
+                    listener.onEpisodeClick(item, pos);
+                }
+            });
+        }
+
+        @Override
+        public int getItemCount() {
+            return episodes.size();
+        }
+
+        class ViewHolder extends RecyclerView.ViewHolder {
+            TextView tvNum, tvTitle, tvPlot, tvDuration;
+            ViewHolder(View v) {
+                super(v);
+                tvNum = v.findViewById(R.id.tv_episode_num);
+                tvTitle = v.findViewById(R.id.tv_episode_title);
+                tvPlot = v.findViewById(R.id.tv_episode_plot);
+                tvDuration = v.findViewById(R.id.tv_episode_duration);
+            }
+        }
+    }
+
+    // --- REPLAY & CATCHUP DIALOG ---
     private void showCatchupDialog(final KeoDatabase.ChannelItem ch) {
         if (ch == null || isFinishing() || isDestroyed()) return;
         final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
         if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) {
-            Toast.makeText(this, "Compte IPTV non configuré", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Compte non configuré", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        Toast.makeText(this, "Chargement du Replay pour " + ch.name + "...", Toast.LENGTH_SHORT).show();
-
-        XtreamClient.fetchCatchupPrograms(this, pl.serverUrl, pl.username, pl.password, ch.streamId, new XtreamClient.CatchupCallback() {
+        Toast.makeText(this, "Chargement des programmes en Replay...", Toast.LENGTH_SHORT).show();
+        xtreamClient.fetchCatchupPrograms(pl.serverUrl, pl.username, pl.password, ch.streamId, 3, new XtreamClient.CatchupCallback() {
             @Override
             public void onSuccess(List<XtreamClient.EpgProgram> pastPrograms) {
                 if (isFinishing() || isDestroyed()) return;
-                if (pastPrograms == null || pastPrograms.isEmpty()) {
-                    new AlertDialog.Builder(MainActivity.this)
-                            .setTitle("🔄 Replay - " + ch.name)
-                            .setMessage("Aucun enregistrement disponible pour cette chaîne sur le serveur IPTV.\n\nAssurez-vous que l'archive est activée chez votre fournisseur pour cette chaîne (tv_archive = 1).")
-                            .setPositiveButton("Fermer", null)
-                            .show();
+                if (pastPrograms.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Aucun programme en Replay disponible pour cette chaîne.", Toast.LENGTH_LONG).show();
                     return;
                 }
 
-                String[] titles = new String[pastPrograms.size()];
+                String[] items = new String[pastPrograms.size()];
                 for (int i = 0; i < pastPrograms.size(); i++) {
                     XtreamClient.EpgProgram p = pastPrograms.get(i);
-                    String timeLabel = (p.start != null && p.start.length() >= 16) ? p.start.substring(5, 16) : "";
-                    titles[i] = (timeLabel.isEmpty() ? "" : "[" + timeLabel + "] ") + p.title + " (" + (p.durationMinutes > 0 ? p.durationMinutes : 60) + " min)";
+                    items[i] = p.getFormattedTime() + " - " + p.title;
                 }
 
                 new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("🔄 Replay : " + ch.name + " (" + pastPrograms.size() + " émissions disponibles)")
-                        .setItems(titles, (d, which) -> {
-                            XtreamClient.EpgProgram prog = pastPrograms.get(which);
-                            playCatchupStream(ch, prog, pl);
+                        .setTitle("🔄 Replay : " + ch.name)
+                        .setItems(items, (dialog, which) -> {
+                            playCatchupStream(ch, pastPrograms.get(which), pl);
                         })
                         .setNegativeButton("Fermer", null)
                         .show();
@@ -802,35 +1131,32 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onError(String error) {
                 if (isFinishing() || isDestroyed()) return;
-                Toast.makeText(MainActivity.this, "Erreur chargement Replay : " + error, Toast.LENGTH_LONG).show();
+                Toast.makeText(MainActivity.this, "Erreur Replay : " + error, Toast.LENGTH_LONG).show();
             }
         });
     }
 
     private void playCatchupStream(KeoDatabase.ChannelItem ch, XtreamClient.EpgProgram prog, KeoDatabase.PlaylistItem pl) {
         try {
-            String server = pl.serverUrl.replaceAll("/+$", "");
-            String encUser = URLEncoder.encode(pl.username != null ? pl.username : "", "UTF-8");
-            String encPass = URLEncoder.encode(pl.password != null ? pl.password : "", "UTF-8");
+            String server = pl.serverUrl.trim().replaceAll("/+$", "");
+            if (!server.startsWith("http://") && !server.startsWith("https://")) server = "http://" + server;
+            String user = pl.username.trim();
+            String pass = pl.password.trim();
 
-            String startFormatted;
-            if (prog.start != null && prog.start.length() >= 16) {
-                startFormatted = prog.start.substring(0, 10) + ":" + prog.start.substring(11, 13) + "-" + prog.start.substring(14, 16);
-            } else {
-                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
-                startFormatted = sdf.format(new Date(prog.startTimestamp > 0 ? prog.startTimestamp * 1000L : System.currentTimeMillis()));
-            }
+            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
+            String startFormatted = sdf.format(new Date(prog.startMs));
+            long durationMins = (prog.stopMs - prog.startMs) / (60 * 1000);
+            if (durationMins <= 0) durationMins = 60;
 
-            int duration = prog.durationMinutes > 0 ? prog.durationMinutes : 60;
-
-            String timeshiftUrl = server + "/timeshift/" + encUser + "/" + encPass + "/" + duration + "/" + startFormatted + "/" + ch.streamId + ".m3u8";
-            String fallbackUrl = server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + ch.streamId + "&duration=" + duration + "&start=" + startFormatted;
+            String catchupUrl = server + "/streaming/timeshift.php?username=" + URLEncoder.encode(user, "UTF-8")
+                    + "&password=" + URLEncoder.encode(pass, "UTF-8")
+                    + "&stream=" + ch.streamId
+                    + "&start=" + startFormatted
+                    + "&duration=" + durationMins;
 
             List<String> urls = new ArrayList<>();
-            urls.add(timeshiftUrl);
-            urls.add(fallbackUrl);
-
             List<String> titles = new ArrayList<>();
+            urls.add(catchupUrl);
             titles.add("[Replay] " + ch.name + " - " + prog.title);
 
             PlayerActivity.pendingUrls = urls;
@@ -847,6 +1173,232 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             Toast.makeText(this, "Erreur lecture Replay : " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void triggerSync() {
+        KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
+        if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) {
+            Toast.makeText(this, "Veuillez d'abord configurer votre compte IPTV", Toast.LENGTH_LONG).show();
+            showCloudSyncDialog();
+            return;
+        }
+
+        tvStatusBadge.setText("🔄 Synchronisation...");
+        tvStatusBadge.setBackgroundColor(0xFF0284C7);
+
+        xtreamClient.syncPlaylist(pl.serverUrl, pl.username, pl.password, db, new XtreamClient.SyncCallback() {
+            @Override
+            public void onProgress(String message) {
+                runOnUiThread(() -> tvStatusBadge.setText("🔄 " + message));
+            }
+
+            @Override
+            public void onSuccess(int liveCount, int vodCount, int seriesCount) {
+                runOnUiThread(() -> {
+                    tvStatusBadge.setText("✅ Prêt (" + liveCount + " chaînes, " + vodCount + " films, " + seriesCount + " séries)");
+                    tvStatusBadge.setBackgroundColor(0xFF132E27);
+                    loadLocalData();
+                    Toast.makeText(MainActivity.this, "Synchronisation terminée avec succès !", Toast.LENGTH_LONG).show();
+                });
+            }
+
+            @Override
+            public void onError(String error) {
+                runOnUiThread(() -> {
+                    tvStatusBadge.setText("❌ Erreur");
+                    tvStatusBadge.setBackgroundColor(0xFF4C0519);
+
+                    if (isFinishing() || isDestroyed()) return;
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle("⚠️ Erreur de synchronisation IPTV")
+                            .setMessage("Impossible de synchroniser avec le serveur IPTV :\n\n" + error + "\n\n💡 Vérifiez votre connexion internet ou vos identifiants.")
+                            .setPositiveButton("Fermer", null)
+                            .setNeutralButton("Vérifier le compte", (dialog, which) -> showLoginDialog())
+                            .show();
+                });
+            }
+        });
+    }
+
+    private void updateHeaderPlaylistInfo(KeoDatabase.PlaylistItem pl) {
+        if (tvHeaderSyncInfo != null && pl != null) {
+            String exp = (pl.expDate != null && !pl.expDate.isEmpty()) ? " • Exp: " + pl.expDate : "";
+            tvHeaderSyncInfo.setText(pl.name + " (" + pl.username + ")" + exp);
+        }
+    }
+
+    // --- SECURE CLOUD SYNC DIALOG (PASSWORD MANDATORY) ---
+    private void showCloudSyncDialog() {
+        if (isFinishing() || isDestroyed()) return;
+
+        try {
+            final SharedPreferences prefs = getSharedPreferences("keotv_prefs", MODE_PRIVATE);
+            String lastUser = prefs.getString("cloud_username", "heyhacene@gmail.com");
+
+            LinearLayout layout = new LinearLayout(this);
+            layout.setOrientation(LinearLayout.VERTICAL);
+            layout.setPadding(36, 24, 36, 24);
+
+            TextView tvInfo = new TextView(this);
+            tvInfo.setText("Récupérez instantanément vos abonnements IPTV enregistrés sur le portail Web (https://keotv.vercel.app/sync).\n\nSaisissez votre email et mot de passe de compte :");
+            tvInfo.setTextColor(0xFFCBD5E1);
+            tvInfo.setTextSize(12);
+            tvInfo.setPadding(0, 0, 0, 16);
+            layout.addView(tvInfo);
+
+            final EditText etUser = new EditText(this);
+            etUser.setHint("Adresse email (ex: heyhacene@gmail.com)");
+            etUser.setText(lastUser);
+            etUser.setTextColor(0xFFFFFFFF);
+            etUser.setTextSize(13);
+            layout.addView(etUser);
+
+            final EditText etPass = new EditText(this);
+            etPass.setHint("Mot de passe du compte");
+            etPass.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            etPass.setTextColor(0xFFFFFFFF);
+            etPass.setTextSize(13);
+            layout.addView(etPass);
+
+            new AlertDialog.Builder(this)
+                    .setTitle("☁️ Rapatriement Sécurisé depuis le Cloud")
+                    .setView(layout)
+                    .setPositiveButton("Rapatrier", (dialog, which) -> {
+                        String ident = etUser.getText().toString().trim();
+                        String pass = etPass.getText().toString().trim();
+
+                        if (ident.isEmpty()) {
+                            Toast.makeText(MainActivity.this, "Veuillez entrer votre adresse email", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        if (pass.isEmpty()) {
+                            Toast.makeText(MainActivity.this, "Mot de passe obligatoire pour sécuriser vos playlists", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+
+                        prefs.edit().putString("cloud_username", ident).apply();
+                        pullAccountsFromCloud(ident, pass);
+                    })
+                    .setNeutralButton("Saisie Manuelle", (dialog, which) -> showLoginDialog())
+                    .setNegativeButton("Annuler", null)
+                    .show();
+        } catch (Throwable t) {
+            Log.e(TAG, "Failed to show cloud sync dialog", t);
+        }
+    }
+
+    private void pullAccountsFromCloud(final String ident, final String password) {
+        tvStatusBadge.setText("⏳ Vérification...");
+        Toast.makeText(this, "Connexion sécurisée pour '" + ident + "'...", Toast.LENGTH_SHORT).show();
+
+        new Thread(() -> {
+            try {
+                String cleanIdent = ident.trim().toLowerCase();
+                String enc = URLEncoder.encode(cleanIdent, "UTF-8");
+                String urlStr = "https://qvfmfstwrkcerzlbemzb.supabase.co/rest/v1/keotv_users?or=(username.eq."
+                        + enc + ",id.eq.usr_" + enc + ",id.eq." + enc + ")&select=*";
+
+                URL url = new URL(urlStr);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(15000);
+                conn.setRequestProperty("apikey", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs");
+                conn.setRequestProperty("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs");
+                conn.setRequestProperty("Accept", "application/json");
+
+                int code = conn.getResponseCode();
+                if (code != 200) {
+                    runOnUiThread(() -> {
+                        tvStatusBadge.setText("❌ Erreur");
+                        Toast.makeText(MainActivity.this, "Erreur serveur HTTP " + code, Toast.LENGTH_LONG).show();
+                    });
+                    return;
+                }
+
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                reader.close();
+
+                JsonArray arr = JsonParser.parseString(sb.toString()).getAsJsonArray();
+                if (arr.size() == 0) {
+                    runOnUiThread(() -> {
+                        tvStatusBadge.setText("❌ Non trouvé");
+                        Toast.makeText(MainActivity.this, "Aucun compte trouvé pour '" + ident + "'.", Toast.LENGTH_LONG).show();
+                    });
+                    return;
+                }
+
+                JsonObject userObj = arr.get(0).getAsJsonObject();
+                JsonArray playlists = userObj.has("playlists") && userObj.get("playlists").isJsonArray()
+                        ? userObj.getAsJsonArray("playlists") : null;
+
+                if (playlists == null || playlists.size() == 0) {
+                    runOnUiThread(() -> {
+                        tvStatusBadge.setText("⚠️ Vide");
+                        Toast.makeText(MainActivity.this, "Ce compte ne contient aucune playlist enregistrée sur le site.", Toast.LENGTH_LONG).show();
+                    });
+                    return;
+                }
+
+                JsonObject targetPl = null;
+                for (int i = 0; i < playlists.size(); i++) {
+                    JsonObject p = playlists.get(i).getAsJsonObject();
+                    if (p.has("server_url") && !p.get("server_url").getAsString().isEmpty()) {
+                        targetPl = p;
+                        break;
+                    }
+                }
+
+                if (targetPl == null) targetPl = playlists.get(0).getAsJsonObject();
+
+                // PASSWORD AUTHENTICATION VERIFICATION
+                String storedHash = userObj.has("password_hash") && !userObj.get("password_hash").isJsonNull()
+                        ? userObj.get("password_hash").getAsString() : "";
+                String enteredHash = XtreamClient.hashPassword(password);
+                boolean isAuthorized = false;
+
+                if (!storedHash.isEmpty() && enteredHash.equalsIgnoreCase(storedHash)) {
+                    isAuthorized = true;
+                } else if (targetPl.has("password") && password.equals(targetPl.get("password").getAsString())) {
+                    isAuthorized = true;
+                } else if (targetPl.has("username") && password.equals(targetPl.get("username").getAsString())) {
+                    isAuthorized = true;
+                }
+
+                if (!isAuthorized) {
+                    runOnUiThread(() -> {
+                        tvStatusBadge.setText("❌ Refusé");
+                        Toast.makeText(MainActivity.this, "Mot de passe cloud incorrect ! Accès refusé.", Toast.LENGTH_LONG).show();
+                    });
+                    return;
+                }
+
+                final KeoDatabase.PlaylistItem pl = new KeoDatabase.PlaylistItem();
+                pl.id = targetPl.has("id") ? targetPl.get("id").getAsString() : "active_xtream";
+                pl.name = targetPl.has("name") ? targetPl.get("name").getAsString() : "Abonnement Xtream";
+                pl.type = targetPl.has("type") ? targetPl.get("type").getAsString() : "xtream";
+                pl.serverUrl = targetPl.has("server_url") ? targetPl.get("server_url").getAsString() : "";
+                pl.username = targetPl.has("username") ? targetPl.get("username").getAsString() : "";
+                pl.password = targetPl.has("password") ? targetPl.get("password").getAsString() : "";
+
+                db.savePlaylist(pl);
+
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "Authentification réussie ! Lancement de la synchronisation...", Toast.LENGTH_LONG).show();
+                    triggerSync();
+                });
+
+            } catch (Exception e) {
+                final String err = e.getMessage();
+                runOnUiThread(() -> {
+                    tvStatusBadge.setText("❌ Erreur");
+                    Toast.makeText(MainActivity.this, "Erreur de rapatriement : " + err, Toast.LENGTH_LONG).show();
+                });
+            }
+        }).start();
     }
 
     private void showSettingsDialog() {
@@ -918,7 +1470,7 @@ public class MainActivity extends AppCompatActivity {
 
         final EditText etPin = new EditText(this);
         etPin.setHint("Code PIN (4 chiffres)");
-        etPin.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        etPin.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         layout.addView(etPin);
 
         new AlertDialog.Builder(this)
@@ -950,12 +1502,12 @@ public class MainActivity extends AppCompatActivity {
 
         final EditText etOld = new EditText(this);
         etOld.setHint("Ancien code PIN");
-        etOld.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        etOld.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         layout.addView(etOld);
 
         final EditText etNew = new EditText(this);
         etNew.setHint("Nouveau code PIN (4 chiffres)");
-        etNew.setInputType(android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD);
+        etNew.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         layout.addView(etNew);
 
         new AlertDialog.Builder(this)
@@ -1038,11 +1590,6 @@ public class MainActivity extends AppCompatActivity {
             msg.append("• Dernière synchronisation : ").append(pl != null ? pl.lastSyncAt : "Jamais").append("\n");
             msg.append("• Mémoire RAM : ").append(usedMb).append(" Mo / ").append(maxMb).append(" Mo\n");
 
-            File crashLog = new File(getFilesDir(), "crash.log");
-            if (crashLog.exists() && crashLog.length() > 0) {
-                msg.append("\n⚠️ Rapport d'anomalie détecté dans crash.log");
-            }
-
             new AlertDialog.Builder(this)
                     .setTitle("Diagnostic KeoTV")
                     .setMessage(msg.toString())
@@ -1073,9 +1620,11 @@ public class MainActivity extends AppCompatActivity {
                             activeChannel = null;
                             selectedCategory = null;
                             loadLocalData();
-                            tvHeaderSyncInfo.setText("Aucun compte configuré");
-                            tvStatusBadge.setText("⚪ Réinitialisé");
-                            tvStatusBadge.setBackgroundColor(0xFF1E293B);
+                            if (tvHeaderSyncInfo != null) tvHeaderSyncInfo.setText("Aucun compte configuré");
+                            if (tvStatusBadge != null) {
+                                tvStatusBadge.setText("⚪ Réinitialisé");
+                                tvStatusBadge.setBackgroundColor(0xFF1E293B);
+                            }
                             Toast.makeText(MainActivity.this, "KeoTV a été remis à zéro avec succès.", Toast.LENGTH_LONG).show();
                             mainHandler.postDelayed(this::showCloudSyncDialog, 400);
                         } catch (Exception e) {
@@ -1089,191 +1638,57 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void showCloudSyncDialog() {
-        if (isFinishing() || isDestroyed()) return;
-
-        try {
-            final SharedPreferences prefs = getSharedPreferences("keotv_prefs", MODE_PRIVATE);
-            String lastUser = prefs.getString("cloud_username", "heyhacene@gmail.com");
-
-            android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
-            layout.setOrientation(android.widget.LinearLayout.VERTICAL);
-            layout.setPadding(32, 24, 32, 24);
-
-            TextView tvInfo = new TextView(this);
-            tvInfo.setText("Récupérez instantanément vos abonnements IPTV enregistrés sur le portail Web (https://keotv.vercel.app/sync).\n\nSaisissez votre adresse email ou identifiant :");
-            tvInfo.setTextColor(0xFFCBD5E1);
-            tvInfo.setTextSize(12);
-            tvInfo.setPadding(0, 0, 0, 16);
-            layout.addView(tvInfo);
-
-            final EditText etUser = new EditText(this);
-            etUser.setHint("Adresse email (ex: heyhacene@gmail.com)");
-            etUser.setText(lastUser);
-            layout.addView(etUser);
-
-            new AlertDialog.Builder(this)
-                    .setTitle("☁️ Rapatriement depuis le portail Web")
-                    .setView(layout)
-                    .setPositiveButton("Rapatrier", (dialog, which) -> {
-                        String ident = etUser.getText().toString().trim();
-                        if (ident.isEmpty()) {
-                            Toast.makeText(MainActivity.this, "Veuillez entrer votre identifiant", Toast.LENGTH_SHORT).show();
-                            return;
-                        }
-                        prefs.edit().putString("cloud_username", ident).apply();
-                        pullAccountsFromCloud(ident);
-                    })
-                    .setNeutralButton("Saisie Manuelle", (dialog, which) -> showLoginDialog())
-                    .setNegativeButton("Annuler", null)
-                    .show();
-        } catch (Throwable t) {
-            Log.e(TAG, "Failed to show cloud sync dialog", t);
-        }
-    }
-
-    private void pullAccountsFromCloud(final String ident) {
-        tvStatusBadge.setText("⏳ Rapatriement...");
-        Toast.makeText(this, "Connexion au portail Web pour '" + ident + "'...", Toast.LENGTH_SHORT).show();
-
-        new Thread(() -> {
-            try {
-                String cleanIdent = ident.trim().toLowerCase();
-                String enc = URLEncoder.encode(cleanIdent, "UTF-8");
-                String urlStr = "https://qvfmfstwrkcerzlbemzb.supabase.co/rest/v1/keotv_users?or=(username.eq."
-                        + enc + ",id.eq.usr_" + enc + ",id.eq." + enc + ")&select=*";
-
-                URL url = new URL(urlStr);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setRequestMethod("GET");
-                conn.setConnectTimeout(10000);
-                conn.setReadTimeout(15000);
-                conn.setRequestProperty("apikey", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs");
-                conn.setRequestProperty("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs");
-                conn.setRequestProperty("Accept", "application/json");
-
-                int code = conn.getResponseCode();
-                if (code != 200) {
-                    runOnUiThread(() -> {
-                        tvStatusBadge.setText("❌ Erreur");
-                        Toast.makeText(MainActivity.this, "Erreur serveur HTTP " + code, Toast.LENGTH_LONG).show();
-                    });
-                    return;
-                }
-
-                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
-                StringBuilder sb = new StringBuilder();
-                String line;
-                while ((line = reader.readLine()) != null) sb.append(line);
-                reader.close();
-
-                JsonArray arr = JsonParser.parseString(sb.toString()).getAsJsonArray();
-                if (arr.size() == 0) {
-                    runOnUiThread(() -> {
-                        tvStatusBadge.setText("❌ Non trouvé");
-                        Toast.makeText(MainActivity.this, "Aucun compte trouvé pour '" + ident + "'. Vérifiez sur https://keotv.vercel.app/sync", Toast.LENGTH_LONG).show();
-                    });
-                    return;
-                }
-
-                JsonObject userObj = arr.get(0).getAsJsonObject();
-                JsonArray playlists = userObj.has("playlists") && userObj.get("playlists").isJsonArray()
-                        ? userObj.getAsJsonArray("playlists") : null;
-
-                if (playlists == null || playlists.size() == 0) {
-                    runOnUiThread(() -> {
-                        tvStatusBadge.setText("⚠️ Vide");
-                        Toast.makeText(MainActivity.this, "Ce compte ne contient aucune playlist enregistrée sur le site.", Toast.LENGTH_LONG).show();
-                    });
-                    return;
-                }
-
-                JsonObject targetPl = null;
-                for (int i = 0; i < playlists.size(); i++) {
-                    JsonObject p = playlists.get(i).getAsJsonObject();
-                    if (p.has("server_url") && !p.get("server_url").getAsString().isEmpty()) {
-                        targetPl = p;
-                        break;
-                    }
-                }
-
-                if (targetPl == null) targetPl = playlists.get(0).getAsJsonObject();
-
-                final KeoDatabase.PlaylistItem pl = new KeoDatabase.PlaylistItem();
-                pl.id = targetPl.has("id") ? targetPl.get("id").getAsString() : "active_xtream";
-                pl.name = targetPl.has("name") ? targetPl.get("name").getAsString() : "Abonnement Xtream";
-                pl.type = targetPl.has("type") ? targetPl.get("type").getAsString() : "xtream";
-                pl.serverUrl = targetPl.has("server_url") ? targetPl.get("server_url").getAsString() : "";
-                pl.username = targetPl.has("username") ? targetPl.get("username").getAsString() : "";
-                pl.password = targetPl.has("password") ? targetPl.get("password").getAsString() : "";
-
-                db.savePlaylist(pl);
-
-                runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Compte '" + pl.name + "' rapatrié avec succès ! Synchronisation en cours...", Toast.LENGTH_LONG).show();
-                    triggerSync();
-                });
-
-            } catch (Exception e) {
-                final String err = e.getMessage();
-                runOnUiThread(() -> {
-                    tvStatusBadge.setText("❌ Erreur");
-                    Toast.makeText(MainActivity.this, "Erreur de rapatriement : " + err, Toast.LENGTH_LONG).show();
-                });
-            }
-        }).start();
-    }
-
     private void showLoginDialog() {
         if (isFinishing() || isDestroyed()) return;
 
         try {
-            KeoDatabase.PlaylistItem existing = db.getActivePlaylist();
-
-            android.widget.LinearLayout layout = new android.widget.LinearLayout(this);
-            layout.setOrientation(android.widget.LinearLayout.VERTICAL);
+            KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
+            LinearLayout layout = new LinearLayout(this);
+            layout.setOrientation(LinearLayout.VERTICAL);
             layout.setPadding(32, 24, 32, 24);
 
-            final EditText etServer = new EditText(this);
-            etServer.setHint("Serveur (ex: http://mon-serveur.com:8080)");
-            if (existing != null && existing.serverUrl != null) etServer.setText(existing.serverUrl);
-            layout.addView(etServer);
+            final EditText etUrl = new EditText(this);
+            etUrl.setHint("URL du serveur (ex: http://domaine.xyz:8080)");
+            etUrl.setText(pl != null ? pl.serverUrl : "");
+            layout.addView(etUrl);
 
             final EditText etUser = new EditText(this);
-            etUser.setHint("Nom d'utilisateur");
-            if (existing != null && existing.username != null) etUser.setText(existing.username);
+            etUser.setHint("Identifiant Xtream");
+            etUser.setText(pl != null ? pl.username : "");
             layout.addView(etUser);
 
             final EditText etPass = new EditText(this);
-            etPass.setHint("Mot de passe");
-            if (existing != null && existing.password != null) etPass.setText(existing.password);
+            etPass.setHint("Mot de passe Xtream");
+            etPass.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+            etPass.setText(pl != null ? pl.password : "");
             layout.addView(etPass);
 
             new AlertDialog.Builder(this)
-                    .setTitle("Configuration Manuelle du Compte Xtream")
+                    .setTitle("Configuration du Compte IPTV")
                     .setView(layout)
-                    .setPositiveButton("Enregistrer & Synchroniser", (dialog, which) -> {
-                        String server = etServer.getText().toString().trim();
+                    .setPositiveButton("Enregistrer & Synchro", (dialog, which) -> {
+                        String url = etUrl.getText().toString().trim();
                         String user = etUser.getText().toString().trim();
                         String pass = etPass.getText().toString().trim();
 
-                        if (server.isEmpty() || user.isEmpty() || pass.isEmpty()) {
+                        if (url.isEmpty() || user.isEmpty() || pass.isEmpty()) {
                             Toast.makeText(MainActivity.this, "Tous les champs sont requis", Toast.LENGTH_SHORT).show();
                             return;
                         }
 
-                        KeoDatabase.PlaylistItem pl = new KeoDatabase.PlaylistItem();
-                        pl.id = "active_xtream";
-                        pl.name = "Abonnement Xtream";
-                        pl.type = "xtream";
-                        pl.serverUrl = server;
-                        pl.username = user;
-                        pl.password = pass;
-                        db.savePlaylist(pl);
+                        KeoDatabase.PlaylistItem item = new KeoDatabase.PlaylistItem();
+                        item.id = "active_xtream";
+                        item.name = "Abonnement Xtream";
+                        item.type = "xtream";
+                        item.serverUrl = url;
+                        item.username = user;
+                        item.password = pass;
 
+                        db.savePlaylist(item);
+                        updateHeaderPlaylistInfo(item);
                         triggerSync();
                     })
-                    .setNeutralButton("☁️ Rapatrier du site", (dialog, which) -> showCloudSyncDialog())
+                    .setNeutralButton("☁️ Portail Cloud", (dialog, which) -> showCloudSyncDialog())
                     .setNegativeButton("Annuler", null)
                     .show();
         } catch (Throwable t) {
@@ -1281,7 +1696,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    // --- RECYCLER VIEW ADAPTERS WITH CLEAN TOUCH & D-PAD FOCUS ---
+    // --- RECYCLER VIEW ADAPTERS ---
 
     private class CategoriesAdapter extends RecyclerView.Adapter<CategoriesAdapter.ViewHolder> {
         private final List<KeoDatabase.CategoryItem> items = new ArrayList<>();
@@ -1333,17 +1748,9 @@ public class MainActivity extends AppCompatActivity {
 
             holder.itemView.setOnKeyListener((v, keyCode, event) -> {
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                    if (keyCode == KeyEvent.KEYCODE_DPAD_UP && holder.getBindingAdapterPosition() == 0) {
-                        if ("vod".equals(currentType) && tabVod != null) {
-                            tabVod.requestFocus();
-                            return true;
-                        } else if ("series".equals(currentType) && tabSeries != null) {
-                            tabSeries.requestFocus();
-                            return true;
-                        } else if (tabLive != null) {
-                            tabLive.requestFocus();
-                            return true;
-                        }
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                        focusActiveSidebarButton();
+                        return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
                         focusChannelsList();
                         return true;
@@ -1379,6 +1786,15 @@ public class MainActivity extends AppCompatActivity {
             notifyDataSetChanged();
         }
 
+        public void notifyItemChangedById(String channelId) {
+            for (int i = 0; i < items.size(); i++) {
+                if (items.get(i).id.equals(channelId)) {
+                    notifyItemChanged(i);
+                    break;
+                }
+            }
+        }
+
         public int getSelectedPos() {
             return selectedPos;
         }
@@ -1401,6 +1817,16 @@ public class MainActivity extends AppCompatActivity {
             holder.tvName.setText(item.name);
             holder.tvRes.setText(item.resolution != null ? item.resolution : "HD");
 
+            // Logo
+            if (holder.ivLogo != null) {
+                if (item.logo != null && !item.logo.trim().isEmpty()) {
+                    holder.ivLogo.setVisibility(View.VISIBLE);
+                    ImageLoader.load(holder.itemView.getContext(), item.logo, holder.ivLogo);
+                } else {
+                    holder.ivLogo.setVisibility(View.GONE);
+                }
+            }
+
             // Favorite star badge
             if (holder.tvFavStar != null) {
                 holder.tvFavStar.setVisibility(item.isFav ? View.VISIBLE : View.GONE);
@@ -1411,40 +1837,80 @@ public class MainActivity extends AppCompatActivity {
                 holder.tvReplayBadge.setVisibility(item.tvArchive == 1 ? View.VISIBLE : View.GONE);
             }
 
-            // EPG title in list
-            if (holder.tvEpg != null) {
-                String cachedEpg = epgCurrentTitleCache.get(item.id);
-                if (cachedEpg != null && !cachedEpg.isEmpty()) {
-                    holder.tvEpg.setText(cachedEpg);
-                } else if ("vod".equals(item.streamType)) {
-                    holder.tvEpg.setText("Film VOD");
-                } else if ("series".equals(item.streamType)) {
-                    holder.tvEpg.setText("Série TV");
+            // Layout based on content type: TiviMate horizontal timeline for TV / Replay, or description for VOD / Series
+            boolean isLiveOrReplay = "live".equals(item.streamType) || "replay".equals(currentType);
+
+            if (isLiveOrReplay && holder.layoutEpgTimeline != null) {
+                holder.layoutEpgTimeline.setVisibility(View.VISIBLE);
+                if (holder.tvEpg != null) holder.tvEpg.setVisibility(View.GONE);
+
+                // NOW Slot
+                String cached = epgCurrentTitleCache.get(item.id);
+                if (cached != null && !cached.isEmpty()) {
+                    holder.tvEpgNow.setText("🔴 " + cached);
                 } else {
-                    holder.tvEpg.setText("Direct TV");
+                    holder.tvEpgNow.setText("🔴 En direct : " + item.name);
+                }
+
+                // PAST Slot (Replay)
+                if (item.tvArchive == 1) {
+                    holder.tvEpgPast.setText("◄ Replay disponible");
+                    holder.tvEpgPast.setTextColor(0xFF38BDF8);
+                    holder.tvEpgPast.setOnClickListener(v -> showCatchupDialog(item));
+                } else {
+                    holder.tvEpgPast.setText("◄ 19:30 Passé");
+                    holder.tvEpgPast.setTextColor(0xFF64748B);
+                    holder.tvEpgPast.setOnClickListener(null);
+                }
+
+                // NEXT Slot
+                holder.tvEpgNext.setText("⏭️ À suivre");
+                holder.tvEpgNext.setOnClickListener(v -> Toast.makeText(v.getContext(), "Guide EPG : " + item.name, Toast.LENGTH_SHORT).show());
+
+                holder.tvEpgNow.setOnClickListener(v -> {
+                    selectChannel(item);
+                    launchPlayerFullscreen();
+                });
+
+            } else {
+                if (holder.layoutEpgTimeline != null) holder.layoutEpgTimeline.setVisibility(View.GONE);
+                if (holder.tvEpg != null) {
+                    holder.tvEpg.setVisibility(View.VISIBLE);
+                    if ("vod".equals(item.streamType)) {
+                        holder.tvEpg.setText("🎬 Film VOD • " + (item.resolution != null ? item.resolution : "HD"));
+                    } else if ("series".equals(item.streamType)) {
+                        holder.tvEpg.setText("🍿 Série TV • Cliquez pour afficher les saisons & épisodes");
+                    } else {
+                        holder.tvEpg.setText(item.groupName != null ? item.groupName : "Direct");
+                    }
                 }
             }
 
-            // Resolution color styling
+            // Resolution styling
             if ("4K".equalsIgnoreCase(item.resolution) || "UHD".equalsIgnoreCase(item.resolution)) {
-                holder.tvRes.setTextColor(0xFFF59E0B); // Amber / Gold
+                holder.tvRes.setTextColor(0xFFF59E0B);
+                holder.tvRes.setBackgroundColor(0xFF332005);
             } else if ("FHD".equalsIgnoreCase(item.resolution)) {
-                holder.tvRes.setTextColor(0xFF38BDF8); // Cyan
+                holder.tvRes.setTextColor(0xFF38BDF8);
+                holder.tvRes.setBackgroundColor(0xFF0F243A);
             } else {
-                holder.tvRes.setTextColor(0xFF94A3B8); // Slate
+                holder.tvRes.setTextColor(0xFF94A3B8);
+                holder.tvRes.setBackgroundColor(0xFF1E293B);
             }
 
             holder.itemView.setSelected(selectedPos == position);
 
+            // Channel row click
             holder.itemView.setOnClickListener(v -> {
                 int pos = holder.getBindingAdapterPosition();
                 if (pos != RecyclerView.NO_POSITION) {
                     selectedPos = pos;
                     selectChannel(item);
 
-                    // Clicking directly launches playback or opens series episodes
-                    if ("series".equals(item.streamType)) {
-                        openSeriesEpisodes(item);
+                    if ("vod".equals(item.streamType)) {
+                        showMovieDetailDialog(item);
+                    } else if ("series".equals(item.streamType)) {
+                        showSeriesDetailDialog(item);
                     } else {
                         launchPlayerFullscreen();
                     }
@@ -1466,17 +1932,9 @@ public class MainActivity extends AppCompatActivity {
                     if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                         focusCategoriesList();
                         return true;
-                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                        if (btnWatchFullscreen != null) {
-                            btnWatchFullscreen.requestFocus();
-                            return true;
-                        }
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP && holder.getBindingAdapterPosition() == 0) {
                         if (etSearch != null && etSearch.isShown()) {
                             etSearch.requestFocus();
-                            return true;
-                        } else if (tabSeries != null) {
-                            tabSeries.requestFocus();
                             return true;
                         }
                     }
@@ -1491,15 +1949,24 @@ public class MainActivity extends AppCompatActivity {
         }
 
         class ViewHolder extends RecyclerView.ViewHolder {
-            TextView tvNum, tvName, tvEpg, tvRes, tvFavStar, tvReplayBadge;
+            TextView tvNum, tvName, tvRes, tvFavStar, tvReplayBadge, tvEpg;
+            ImageView ivLogo;
+            View layoutEpgTimeline;
+            TextView tvEpgPast, tvEpgNow, tvEpgNext;
+
             ViewHolder(View v) {
                 super(v);
                 tvNum = v.findViewById(R.id.tv_channel_num);
+                ivLogo = v.findViewById(R.id.iv_channel_logo);
                 tvName = v.findViewById(R.id.tv_channel_name);
-                tvEpg = v.findViewById(R.id.tv_channel_epg);
                 tvRes = v.findViewById(R.id.tv_channel_res);
                 tvFavStar = v.findViewById(R.id.tv_channel_fav_star);
                 tvReplayBadge = v.findViewById(R.id.tv_channel_replay_badge);
+                tvEpg = v.findViewById(R.id.tv_channel_epg);
+                layoutEpgTimeline = v.findViewById(R.id.layout_epg_timeline);
+                tvEpgPast = v.findViewById(R.id.tv_epg_past);
+                tvEpgNow = v.findViewById(R.id.tv_epg_now);
+                tvEpgNext = v.findViewById(R.id.tv_epg_next);
             }
         }
     }
@@ -1507,18 +1974,23 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if ("search".equals(currentType)) {
+                switchSection("live");
+                focusActiveSidebarButton();
+                return true;
+            }
             if (etSearch != null && etSearch.hasFocus()) {
                 etSearch.setText("");
                 etSearch.clearFocus();
                 focusChannelsList();
                 return true;
             }
-            if (btnWatchFullscreen != null && (btnWatchFullscreen.hasFocus() || btnToggleFav.hasFocus())) {
-                focusChannelsList();
-                return true;
-            }
             if (recyclerChannels != null && recyclerChannels.hasFocus()) {
                 focusCategoriesList();
+                return true;
+            }
+            if (recyclerCategories != null && recyclerCategories.hasFocus()) {
+                focusActiveSidebarButton();
                 return true;
             }
         }

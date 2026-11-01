@@ -69,6 +69,11 @@ public class XtreamClient {
         void onError(String error);
     }
 
+    public interface VodInfoCallback {
+        void onSuccess(JsonObject info, JsonObject movieData);
+        void onError(String error);
+    }
+
     public void syncPlaylist(final String serverUrl, final String username, final String password,
                              final KeoDatabase db, final SyncCallback callback) {
         executor.execute(new Runnable() {
@@ -407,6 +412,51 @@ public class XtreamClient {
         });
     }
 
+    public void fetchVodInfo(final String serverUrl, final String username, final String password,
+                             final String vodId, final VodInfoCallback callback) {
+        executor.execute(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    String server = serverUrl.trim().replaceAll("/+$", "");
+                    if (!server.startsWith("http://") && !server.startsWith("https://")) {
+                        server = "http://" + server;
+                    }
+                    String encUser = URLEncoder.encode(username.trim(), "UTF-8");
+                    String encPass = URLEncoder.encode(password.trim(), "UTF-8");
+                    String cleanId = vodId.replace("xtream_vod_", "");
+                    String url = server + "/player_api.php?username=" + encUser + "&password=" + encPass
+                            + "&action=get_vod_info&vod_id=" + cleanId;
+
+                    String json = fetchUrl(url);
+                    JsonElement el = JsonParser.parseString(json.trim());
+                    if (!el.isJsonObject()) {
+                        throw new Exception("Réponse serveur invalide");
+                    }
+                    final JsonObject root = el.getAsJsonObject();
+                    final JsonObject info = root.has("info") && root.get("info").isJsonObject()
+                            ? root.getAsJsonObject("info") : new JsonObject();
+                    final JsonObject movieData = root.has("movie_data") && root.get("movie_data").isJsonObject()
+                            ? root.getAsJsonObject("movie_data") : new JsonObject();
+
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            callback.onSuccess(info, movieData);
+                        }
+                    });
+                } catch (final Exception e) {
+                    mainHandler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            callback.onError(e.getMessage() != null ? e.getMessage() : e.toString());
+                        }
+                    });
+                }
+            }
+        });
+    }
+
     private void postProgress(final SyncCallback callback, final String message) {
         mainHandler.post(new Runnable() {
             @Override
@@ -529,6 +579,17 @@ public class XtreamClient {
         if (trimmed.endsWith("---") || trimmed.endsWith("===") || trimmed.endsWith("***")) return true;
         if (trimmed.endsWith("▼") || trimmed.endsWith("▲")) return true;
         return false;
+    }
+
+    public static String hashPassword(String str) {
+        if (str == null) return "";
+        int hash = 0;
+        for (int i = 0; i < str.length(); i++) {
+            int ch = str.charAt(i);
+            hash = (hash << 5) - hash + ch;
+        }
+        long abs = Math.abs((long) hash);
+        return "h_" + Long.toString(abs, 36) + "_" + str.length();
     }
 
     public static boolean isAdultCategory(String name) {

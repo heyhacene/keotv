@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:minWidth="700dp"
+    android:maxWidth="900dp"
+    android:orientation="vertical"
+    android:background="@drawable/bg_card"
+    android:padding="20dp">
+
+    <!-- Top: Series Cover & Overview -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingBottom="12dp">
+
+        <ImageView
+            android:id="@+id/iv_series_cover"
+            android:layout_width="100dp"
+            android:layout_height="145dp"
+            android:scaleType="centerCrop"
+            android:background="#1E293B"
+            android:layout_marginEnd="16dp" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tv_series_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Titre de la Série"
+                android:textColor="#F8FAFC"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:maxLines="2"
+                android:ellipsize="end" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginTop="4dp">
+
+                <TextView
+                    android:id="@+id/tv_series_rating"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="⭐ 8.8"
+                    android:textColor="#F59E0B"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:paddingStart="6dp"
+                    android:paddingEnd="6dp"
+                    android:paddingTop="2dp"
+                    android:paddingBottom="2dp"
+                    android:background="#26F59E0B"
+                    android:layout_marginEnd="8dp" />
+
+                <TextView
+                    android:id="@+id/tv_series_meta"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="2020 • Comédie / Drame"
+                    android:textColor="#94A3B8"
+                    android:textSize="12sp" />
+
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tv_series_plot"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textColor="#CBD5E1"
+                android:textSize="11sp"
+                android:maxLines="3"
+                android:ellipsize="end"
+                android:text="Chargement des épisodes..." />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Seasons horizontal selector bar -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="SAISONS DISPONIBLES"
+        android:textColor="#64748B"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:paddingBottom="4dp" />
+
+    <HorizontalScrollView
+        android:id="@+id/scroll_seasons"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:scrollbars="none"
+        android:paddingBottom="10dp">
+
+        <LinearLayout
+            android:id="@+id/layout_seasons"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal" />
+
+    </HorizontalScrollView>
+
+    <!-- Episodes List -->
+    <TextView
+        android:id="@+id/tv_episodes_header"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="ÉPISODES"
+        android:textColor="#64748B"
+        android:textSize="10sp"
+        android:textStyle="bold"
+        android:paddingBottom="4dp" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recycler_episodes"
+        android:layout_width="match_parent"
+        android:layout_height="220dp"
+        android:scrollbars="vertical" />
+
+    <!-- Bottom Actions -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="end"
+        android:layout_marginTop="12dp">
+
+        <Button
+            android:id="@+id/btn_close_series"
+            android:layout_width="wrap_content"
+            android:layout_height="38dp"
+            android:text="Fermer"
+            android:textColor="#94A3B8"
+            android:textSize="12sp"
+            android:background="@drawable/bg_button_selector"
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:focusable="true" />
+
+    </LinearLayout>
+
+</LinearLayout>

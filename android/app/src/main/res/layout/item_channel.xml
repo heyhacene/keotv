@@ -6,8 +6,8 @@
     android:gravity="center_vertical"
     android:paddingStart="12dp"
     android:paddingEnd="12dp"
-    android:paddingTop="10dp"
-    android:paddingBottom="10dp"
+    android:paddingTop="8dp"
+    android:paddingBottom="8dp"
     android:layout_marginBottom="4dp"
     android:background="@drawable/bg_item_selector"
     android:focusable="true"
@@ -22,12 +22,22 @@
         android:textStyle="bold"
         android:fontFamily="monospace" />
 
+    <ImageView
+        android:id="@+id/iv_channel_logo"
+        android:layout_width="36dp"
+        android:layout_height="26dp"
+        android:scaleType="fitCenter"
+        android:layout_marginStart="4dp"
+        android:layout_marginEnd="8dp"
+        android:visibility="gone" />
+
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:orientation="vertical">
 
+        <!-- Channel Title & Badges Row -->
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -58,13 +68,35 @@
                 android:id="@+id/tv_channel_replay_badge"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="🔄"
-                android:textSize="11sp"
-                android:layout_marginStart="4dp"
+                android:text="🔄 Replay"
+                android:textColor="#38BDF8"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp"
+                android:paddingTop="1dp"
+                android:paddingBottom="1dp"
+                android:background="#1538BDF8"
+                android:layout_marginStart="6dp"
                 android:visibility="gone" />
+
+            <TextView
+                android:id="@+id/tv_channel_res"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#38BDF8"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:background="#0F243A"
+                android:layout_marginStart="6dp" />
 
         </LinearLayout>
 
+        <!-- Fallback / Subtitle line for VOD / Series / simple view -->
         <TextView
             android:id="@+id/tv_channel_epg"
             android:layout_width="match_parent"
@@ -75,19 +107,69 @@
             android:ellipsize="end"
             android:text="Direct TV" />
 
-    </LinearLayout>
+        <!-- TiviMate EPG Timeline Row (Past, Current, Next) -->
+        <LinearLayout
+            android:id="@+id/layout_epg_timeline"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="3dp"
+            android:visibility="gone">
 
-    <TextView
-        android:id="@+id/tv_channel_res"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textColor="#38BDF8"
-        android:textSize="10sp"
-        android:textStyle="bold"
-        android:paddingStart="6dp"
-        android:paddingEnd="6dp"
-        android:paddingTop="2dp"
-        android:paddingBottom="2dp"
-        android:background="#0F243A" />
+            <!-- Past Program (Replay) -->
+            <TextView
+                android:id="@+id/tv_epg_past"
+                android:layout_width="0dp"
+                android:layout_height="22dp"
+                android:layout_weight="1"
+                android:textColor="#94A3B8"
+                android:textSize="10sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:gravity="center_vertical"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:background="@drawable/bg_epg_slot_selector"
+                android:layout_marginEnd="4dp"
+                android:text="◄ 19:30 Passé" />
+
+            <!-- Current Program (Live) -->
+            <TextView
+                android:id="@+id/tv_epg_now"
+                android:layout_width="0dp"
+                android:layout_height="22dp"
+                android:layout_weight="1.4"
+                android:textColor="#38BDF8"
+                android:textSize="10sp"
+                android:textStyle="bold"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:gravity="center_vertical"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:background="@drawable/bg_epg_now_selector"
+                android:layout_marginEnd="4dp"
+                android:text="🔴 En direct" />
+
+            <!-- Next Program (Future) -->
+            <TextView
+                android:id="@+id/tv_epg_next"
+                android:layout_width="0dp"
+                android:layout_height="22dp"
+                android:layout_weight="1"
+                android:textColor="#64748B"
+                android:textSize="10sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:gravity="center_vertical"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:background="@drawable/bg_epg_slot_selector"
+                android:text="⏭️ Suivant" />
+
+        </LinearLayout>
+
+    </LinearLayout>
 
 </LinearLayout>
