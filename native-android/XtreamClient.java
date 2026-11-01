@@ -617,6 +617,8 @@ public class XtreamClient {
         public String stop;  // e.g. "2026-11-01 22:45:00"
         public long startTimestamp;
         public long stopTimestamp;
+        public long startMs;
+        public long stopMs;
         public int durationMinutes;
 
         public String getFormattedTime() {
@@ -656,6 +658,14 @@ public class XtreamClient {
             }
         } catch (Exception ignored) {}
         return text;
+    }
+
+    public static void fetchShortEpg(String serverUrl, String username, String password, String streamId, int limit, EpgCallback callback) {
+        fetchShortEpg(null, serverUrl, username, password, streamId, callback);
+    }
+
+    public static void fetchCatchupPrograms(String serverUrl, String username, String password, String streamId, int limit, CatchupCallback callback) {
+        fetchCatchupPrograms(null, serverUrl, username, password, streamId, callback);
     }
 
     public static void fetchShortEpg(final Context context, final String serverUrl, final String username, final String password, final String streamId, final EpgCallback callback) {
@@ -706,6 +716,8 @@ public class XtreamClient {
                             if (p.stopTimestamp > p.startTimestamp) {
                                 p.durationMinutes = (int) ((p.stopTimestamp - p.startTimestamp) / 60);
                             }
+                            p.startMs = p.startTimestamp * 1000L;
+                            p.stopMs = p.stopTimestamp * 1000L;
                         } catch (Exception ignored) {}
 
                         list.add(p);
@@ -787,6 +799,8 @@ public class XtreamClient {
                             if (p.stopTimestamp > p.startTimestamp) {
                                 p.durationMinutes = (int) ((p.stopTimestamp - p.startTimestamp) / 60);
                             }
+                            p.startMs = p.startTimestamp * 1000L;
+                            p.stopMs = p.stopTimestamp * 1000L;
                         } catch (Exception ignored) {}
 
                         list.add(p);
@@ -819,6 +833,8 @@ public class XtreamClient {
                                 if (p.stopTimestamp > p.startTimestamp) {
                                     p.durationMinutes = (int) ((p.stopTimestamp - p.startTimestamp) / 60);
                                 }
+                                p.startMs = p.startTimestamp * 1000L;
+                                p.stopMs = p.stopTimestamp * 1000L;
                             } catch (Exception ignored) {}
 
                             if (p.stopTimestamp > 0 && p.stopTimestamp <= nowSec) {
