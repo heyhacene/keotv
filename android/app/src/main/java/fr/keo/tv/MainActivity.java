@@ -48,6 +48,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 
 public class MainActivity extends AppCompatActivity {
@@ -110,6 +111,7 @@ public class MainActivity extends AppCompatActivity {
     private Button btnReplay;
 
     private final Map<String, String> epgCurrentTitleCache = new ConcurrentHashMap<>();
+    private Runnable epgDebounceRunnable;
 
     private CategoriesAdapter categoriesAdapter;
     private ChannelsAdapter channelsAdapter;
@@ -658,9 +660,13 @@ public class MainActivity extends AppCompatActivity {
             btnReplay.setVisibility(ch.tvArchive == 1 ? View.VISIBLE : View.GONE);
         }
 
-        // Asynchronously fetch short EPG for live channel
+        // Asynchronously fetch short EPG for live channel with 300ms debounce
         if ("live".equals(ch.streamType) || "replay".equals(ch.streamType)) {
-            fetchEpgForChannel(ch);
+            if (epgDebounceRunnable != null) {
+                mainHandler.removeCallbacks(epgDebounceRunnable);
+            }
+            epgDebounceRunnable = () -> fetchEpgForChannel(ch);
+            mainHandler.postDelayed(epgDebounceRunnable, 300);
         }
     }
 
@@ -675,7 +681,25 @@ public class MainActivity extends AppCompatActivity {
                 if (isFinishing() || isDestroyed()) return;
                 if (current != null && current.title != null && !current.title.isEmpty()) {
                     epgCurrentTitleCache.put(ch.id, current.title);
-                    channelsAdapter.notifyItemChangedById(ch.id);
+
+                    // Update UI directly without re-binding or resetting focus (eliminates flickering)
+                    if (activeChannel != null && ch.id.equals(activeChannel.id)) {
+                        if (tvDetailEpg != null) {
+                            tvDetailEpg.setText("🔴 " + current.title);
+                        }
+                        if (recyclerChannels != null && channelsAdapter != null) {
+                            int pos = channelsAdapter.getPositionForId(ch.id);
+                            if (pos != -1) {
+                                RecyclerView.ViewHolder vh = recyclerChannels.findViewHolderForAdapterPosition(pos);
+                                if (vh instanceof ChannelsAdapter.ViewHolder) {
+                                    ChannelsAdapter.ViewHolder cvh = (ChannelsAdapter.ViewHolder) vh;
+                                    if (cvh.tvEpgNow != null) {
+                                        cvh.tvEpgNow.setText("🔴 " + current.title);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1103,8 +1127,12 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        final String streamId = (ch.streamId != null && !ch.streamId.isEmpty())
+                ? ch.streamId
+                : ch.id.replace("xtream_live_", "").replace("xtream_replay_", "");
+
         Toast.makeText(this, "Chargement des programmes en Replay...", Toast.LENGTH_SHORT).show();
-        xtreamClient.fetchCatchupPrograms(pl.serverUrl, pl.username, pl.password, ch.streamId, 3, new XtreamClient.CatchupCallback() {
+        xtreamClient.fetchCatchupPrograms(pl.serverUrl, pl.username, pl.password, streamId, 3, new XtreamClient.CatchupCallback() {
             @Override
             public void onSuccess(List<XtreamClient.EpgProgram> pastPrograms) {
                 if (isFinishing() || isDestroyed()) return;
@@ -1142,22 +1170,42 @@ public class MainActivity extends AppCompatActivity {
             if (!server.startsWith("http://") && !server.startsWith("https://")) server = "http://" + server;
             String user = pl.username.trim();
             String pass = pl.password.trim();
+            String cleanId = ch.streamId != null && !ch.streamId.isEmpty() ? ch.streamId : ch.id.replace("xtream_live_", "").replace("xtream_replay_", "");
 
-            SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
-            String startFormatted = sdf.format(new Date(prog.startMs));
+            SimpleDateFormat sdfLocal = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
+            String startFormattedLocal = sdfLocal.format(new Date(prog.startMs));
+
+            SimpleDateFormat sdfUtc = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
+            sdfUtc.setTimeZone(TimeZone.getTimeZone("UTC"));
+            String startFormattedUtc = sdfUtc.format(new Date(prog.startMs));
+
             long durationMins = (prog.stopMs - prog.startMs) / (60 * 1000);
             if (durationMins <= 0) durationMins = 60;
+            long startSec = prog.startMs / 1000L;
 
-            String catchupUrl = server + "/streaming/timeshift.php?username=" + URLEncoder.encode(user, "UTF-8")
-                    + "&password=" + URLEncoder.encode(pass, "UTF-8")
-                    + "&stream=" + ch.streamId
-                    + "&start=" + startFormatted
-                    + "&duration=" + durationMins;
+            String encUser = URLEncoder.encode(user, "UTF-8");
+            String encPass = URLEncoder.encode(pass, "UTF-8");
 
             List<String> urls = new ArrayList<>();
             List<String> titles = new ArrayList<>();
-            urls.add(catchupUrl);
-            titles.add("[Replay] " + ch.name + " - " + prog.title);
+
+            // 1. Standard Xtream Codes Catchup: /streaming/timeshift.php (local time)
+            urls.add(server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormattedLocal + "&duration=" + durationMins);
+            // 2. Direct Xtream MPEG-TS format: /timeshift/{user}/{pass}/{dur}/{local}/{stream}.ts
+            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormattedLocal + "/" + cleanId + ".ts");
+            // 3. Direct Xtream HLS format: /timeshift/{user}/{pass}/{dur}/{local}/{stream}.m3u8
+            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormattedLocal + "/" + cleanId + ".m3u8");
+            // 4. Timeshift with UTC time (if server clock is UTC)
+            if (!startFormattedUtc.equals(startFormattedLocal)) {
+                urls.add(server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormattedUtc + "&duration=" + durationMins);
+                urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormattedUtc + "/" + cleanId + ".ts");
+            }
+            // 5. Unix timestamp format (XUI.one and newer Xtream panels)
+            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startSec + "/" + cleanId + ".ts");
+
+            for (int u = 0; u < urls.size(); u++) {
+                titles.add("[Replay] " + ch.name + " - " + prog.title);
+            }
 
             PlayerActivity.pendingUrls = urls;
             PlayerActivity.pendingTitles = titles;
@@ -1795,6 +1843,15 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
+        public int getPositionForId(String channelId) {
+            for (int i = 0; i < items.size(); i++) {
+                if (items.get(i).id.equals(channelId)) {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
         public int getSelectedPos() {
             return selectedPos;
         }
@@ -1853,24 +1910,16 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 // PAST Slot (Replay)
-                if (item.tvArchive == 1) {
+                if (item.tvArchive == 1 || "replay".equals(currentType)) {
                     holder.tvEpgPast.setText("◄ Replay disponible");
                     holder.tvEpgPast.setTextColor(0xFF38BDF8);
-                    holder.tvEpgPast.setOnClickListener(v -> showCatchupDialog(item));
                 } else {
                     holder.tvEpgPast.setText("◄ 19:30 Passé");
                     holder.tvEpgPast.setTextColor(0xFF64748B);
-                    holder.tvEpgPast.setOnClickListener(null);
                 }
 
                 // NEXT Slot
                 holder.tvEpgNext.setText("⏭️ À suivre");
-                holder.tvEpgNext.setOnClickListener(v -> Toast.makeText(v.getContext(), "Guide EPG : " + item.name, Toast.LENGTH_SHORT).show());
-
-                holder.tvEpgNow.setOnClickListener(v -> {
-                    selectChannel(item);
-                    launchPlayerFullscreen();
-                });
 
             } else {
                 if (holder.layoutEpgTimeline != null) holder.layoutEpgTimeline.setVisibility(View.GONE);
@@ -1907,7 +1956,9 @@ public class MainActivity extends AppCompatActivity {
                     selectedPos = pos;
                     selectChannel(item);
 
-                    if ("vod".equals(item.streamType)) {
+                    if ("replay".equals(currentType)) {
+                        showCatchupDialog(item);
+                    } else if ("vod".equals(item.streamType)) {
                         showMovieDetailDialog(item);
                     } else if ("series".equals(item.streamType)) {
                         showSeriesDetailDialog(item);
@@ -1937,6 +1988,11 @@ public class MainActivity extends AppCompatActivity {
                             etSearch.requestFocus();
                             return true;
                         }
+                    }
+                } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+                        holder.itemView.performClick();
+                        return true;
                     }
                 }
                 return false;

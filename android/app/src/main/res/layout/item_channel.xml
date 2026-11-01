@@ -115,6 +115,8 @@
             android:orientation="horizontal"
             android:gravity="center_vertical"
             android:layout_marginTop="3dp"
+            android:focusable="false"
+            android:clickable="false"
             android:visibility="gone">
 
             <!-- Past Program (Replay) -->
@@ -132,6 +134,8 @@
                 android:paddingEnd="6dp"
                 android:background="@drawable/bg_epg_slot_selector"
                 android:layout_marginEnd="4dp"
+                android:focusable="false"
+                android:clickable="false"
                 android:text="◄ 19:30 Passé" />
 
             <!-- Current Program (Live) -->
@@ -150,6 +154,8 @@
                 android:paddingEnd="6dp"
                 android:background="@drawable/bg_epg_now_selector"
                 android:layout_marginEnd="4dp"
+                android:focusable="false"
+                android:clickable="false"
                 android:text="🔴 En direct" />
 
             <!-- Next Program (Future) -->
@@ -166,6 +172,8 @@
                 android:paddingStart="6dp"
                 android:paddingEnd="6dp"
                 android:background="@drawable/bg_epg_slot_selector"
+                android:focusable="false"
+                android:clickable="false"
                 android:text="⏭️ Suivant" />
 
         </LinearLayout>

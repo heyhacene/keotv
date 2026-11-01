@@ -844,6 +844,29 @@ public class XtreamClient {
                     }
                 }
 
+                // If no EPG was returned by server, synthesize 1-hour past slots so Replay is always accessible
+                if (list.isEmpty()) {
+                    long nowMs = System.currentTimeMillis();
+                    SimpleDateFormat timeFmt = new SimpleDateFormat("HH:mm", Locale.getDefault());
+                    SimpleDateFormat dayFmt = new SimpleDateFormat("EEEE d MMM", Locale.FRENCH);
+                    for (int i = 1; i <= 12; i++) {
+                        long slotEndMs = (nowMs / 3600_000L) * 3600_000L - ((i - 1) * 3600_000L);
+                        long slotStartMs = slotEndMs - 3600_000L;
+                        EpgProgram p = new EpgProgram();
+                        p.id = "catchup_slot_" + i;
+                        p.startMs = slotStartMs;
+                        p.stopMs = slotEndMs;
+                        p.startTimestamp = slotStartMs / 1000L;
+                        p.stopTimestamp = slotEndMs / 1000L;
+                        p.durationMinutes = 60;
+                        p.title = "Replay de " + timeFmt.format(new Date(slotStartMs)) + " à " + timeFmt.format(new Date(slotEndMs)) + " (" + dayFmt.format(new Date(slotStartMs)) + ")";
+                        p.desc = "Diffusion passée en rattrapage";
+                        p.start = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(slotStartMs));
+                        p.stop = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(slotEndMs));
+                        list.add(p);
+                    }
+                }
+
                 final List<EpgProgram> finalList = list;
                 new Handler(Looper.getMainLooper()).post(() -> {
                     if (callback != null) callback.onSuccess(finalList);

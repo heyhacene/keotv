@@ -13,7 +13,7 @@ import java.util.List;
 public class KeoDatabase extends SQLiteOpenHelper {
 
     private static final String DB_NAME = "keotv_native.db";
-    private static final int DB_VERSION = 3;
+    private static final int DB_VERSION = 4;
     private static KeoDatabase instance;
 
     public static synchronized KeoDatabase getInstance(Context context) {
@@ -58,13 +58,22 @@ public class KeoDatabase extends SQLiteOpenHelper {
     private void safeEnsureColumn(SQLiteDatabase db, String table, String column, String typeDef) {
         Cursor c = null;
         try {
-            c = db.rawQuery("SELECT " + column + " FROM " + table + " LIMIT 0", null);
-        } catch (Exception notFound) {
-            try {
-                db.execSQL("ALTER TABLE " + table + " ADD COLUMN " + column + " " + typeDef);
-            } catch (Exception e) {
-                android.util.Log.w("KeoDatabase", "safeEnsureColumn " + table + "." + column + " failed: " + e.getMessage());
+            c = db.rawQuery("PRAGMA table_info(" + table + ")", null);
+            boolean exists = false;
+            if (c != null) {
+                int nameIdx = c.getColumnIndex("name");
+                while (c.moveToNext()) {
+                    if (nameIdx >= 0 && column.equalsIgnoreCase(c.getString(nameIdx))) {
+                        exists = true;
+                        break;
+                    }
+                }
             }
+            if (!exists) {
+                db.execSQL("ALTER TABLE " + table + " ADD COLUMN " + column + " " + typeDef);
+            }
+        } catch (Exception e) {
+            android.util.Log.w("KeoDatabase", "safeEnsureColumn " + table + "." + column + " failed: " + e.getMessage());
         } finally {
             if (c != null) {
                 try { c.close(); } catch (Exception ignored) {}
@@ -293,6 +302,10 @@ public class KeoDatabase extends SQLiteOpenHelper {
             list.add(item);
         }
         c.close();
+        // Fallback: if provider does not tag tv_archive=1, display all live bouquets for Replay
+        if (list.isEmpty()) {
+            return getCategories("live");
+        }
         return list;
     }
 
@@ -321,6 +334,10 @@ public class KeoDatabase extends SQLiteOpenHelper {
             list.add(item);
         }
         c.close();
+        // Fallback: if provider does not tag tv_archive=1, display all bouquet channels for Replay
+        if (list.isEmpty()) {
+            return getChannelsByGroup(groupId);
+        }
         return list;
     }
 
@@ -441,9 +458,25 @@ public class KeoDatabase extends SQLiteOpenHelper {
         db.execSQL("UPDATE channels SET is_fav = CASE WHEN is_fav = 1 THEN 0 ELSE 1 END WHERE id = ?", new String[]{channelId});
     }
 
-    // High performance bulk inserts in atomic transaction
+    // High performance bulk inserts in atomic transaction with auto-schema repair
     public void bulkInsertCategories(List<CategoryItem> categories, String typeToClear) {
         SQLiteDatabase db = getWritableDatabase();
+        ensureColumnsExist(db);
+        try {
+            doBulkInsertCategories(db, categories, typeToClear);
+        } catch (android.database.sqlite.SQLiteException e) {
+            android.util.Log.e("KeoDatabase", "bulkInsertCategories failed, repairing schema: " + e.getMessage());
+            try {
+                db.execSQL("DROP TABLE IF EXISTS categories");
+                onCreate(db);
+                doBulkInsertCategories(db, categories, typeToClear);
+            } catch (Exception retryEx) {
+                android.util.Log.e("KeoDatabase", "Retry bulkInsertCategories failed: " + retryEx.getMessage());
+            }
+        }
+    }
+
+    private void doBulkInsertCategories(SQLiteDatabase db, List<CategoryItem> categories, String typeToClear) {
         db.beginTransaction();
         try {
             if (typeToClear != null && !typeToClear.isEmpty()) {
@@ -473,6 +506,21 @@ public class KeoDatabase extends SQLiteOpenHelper {
     public void bulkInsertChannels(List<ChannelItem> channels, String typeToClear) {
         SQLiteDatabase db = getWritableDatabase();
         ensureColumnsExist(db);
+        try {
+            doBulkInsertChannels(db, channels, typeToClear);
+        } catch (android.database.sqlite.SQLiteException e) {
+            android.util.Log.e("KeoDatabase", "bulkInsertChannels failed, repairing schema: " + e.getMessage());
+            try {
+                db.execSQL("DROP TABLE IF EXISTS channels");
+                onCreate(db);
+                doBulkInsertChannels(db, channels, typeToClear);
+            } catch (Exception retryEx) {
+                android.util.Log.e("KeoDatabase", "Retry bulkInsertChannels failed: " + retryEx.getMessage());
+            }
+        }
+    }
+
+    private void doBulkInsertChannels(SQLiteDatabase db, List<ChannelItem> channels, String typeToClear) {
         db.beginTransaction();
         try {
             if (typeToClear != null && !typeToClear.isEmpty()) {
@@ -483,7 +531,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
             for (ChannelItem ch : channels) {
-                stmt.bindString(1, ch.id);
+                stmt.bindString(1, ch.id != null ? ch.id : "");
                 stmt.bindString(2, ch.name != null ? ch.name : "");
                 stmt.bindLong(3, ch.num);
                 stmt.bindString(4, ch.groupId != null ? ch.groupId : "");
