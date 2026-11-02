@@ -2086,12 +2086,15 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_category, parent, false);
-            if (parent.getLayoutManager() != null && parent.getLayoutManager().canScrollHorizontally()) {
-                ViewGroup.LayoutParams lp = v.getLayoutParams();
-                if (lp != null) {
-                    lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
-                    lp.height = dpToPx(40);
-                    v.setLayoutParams(lp);
+            if (parent instanceof RecyclerView) {
+                RecyclerView.LayoutManager lm = ((RecyclerView) parent).getLayoutManager();
+                if (lm != null && lm.canScrollHorizontally()) {
+                    ViewGroup.LayoutParams lp = v.getLayoutParams();
+                    if (lp != null) {
+                        lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+                        lp.height = dpToPx(40);
+                        v.setLayoutParams(lp);
+                    }
                 }
             }
             return new ViewHolder(v);
