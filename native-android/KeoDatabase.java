@@ -51,8 +51,26 @@ public class KeoDatabase extends SQLiteOpenHelper {
         safeEnsureColumn(db, "channels", "tv_archive", "INTEGER DEFAULT 0");
         safeEnsureColumn(db, "channels", "tv_archive_duration", "INTEGER DEFAULT 0");
         safeEnsureColumn(db, "channels", "epg_channel_id", "TEXT");
+        safeEnsureColumn(db, "channels", "cast", "TEXT");
+        safeEnsureColumn(db, "channels", "director", "TEXT");
+        safeEnsureColumn(db, "channels", "plot", "TEXT");
+        safeEnsureColumn(db, "channels", "genre", "TEXT");
+        safeEnsureColumn(db, "channels", "release_date", "TEXT");
+        safeEnsureColumn(db, "channels", "rating", "TEXT");
         safeEnsureColumn(db, "categories", "is_adult", "INTEGER DEFAULT 0");
         safeEnsureColumn(db, "categories", "is_hidden", "INTEGER DEFAULT 0");
+
+        try {
+            db.execSQL("CREATE TABLE IF NOT EXISTS movie_actors ("
+                    + "channel_id TEXT, "
+                    + "actor_name TEXT, "
+                    + "stream_type TEXT, "
+                    + "PRIMARY KEY (channel_id, actor_name))");
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_actor_name ON movie_actors(actor_name)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS idx_actor_channel ON movie_actors(channel_id)");
+        } catch (Exception e) {
+            android.util.Log.w("KeoDatabase", "ensureColumnsExist movie_actors failed: " + e.getMessage());
+        }
     }
 
     private void safeEnsureColumn(SQLiteDatabase db, String table, String column, String typeDef) {
@@ -121,11 +139,26 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 + "stream_id TEXT, "
                 + "tv_archive INTEGER DEFAULT 0, "
                 + "tv_archive_duration INTEGER DEFAULT 0, "
-                + "epg_channel_id TEXT)");
+                + "epg_channel_id TEXT, "
+                + "cast TEXT, "
+                + "director TEXT, "
+                + "plot TEXT, "
+                + "genre TEXT, "
+                + "release_date TEXT, "
+                + "rating TEXT)");
 
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_ch_group ON channels(group_id)");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_ch_type ON channels(stream_type)");
         db.execSQL("CREATE INDEX IF NOT EXISTS idx_ch_fav ON channels(is_fav)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_ch_name ON channels(name)");
+
+        db.execSQL("CREATE TABLE IF NOT EXISTS movie_actors ("
+                + "channel_id TEXT, "
+                + "actor_name TEXT, "
+                + "stream_type TEXT, "
+                + "PRIMARY KEY (channel_id, actor_name))");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_actor_name ON movie_actors(actor_name)");
+        db.execSQL("CREATE INDEX IF NOT EXISTS idx_actor_channel ON movie_actors(channel_id)");
 
         db.execSQL("CREATE TABLE IF NOT EXISTS settings ("
                 + "key TEXT PRIMARY KEY, "
@@ -138,6 +171,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
         try {
             db.execSQL("DELETE FROM categories");
             db.execSQL("DELETE FROM channels");
+            db.execSQL("DELETE FROM movie_actors");
             if (!keepPlaylist) {
                 db.execSQL("DELETE FROM playlists");
                 db.execSQL("DELETE FROM settings");
@@ -150,11 +184,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
     @Override
     public void onUpgrade(SQLiteDatabase db, int oldVersion, int newVersion) {
-        try {
-            db.execSQL("DROP TABLE IF EXISTS categories");
-            db.execSQL("DROP TABLE IF EXISTS channels");
-            onCreate(db);
-        } catch (Exception ignored) {}
+        ensureColumnsExist(db);
     }
 
     // Models
@@ -192,8 +222,44 @@ public class KeoDatabase extends SQLiteOpenHelper {
         public int tvArchive;
         public int tvArchiveDuration;
         public String epgChannelId;
+        public String cast;
+        public String director;
+        public String plot;
+        public String genre;
+        public String releaseDate;
+        public String rating;
 
         public ChannelItem() {}
+    }
+
+    public static final String CHANNEL_COLUMNS = "id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id, cast, director, plot, genre, release_date, rating";
+
+    public ChannelItem cursorToChannel(Cursor c) {
+        ChannelItem item = new ChannelItem();
+        item.id = c.getString(0);
+        item.name = c.getString(1);
+        item.num = c.getInt(2);
+        item.groupId = c.getString(3);
+        item.groupName = c.getString(4);
+        item.streamUrl = c.getString(5);
+        item.streamType = c.getString(6);
+        item.logo = c.getString(7);
+        item.isFav = c.getInt(8) == 1;
+        item.resolution = c.getString(9);
+        item.isSeparator = c.getInt(10) == 1;
+        item.streamId = c.getString(11);
+        item.tvArchive = c.getInt(12);
+        item.tvArchiveDuration = c.getInt(13);
+        item.epgChannelId = c.getString(14);
+        if (c.getColumnCount() > 15) {
+            item.cast = c.getString(15);
+            item.director = c.getString(16);
+            item.plot = c.getString(17);
+            item.genre = c.getString(18);
+            item.releaseDate = c.getString(19);
+            item.rating = c.getString(20);
+        }
+        return item;
     }
 
     public static class PlaylistItem {
@@ -312,26 +378,10 @@ public class KeoDatabase extends SQLiteOpenHelper {
     public List<ChannelItem> getReplayChannelsByGroup(String groupId) {
         List<ChannelItem> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id "
-                + "FROM channels WHERE group_id = ? AND tv_archive = 1 AND is_separator = 0 ORDER BY num ASC, name ASC", new String[]{groupId});
+        Cursor c = db.rawQuery("SELECT " + CHANNEL_COLUMNS
+                + " FROM channels WHERE group_id = ? AND tv_archive = 1 AND is_separator = 0 ORDER BY num ASC, name ASC", new String[]{groupId});
         while (c.moveToNext()) {
-            ChannelItem item = new ChannelItem();
-            item.id = c.getString(0);
-            item.name = c.getString(1);
-            item.num = c.getInt(2);
-            item.groupId = c.getString(3);
-            item.groupName = c.getString(4);
-            item.streamUrl = c.getString(5);
-            item.streamType = c.getString(6);
-            item.logo = c.getString(7);
-            item.isFav = c.getInt(8) == 1;
-            item.resolution = c.getString(9);
-            item.isSeparator = c.getInt(10) == 1;
-            item.streamId = c.getString(11);
-            item.tvArchive = c.getInt(12);
-            item.tvArchiveDuration = c.getInt(13);
-            item.epgChannelId = c.getString(14);
-            list.add(item);
+            list.add(cursorToChannel(c));
         }
         c.close();
         // Fallback: if provider does not tag tv_archive=1, display all bouquet channels for Replay
@@ -349,27 +399,11 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
         List<ChannelItem> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id "
-                + "FROM channels WHERE group_id = ? AND is_separator = 0 ORDER BY num ASC, name ASC", new String[]{groupId});
+        Cursor c = db.rawQuery("SELECT " + CHANNEL_COLUMNS
+                + " FROM channels WHERE group_id = ? AND is_separator = 0 ORDER BY num ASC, name ASC", new String[]{groupId});
 
         while (c.moveToNext()) {
-            ChannelItem item = new ChannelItem();
-            item.id = c.getString(0);
-            item.name = c.getString(1);
-            item.num = c.getInt(2);
-            item.groupId = c.getString(3);
-            item.groupName = c.getString(4);
-            item.streamUrl = c.getString(5);
-            item.streamType = c.getString(6);
-            item.logo = c.getString(7);
-            item.isFav = c.getInt(8) == 1;
-            item.resolution = c.getString(9);
-            item.isSeparator = c.getInt(10) == 1;
-            item.streamId = c.getString(11);
-            item.tvArchive = c.getInt(12);
-            item.tvArchiveDuration = c.getInt(13);
-            item.epgChannelId = c.getString(14);
-            list.add(item);
+            list.add(cursorToChannel(c));
         }
         c.close();
         return list;
@@ -378,27 +412,11 @@ public class KeoDatabase extends SQLiteOpenHelper {
     public List<ChannelItem> getFavoriteChannels() {
         List<ChannelItem> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id "
-                + "FROM channels WHERE is_fav = 1 AND is_separator = 0 ORDER BY name ASC", null);
+        Cursor c = db.rawQuery("SELECT " + CHANNEL_COLUMNS
+                + " FROM channels WHERE is_fav = 1 AND is_separator = 0 ORDER BY name ASC", null);
 
         while (c.moveToNext()) {
-            ChannelItem item = new ChannelItem();
-            item.id = c.getString(0);
-            item.name = c.getString(1);
-            item.num = c.getInt(2);
-            item.groupId = c.getString(3);
-            item.groupName = c.getString(4);
-            item.streamUrl = c.getString(5);
-            item.streamType = c.getString(6);
-            item.logo = c.getString(7);
-            item.isFav = true;
-            item.resolution = c.getString(9);
-            item.isSeparator = c.getInt(10) == 1;
-            item.streamId = c.getString(11);
-            item.tvArchive = c.getInt(12);
-            item.tvArchiveDuration = c.getInt(13);
-            item.epgChannelId = c.getString(14);
-            list.add(item);
+            list.add(cursorToChannel(c));
         }
         c.close();
         return list;
@@ -410,27 +428,11 @@ public class KeoDatabase extends SQLiteOpenHelper {
         }
         List<ChannelItem> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
-        Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id "
-                + "FROM channels WHERE is_fav = 1 AND is_separator = 0 AND stream_type = ? ORDER BY name ASC", new String[]{typeFilter});
+        Cursor c = db.rawQuery("SELECT " + CHANNEL_COLUMNS
+                + " FROM channels WHERE is_fav = 1 AND is_separator = 0 AND stream_type = ? ORDER BY name ASC", new String[]{typeFilter});
 
         while (c.moveToNext()) {
-            ChannelItem item = new ChannelItem();
-            item.id = c.getString(0);
-            item.name = c.getString(1);
-            item.num = c.getInt(2);
-            item.groupId = c.getString(3);
-            item.groupName = c.getString(4);
-            item.streamUrl = c.getString(5);
-            item.streamType = c.getString(6);
-            item.logo = c.getString(7);
-            item.isFav = true;
-            item.resolution = c.getString(9);
-            item.isSeparator = c.getInt(10) == 1;
-            item.streamId = c.getString(11);
-            item.tvArchive = c.getInt(12);
-            item.tvArchiveDuration = c.getInt(13);
-            item.epgChannelId = c.getString(14);
-            list.add(item);
+            list.add(cursorToChannel(c));
         }
         c.close();
         return list;
@@ -462,39 +464,87 @@ public class KeoDatabase extends SQLiteOpenHelper {
         if (query == null || query.trim().isEmpty()) return list;
         SQLiteDatabase db = getReadableDatabase();
         String q = "%" + query.trim() + "%";
-        String sql = "SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id "
-                + "FROM channels WHERE name LIKE ? AND is_separator = 0";
-        String[] args;
-        if (streamType != null && !streamType.isEmpty()) {
-            sql += " AND stream_type = ?";
-            args = new String[]{q, streamType};
-        } else {
-            args = new String[]{q};
-        }
-        sql += " ORDER BY num ASC, name ASC LIMIT 100";
 
-        Cursor c = db.rawQuery(sql, args);
+        String sql = "SELECT DISTINCT " + CHANNEL_COLUMNS
+                + " FROM channels WHERE (name LIKE ? OR cast LIKE ? OR director LIKE ? "
+                + " OR id IN (SELECT channel_id FROM movie_actors WHERE actor_name LIKE ?)) "
+                + " AND is_separator = 0";
+
+        List<String> argsList = new ArrayList<>();
+        argsList.add(q);
+        argsList.add(q);
+        argsList.add(q);
+        argsList.add(q);
+
+        if (streamType != null && !streamType.isEmpty() && !"all".equalsIgnoreCase(streamType)) {
+            sql += " AND stream_type = ?";
+            argsList.add(streamType);
+        }
+
+        sql += " ORDER BY (CASE WHEN name LIKE ? THEN 0 WHEN cast LIKE ? THEN 1 ELSE 2 END), name ASC LIMIT 100";
+        argsList.add(q);
+        argsList.add(q);
+
+        Cursor c = db.rawQuery(sql, argsList.toArray(new String[0]));
         while (c.moveToNext()) {
-            ChannelItem item = new ChannelItem();
-            item.id = c.getString(0);
-            item.name = c.getString(1);
-            item.num = c.getInt(2);
-            item.groupId = c.getString(3);
-            item.groupName = c.getString(4);
-            item.streamUrl = c.getString(5);
-            item.streamType = c.getString(6);
-            item.logo = c.getString(7);
-            item.isFav = c.getInt(8) == 1;
-            item.resolution = c.getString(9);
-            item.isSeparator = c.getInt(10) == 1;
-            item.streamId = c.getString(11);
-            item.tvArchive = c.getInt(12);
-            item.tvArchiveDuration = c.getInt(13);
-            item.epgChannelId = c.getString(14);
-            list.add(item);
+            list.add(cursorToChannel(c));
         }
         c.close();
         return list;
+    }
+
+    public void saveActorsForChannel(SQLiteDatabase db, String channelId, String cast, String streamType) {
+        if (channelId == null || cast == null || cast.trim().isEmpty()) return;
+        try {
+            SQLiteStatement del = db.compileStatement("DELETE FROM movie_actors WHERE channel_id = ?");
+            del.bindString(1, channelId);
+            del.executeUpdateDelete();
+
+            SQLiteStatement ins = db.compileStatement("INSERT OR IGNORE INTO movie_actors (channel_id, actor_name, stream_type) VALUES (?, ?, ?)");
+            String[] actors = cast.split("[,;/]");
+            for (String a : actors) {
+                String actorName = a.trim();
+                if (actorName.length() > 1) {
+                    ins.bindString(1, channelId);
+                    ins.bindString(2, actorName);
+                    ins.bindString(3, streamType != null ? streamType : "vod");
+                    ins.executeInsert();
+                }
+            }
+        } catch (Exception e) {
+            android.util.Log.w("KeoDatabase", "saveActorsForChannel error: " + e.getMessage());
+        }
+    }
+
+    public void updateChannelMetadata(String id, String cast, String director, String plot, String genre, String releaseDate, String rating) {
+        if (id == null || id.isEmpty()) return;
+        SQLiteDatabase db = getWritableDatabase();
+        ensureColumnsExist(db);
+        db.beginTransaction();
+        try {
+            ContentValues cv = new ContentValues();
+            if (cast != null) cv.put("cast", cast);
+            if (director != null) cv.put("director", director);
+            if (plot != null) cv.put("plot", plot);
+            if (genre != null) cv.put("genre", genre);
+            if (releaseDate != null) cv.put("release_date", releaseDate);
+            if (rating != null) cv.put("rating", rating);
+
+            db.update("channels", cv, "id = ?", new String[]{id});
+
+            if (cast != null && !cast.trim().isEmpty()) {
+                Cursor c = db.rawQuery("SELECT stream_type FROM channels WHERE id = ? LIMIT 1", new String[]{id});
+                String st = "vod";
+                if (c.moveToFirst()) st = c.getString(0);
+                c.close();
+                saveActorsForChannel(db, id, cast, st);
+            }
+            db.setTransactionSuccessful();
+        } catch (Exception e) {
+            android.util.Log.e("KeoDatabase", "updateChannelMetadata failed: " + e.getMessage());
+        } finally {
+            db.endTransaction();
+        }
     }
 
     public void toggleFavorite(String channelId) {
@@ -556,6 +606,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
             android.util.Log.e("KeoDatabase", "bulkInsertChannels failed, repairing schema: " + e.getMessage());
             try {
                 db.execSQL("DROP TABLE IF EXISTS channels");
+                db.execSQL("DROP TABLE IF EXISTS movie_actors");
                 onCreate(db);
                 doBulkInsertChannels(db, channels, typeToClear);
             } catch (Exception retryEx) {
@@ -569,10 +620,14 @@ public class KeoDatabase extends SQLiteOpenHelper {
         try {
             if (typeToClear != null && !typeToClear.isEmpty()) {
                 db.execSQL("DELETE FROM channels WHERE stream_type = ?", new String[]{typeToClear});
+                db.execSQL("DELETE FROM movie_actors WHERE stream_type = ?", new String[]{typeToClear});
             }
             SQLiteStatement stmt = db.compileStatement(
-                    "INSERT OR REPLACE INTO channels (id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id) "
-                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    "INSERT OR REPLACE INTO channels (id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id, cast, director, plot, genre, release_date, rating) "
+                            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+
+            SQLiteStatement actorStmt = db.compileStatement(
+                    "INSERT OR IGNORE INTO movie_actors (channel_id, actor_name, stream_type) VALUES (?, ?, ?)");
 
             for (ChannelItem ch : channels) {
                 stmt.bindString(1, ch.id != null ? ch.id : "");
@@ -590,7 +645,26 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 stmt.bindLong(13, ch.tvArchive);
                 stmt.bindLong(14, ch.tvArchiveDuration);
                 stmt.bindString(15, ch.epgChannelId != null ? ch.epgChannelId : "");
+                stmt.bindString(16, ch.cast != null ? ch.cast : "");
+                stmt.bindString(17, ch.director != null ? ch.director : "");
+                stmt.bindString(18, ch.plot != null ? ch.plot : "");
+                stmt.bindString(19, ch.genre != null ? ch.genre : "");
+                stmt.bindString(20, ch.releaseDate != null ? ch.releaseDate : "");
+                stmt.bindString(21, ch.rating != null ? ch.rating : "");
                 stmt.executeInsert();
+
+                if (ch.cast != null && !ch.cast.trim().isEmpty()) {
+                    String[] actors = ch.cast.split("[,;/]");
+                    for (String a : actors) {
+                        String actorName = a.trim();
+                        if (actorName.length() > 1) {
+                            actorStmt.bindString(1, ch.id != null ? ch.id : "");
+                            actorStmt.bindString(2, actorName);
+                            actorStmt.bindString(3, ch.streamType != null ? ch.streamType : "vod");
+                            actorStmt.executeInsert();
+                        }
+                    }
+                }
             }
             db.setTransactionSuccessful();
         } finally {

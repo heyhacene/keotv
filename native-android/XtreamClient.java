@@ -278,6 +278,25 @@ public class XtreamClient {
                             ch.isSeparator = false;
                             ch.streamId = streamId;
 
+                            String cast = getOptString(obj, "cast", "");
+                            if (cast.isEmpty()) cast = getOptString(obj, "actors", "");
+                            String director = getOptString(obj, "director", "");
+                            String plot = getOptString(obj, "plot", "");
+                            if (plot.isEmpty()) plot = getOptString(obj, "description", "");
+                            String genre = getOptString(obj, "genre", "");
+                            String releaseDate = getOptString(obj, "release_date", "");
+                            if (releaseDate.isEmpty()) releaseDate = getOptString(obj, "releasedate", "");
+                            if (releaseDate.isEmpty()) releaseDate = getOptString(obj, "year", "");
+                            String rating = getOptString(obj, "rating", "");
+                            if (rating.isEmpty() && obj.has("rating_5based")) rating = getOptString(obj, "rating_5based", "");
+
+                            ch.cast = cast;
+                            ch.director = director;
+                            ch.plot = plot;
+                            ch.genre = genre;
+                            ch.releaseDate = releaseDate;
+                            ch.rating = rating;
+
                             vodMovies.add(ch);
                         }
                         db.bulkInsertChannels(vodMovies, "vod");
@@ -338,6 +357,23 @@ public class XtreamClient {
                             ch.resolution = "HD";
                             ch.isSeparator = false;
                             ch.streamId = seriesId;
+
+                            String cast = getOptString(obj, "cast", "");
+                            if (cast.isEmpty()) cast = getOptString(obj, "actors", "");
+                            String director = getOptString(obj, "director", "");
+                            String plot = getOptString(obj, "plot", "");
+                            String genre = getOptString(obj, "genre", "");
+                            String releaseDate = getOptString(obj, "releaseDate", "");
+                            if (releaseDate.isEmpty()) releaseDate = getOptString(obj, "year", "");
+                            String rating = getOptString(obj, "rating", "");
+                            if (rating.isEmpty() && obj.has("rating_5based")) rating = getOptString(obj, "rating_5based", "");
+
+                            ch.cast = cast;
+                            ch.director = director;
+                            ch.plot = plot;
+                            ch.genre = genre;
+                            ch.releaseDate = releaseDate;
+                            ch.rating = rating;
 
                             seriesList.add(ch);
                         }

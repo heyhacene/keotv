@@ -448,10 +448,15 @@ public class MainActivity extends AppCompatActivity {
 
     private void switchToSearch(String query) {
         switchSection("search");
+        globalSearchFilter = "all";
+        updateSearchFilterTabs();
         if (etGlobalSearch != null) {
-            etGlobalSearch.setText(query);
-            etGlobalSearch.setSelection(query.length());
+            etGlobalSearch.setText(query != null ? query : "");
+            if (query != null && !query.isEmpty()) {
+                etGlobalSearch.setSelection(query.length());
+            }
         }
+        performGlobalSearch(query != null ? query : "", "all");
     }
 
     private void updateSidebarHighlights() {
@@ -894,6 +899,68 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // --- FICHE FILM (VOD MOVIE DETAIL DIALOG) ---
+    private void populateActorChips(LinearLayout layoutActorsContainer, String castStr, AlertDialog dialog, KeoDatabase.ChannelItem movieItem, String[] firstActor) {
+        if (layoutActorsContainer == null || castStr == null || castStr.trim().isEmpty()) return;
+        layoutActorsContainer.removeAllViews();
+        String[] actorList = castStr.split("[,;/]");
+        int addedCount = 0;
+        for (String rawActor : actorList) {
+            final String actorName = rawActor.trim();
+            if (actorName.isEmpty()) continue;
+            if (addedCount == 0 && firstActor != null && firstActor.length > 0) {
+                firstActor[0] = actorName;
+            }
+            addedCount++;
+
+            Button actorChip = new Button(MainActivity.this);
+            actorChip.setText("👤 " + actorName);
+            actorChip.setTextColor(0xFFE2E8F0);
+            actorChip.setTextSize(11.5f);
+            actorChip.setTypeface(Typeface.DEFAULT_BOLD);
+            actorChip.setAllCaps(false);
+            actorChip.setFocusable(true);
+            actorChip.setFocusableInTouchMode(true);
+            actorChip.setPadding(dpToPx(12), dpToPx(5), dpToPx(12), dpToPx(5));
+
+            GradientDrawable chipBg = new GradientDrawable();
+            chipBg.setColor(0x2B334155);
+            chipBg.setCornerRadius(dpToPx(14));
+            chipBg.setStroke(dpToPx(1), 0xFF475569);
+            actorChip.setBackground(chipBg);
+
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, dpToPx(34));
+            lp.setMarginEnd(dpToPx(8));
+            actorChip.setLayoutParams(lp);
+
+            actorChip.setOnFocusChangeListener((v, hasFocus) -> {
+                GradientDrawable bg = (GradientDrawable) actorChip.getBackground();
+                if (hasFocus) {
+                    bg.setColor(0xFF0284C7);
+                    bg.setStroke(dpToPx(2), Color.WHITE);
+                    actorChip.setScaleX(1.05f);
+                    actorChip.setScaleY(1.05f);
+                } else {
+                    bg.setColor(0x2B334155);
+                    bg.setStroke(dpToPx(1), 0xFF475569);
+                    actorChip.setScaleX(1.0f);
+                    actorChip.setScaleY(1.0f);
+                }
+            });
+
+            actorChip.setOnClickListener(v -> {
+                dialog.dismiss();
+                if (movieItem != null && movieItem.cast != null && !movieItem.cast.isEmpty()) {
+                    db.updateChannelMetadata(movieItem.id, movieItem.cast, movieItem.director, movieItem.plot, movieItem.genre, movieItem.releaseDate, movieItem.rating);
+                }
+                switchToSearch(actorName);
+            });
+
+            layoutActorsContainer.addView(actorChip);
+            if (addedCount >= 16) break;
+        }
+    }
+
     private void showMovieDetailDialog(final KeoDatabase.ChannelItem movieItem) {
         if (isFinishing() || isDestroyed() || movieItem == null) return;
 
@@ -933,6 +1000,26 @@ public class MainActivity extends AppCompatActivity {
             final String[] firstActor = new String[]{""};
             final String[] streamUrlHolder = new String[]{movieItem.streamUrl};
             final long[] savedPosHolder = new long[]{getSavedPositionForUrl(movieItem.streamUrl)};
+
+            // Immediate pre-population from cached database metadata
+            if (movieItem.rating != null && !movieItem.rating.isEmpty()) {
+                tvRating.setText("⭐ " + movieItem.rating);
+            }
+            if (movieItem.releaseDate != null && !movieItem.releaseDate.isEmpty()) {
+                tvYear.setText(movieItem.releaseDate);
+            }
+            if (movieItem.genre != null && !movieItem.genre.isEmpty()) {
+                tvGenre.setText(" • " + movieItem.genre);
+            }
+            if (movieItem.plot != null && !movieItem.plot.isEmpty()) {
+                tvPlot.setText(movieItem.plot);
+            }
+            if (movieItem.director != null && !movieItem.director.isEmpty()) {
+                tvDirector.setText("Réalisateur : " + movieItem.director);
+            }
+            if (movieItem.cast != null && !movieItem.cast.isEmpty()) {
+                populateActorChips(layoutActorsContainer, movieItem.cast, dialog, movieItem, firstActor);
+            }
 
             Runnable updatePlayButtons = () -> {
                 long pos = savedPosHolder[0];
@@ -985,70 +1072,46 @@ public class MainActivity extends AppCompatActivity {
                         if (info.has("director") && !info.get("director").isJsonNull()) {
                             tvDirector.setText("Réalisateur : " + info.get("director").getAsString());
                         }
+
+                        // Extract full metadata
+                        String cast = "";
                         if (info.has("cast") && !info.get("cast").isJsonNull()) {
-                            String castStr = info.get("cast").getAsString().trim();
-                            if (castStr.contains(",")) {
-                                firstActor[0] = castStr.split(",")[0].trim();
-                            } else {
-                                firstActor[0] = castStr.trim();
-                            }
-
-                            // Populate individual clickable actor badges
-                            if (layoutActorsContainer != null && !castStr.isEmpty()) {
-                                layoutActorsContainer.removeAllViews();
-                                String[] actorList = castStr.split("[,;/]");
-                                int addedCount = 0;
-                                for (String rawActor : actorList) {
-                                    final String actorName = rawActor.trim();
-                                    if (actorName.isEmpty()) continue;
-                                    addedCount++;
-
-                                    Button actorChip = new Button(MainActivity.this);
-                                    actorChip.setText("👤 " + actorName);
-                                    actorChip.setTextColor(0xFFE2E8F0);
-                                    actorChip.setTextSize(11.5f);
-                                    actorChip.setTypeface(Typeface.DEFAULT_BOLD);
-                                    actorChip.setAllCaps(false);
-                                    actorChip.setFocusable(true);
-                                    actorChip.setFocusableInTouchMode(true);
-                                    actorChip.setPadding(dpToPx(12), dpToPx(5), dpToPx(12), dpToPx(5));
-
-                                    GradientDrawable chipBg = new GradientDrawable();
-                                    chipBg.setColor(0x2B334155);
-                                    chipBg.setCornerRadius(dpToPx(14));
-                                    chipBg.setStroke(dpToPx(1), 0xFF475569);
-                                    actorChip.setBackground(chipBg);
-
-                                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                                            ViewGroup.LayoutParams.WRAP_CONTENT, dpToPx(34));
-                                    lp.setMarginEnd(dpToPx(8));
-                                    actorChip.setLayoutParams(lp);
-
-                                    actorChip.setOnFocusChangeListener((v, hasFocus) -> {
-                                        GradientDrawable bg = (GradientDrawable) actorChip.getBackground();
-                                        if (hasFocus) {
-                                            bg.setColor(0xFF0284C7);
-                                            bg.setStroke(dpToPx(2), Color.WHITE);
-                                            actorChip.setScaleX(1.05f);
-                                            actorChip.setScaleY(1.05f);
-                                        } else {
-                                            bg.setColor(0x2B334155);
-                                            bg.setStroke(dpToPx(1), 0xFF475569);
-                                            actorChip.setScaleX(1.0f);
-                                            actorChip.setScaleY(1.0f);
-                                        }
-                                    });
-
-                                    actorChip.setOnClickListener(v -> {
-                                        dialog.dismiss();
-                                        switchToSearch(actorName);
-                                    });
-
-                                    layoutActorsContainer.addView(actorChip);
-                                    if (addedCount >= 16) break;
-                                }
-                            }
+                            cast = info.get("cast").getAsString().trim();
+                        } else if (info.has("actors") && !info.get("actors").isJsonNull()) {
+                            cast = info.get("actors").getAsString().trim();
                         }
+                        String director = info.has("director") && !info.get("director").isJsonNull() ? info.get("director").getAsString().trim() : (movieItem.director != null ? movieItem.director : "");
+                        String genre = info.has("genre") && !info.get("genre").isJsonNull() ? info.get("genre").getAsString().trim() : (movieItem.genre != null ? movieItem.genre : "");
+                        String plot = info.has("plot") && !info.get("plot").isJsonNull() ? info.get("plot").getAsString().trim() : (movieItem.plot != null ? movieItem.plot : "");
+                        String releaseDate = "";
+                        if (info.has("releasedate") && !info.get("releasedate").isJsonNull()) {
+                            releaseDate = info.get("releasedate").getAsString().trim();
+                        } else if (info.has("year") && !info.get("year").isJsonNull()) {
+                            releaseDate = info.get("year").getAsString().trim();
+                        } else if (movieItem.releaseDate != null) {
+                            releaseDate = movieItem.releaseDate;
+                        }
+                        String rating = info.has("rating") && !info.get("rating").isJsonNull() ? info.get("rating").getAsString().trim() : (movieItem.rating != null ? movieItem.rating : "");
+
+                        if (!cast.isEmpty()) {
+                            movieItem.cast = cast;
+                            populateActorChips(layoutActorsContainer, cast, dialog, movieItem, firstActor);
+                        }
+                        movieItem.director = director;
+                        movieItem.genre = genre;
+                        movieItem.plot = plot;
+                        movieItem.releaseDate = releaseDate;
+                        movieItem.rating = rating;
+
+                        // Persist metadata asynchronously in database
+                        final String fCast = movieItem.cast;
+                        final String fDirector = director;
+                        final String fGenre = genre;
+                        final String fPlot = plot;
+                        final String fReleaseDate = releaseDate;
+                        final String fRating = rating;
+                        new Thread(() -> db.updateChannelMetadata(movieItem.id, fCast, fDirector, fPlot, fGenre, fReleaseDate, fRating)).start();
+
                         if (info.has("movie_image") && !info.get("movie_image").isJsonNull()) {
                             ImageLoader.load(MainActivity.this, info.get("movie_image").getAsString(), ivPoster);
                         }
@@ -1115,6 +1178,9 @@ public class MainActivity extends AppCompatActivity {
             if (btnSearchActor != null) {
                 btnSearchActor.setOnClickListener(v -> {
                     dialog.dismiss();
+                    if (movieItem != null && movieItem.cast != null && !movieItem.cast.isEmpty()) {
+                        db.updateChannelMetadata(movieItem.id, movieItem.cast, movieItem.director, movieItem.plot, movieItem.genre, movieItem.releaseDate, movieItem.rating);
+                    }
                     if (!firstActor[0].isEmpty()) {
                         switchToSearch(firstActor[0]);
                     } else {
@@ -1165,6 +1231,18 @@ public class MainActivity extends AppCompatActivity {
                 ImageLoader.load(this, seriesItem.logo, ivCover);
             }
 
+            // Pre-populate cached metadata
+            if (seriesItem.rating != null && !seriesItem.rating.isEmpty()) {
+                tvRating.setText("⭐ " + seriesItem.rating);
+            }
+            if (seriesItem.plot != null && !seriesItem.plot.isEmpty()) {
+                tvPlot.setText(seriesItem.plot);
+            }
+            if (seriesItem.genre != null && !seriesItem.genre.isEmpty() && tvMeta != null) {
+                String meta = (seriesItem.releaseDate != null ? seriesItem.releaseDate + " • " : "") + seriesItem.genre;
+                tvMeta.setText(meta);
+            }
+
             final AlertDialog dialog = new AlertDialog.Builder(this)
                     .setView(view)
                     .create();
@@ -1181,7 +1259,7 @@ public class MainActivity extends AppCompatActivity {
                         if (isFinishing() || isDestroyed()) return;
 
                         JsonObject info = seriesDetails.has("info") && seriesDetails.get("info").isJsonObject()
-                                ? seriesDetails.getAsJsonObject("info") : new JsonObject();
+                                 ? seriesDetails.getAsJsonObject("info") : new JsonObject();
 
                         if (info.has("name") && !info.get("name").isJsonNull()) {
                             tvTitle.setText(info.get("name").getAsString());
@@ -1195,6 +1273,36 @@ public class MainActivity extends AppCompatActivity {
                         if (info.has("cover") && !info.get("cover").isJsonNull()) {
                             ImageLoader.load(MainActivity.this, info.get("cover").getAsString(), ivCover);
                         }
+
+                        // Extract and cache metadata
+                        String cast = info.has("cast") && !info.get("cast").isJsonNull() ? info.get("cast").getAsString().trim() : (seriesItem.cast != null ? seriesItem.cast : "");
+                        if (cast.isEmpty() && info.has("actors") && !info.get("actors").isJsonNull()) {
+                            cast = info.get("actors").getAsString().trim();
+                        }
+                        String director = info.has("director") && !info.get("director").isJsonNull() ? info.get("director").getAsString().trim() : (seriesItem.director != null ? seriesItem.director : "");
+                        String genre = info.has("genre") && !info.get("genre").isJsonNull() ? info.get("genre").getAsString().trim() : (seriesItem.genre != null ? seriesItem.genre : "");
+                        String plot = info.has("plot") && !info.get("plot").isJsonNull() ? info.get("plot").getAsString().trim() : (seriesItem.plot != null ? seriesItem.plot : "");
+                        String releaseDate = info.has("releaseDate") && !info.get("releaseDate").isJsonNull() ? info.get("releaseDate").getAsString().trim() : (seriesItem.releaseDate != null ? seriesItem.releaseDate : "");
+                        String rating = info.has("rating") && !info.get("rating").isJsonNull() ? info.get("rating").getAsString().trim() : (seriesItem.rating != null ? seriesItem.rating : "");
+
+                        seriesItem.cast = cast;
+                        seriesItem.director = director;
+                        seriesItem.genre = genre;
+                        seriesItem.plot = plot;
+                        seriesItem.releaseDate = releaseDate;
+                        seriesItem.rating = rating;
+
+                        if (tvMeta != null && (!genre.isEmpty() || !releaseDate.isEmpty())) {
+                            tvMeta.setText((!releaseDate.isEmpty() ? releaseDate + " • " : "") + genre);
+                        }
+
+                        final String fCast = cast;
+                        final String fDirector = director;
+                        final String fGenre = genre;
+                        final String fPlot = plot;
+                        final String fReleaseDate = releaseDate;
+                        final String fRating = rating;
+                        new Thread(() -> db.updateChannelMetadata(seriesItem.id, fCast, fDirector, fPlot, fGenre, fReleaseDate, fRating)).start();
 
                         JsonObject episodesObj = seriesDetails.has("episodes") && seriesDetails.get("episodes").isJsonObject()
                                 ? seriesDetails.getAsJsonObject("episodes") : new JsonObject();
@@ -2327,9 +2435,17 @@ public class MainActivity extends AppCompatActivity {
                 if (holder.tvEpg != null) {
                     holder.tvEpg.setVisibility(View.VISIBLE);
                     if ("vod".equals(item.streamType)) {
-                        holder.tvEpg.setText("🎬 Film VOD • " + (item.resolution != null ? item.resolution : "HD"));
+                        StringBuilder sb = new StringBuilder("🎬 Film VOD");
+                        if (item.releaseDate != null && !item.releaseDate.isEmpty()) sb.append(" • ").append(item.releaseDate);
+                        if (item.rating != null && !item.rating.isEmpty()) sb.append(" • ⭐ ").append(item.rating);
+                        if (item.director != null && !item.director.isEmpty()) sb.append(" • ").append(item.director);
+                        holder.tvEpg.setText(sb.toString());
                     } else if ("series".equals(item.streamType)) {
-                        holder.tvEpg.setText("🍿 Série TV • Cliquez pour afficher les saisons & épisodes");
+                        StringBuilder sb = new StringBuilder("🍿 Série TV");
+                        if (item.releaseDate != null && !item.releaseDate.isEmpty()) sb.append(" • ").append(item.releaseDate);
+                        if (item.rating != null && !item.rating.isEmpty()) sb.append(" • ⭐ ").append(item.rating);
+                        sb.append(" • Cliquez pour saisons & épisodes");
+                        holder.tvEpg.setText(sb.toString());
                     } else {
                         holder.tvEpg.setText(item.groupName != null ? item.groupName : "Direct");
                     }
