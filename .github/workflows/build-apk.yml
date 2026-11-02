@@ -93,11 +93,20 @@ jobs:
       - name: Affichage des logs d'erreur de compilation
         if: failure()
         run: |
-          echo "=== DERNIERES LIGNES DU RAPPORT GRADLE ==="
+          echo "=== EXTRACTION ANNOTATIONS ERREURS GRADLE ==="
           if [ -f gradle-build.log ]; then
-            tail -n 250 gradle-build.log
-          elif [ -f android/gradle-build.log ]; then
-            tail -n 250 android/gradle-build.log
+            python3 -c "
+with open('gradle-build.log', 'r', encoding='utf-8', errors='ignore') as f:
+    lines = [line.strip() for line in f.readlines() if line.strip()]
+
+# Find compilation errors or failures
+errs = [l for l in lines if any(k in l for k in ['error:', 'FAILURE:', 'FAILED', 'Caused by:'])]
+if not errs:
+    errs = lines[-30:]
+for e in errs[-15:]:
+    msg = e.replace('%', '%25').replace('\r', '').replace('\n', '%0A')
+    print(f'::error title=GradleLog::{msg}')
+"
           fi
 
       - name: Sauvegarde des rapports de compilation en cas d'erreur
