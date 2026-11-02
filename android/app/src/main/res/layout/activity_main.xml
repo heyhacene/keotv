@@ -203,10 +203,22 @@
                 android:id="@+id/tab_favs"
                 android:layout_width="0dp"
                 android:layout_height="34dp"
-                android:layout_weight="1.1"
+                android:layout_weight="1"
                 android:text="⭐ Favoris"
                 android:textColor="#F59E0B"
-                android:textSize="10sp"
+                android:textSize="9.5sp"
+                android:textStyle="bold"
+                android:background="@drawable/bg_tab_selector"
+                android:layout_marginEnd="3dp" />
+
+            <Button
+                android:id="@+id/tab_search"
+                android:layout_width="0dp"
+                android:layout_height="34dp"
+                android:layout_weight="1"
+                android:text="🔍 Chercher"
+                android:textColor="#38BDF8"
+                android:textSize="9.5sp"
                 android:textStyle="bold"
                 android:background="@drawable/bg_tab_selector" />
 
@@ -230,65 +242,204 @@
 
     </LinearLayout>
 
-    <!-- Bouquets TV Horizontal Chips -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:paddingStart="14dp"
-        android:paddingEnd="14dp"
-        android:paddingTop="8dp"
-        android:paddingBottom="4dp">
-
-        <TextView
-            android:id="@+id/tv_bouquets_header"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="BOUQUETS TV"
-            android:textColor="#64748B"
-            android:textSize="10sp"
-            android:textStyle="bold"
-            android:paddingBottom="4dp" />
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recycler_categories"
-            android:layout_width="match_parent"
-            android:layout_height="42dp"
-            android:scrollbars="none"
-            android:overScrollMode="always"
-            android:nestedScrollingEnabled="true" />
-
-    </LinearLayout>
-
-    <!-- Channels List (Full remaining height in portrait) -->
-    <LinearLayout
+    <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="vertical"
-        android:paddingStart="14dp"
-        android:paddingEnd="14dp"
-        android:paddingTop="4dp">
+        android:layout_weight="1">
 
-        <TextView
-            android:id="@+id/tv_channels_header"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="CHAÎNES DU BOUQUET"
-            android:textColor="#64748B"
-            android:textSize="10sp"
-            android:textStyle="bold"
-            android:paddingBottom="4dp" />
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/recycler_channels"
+        <!-- Split / Channels Content -->
+        <LinearLayout
+            android:id="@+id/layout_content_split"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:scrollbars="vertical"
-            android:overScrollMode="always"
-            android:nestedScrollingEnabled="true" />
+            android:orientation="vertical">
 
-    </LinearLayout>
+            <!-- Bouquets TV Horizontal Chips -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="4dp">
+
+                <TextView
+                    android:id="@+id/tv_bouquets_header"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="BOUQUETS TV"
+                    android:textColor="#64748B"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:paddingBottom="4dp" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recycler_categories"
+                    android:layout_width="match_parent"
+                    android:layout_height="42dp"
+                    android:scrollbars="none"
+                    android:overScrollMode="always"
+                    android:nestedScrollingEnabled="true" />
+
+            </LinearLayout>
+
+            <!-- Channels List (Full remaining height in portrait) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:orientation="vertical"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="4dp">
+
+                <TextView
+                    android:id="@+id/tv_channels_header"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="CHAÎNES DU BOUQUET"
+                    android:textColor="#64748B"
+                    android:textSize="10sp"
+                    android:textStyle="bold"
+                    android:paddingBottom="4dp" />
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/recycler_channels"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:scrollbars="vertical"
+                    android:overScrollMode="always"
+                    android:nestedScrollingEnabled="true" />
+
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <!-- Search Panel (Visible when currentType == "search") -->
+        <LinearLayout
+            android:id="@+id/panel_search"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:visibility="gone">
+
+            <!-- Search Input Row -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <EditText
+                    android:id="@+id/et_global_search"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:hint="🔍 Rechercher chaînes, films, séries, acteurs..."
+                    android:textColor="#FFFFFF"
+                    android:textColorHint="#64748B"
+                    android:textSize="13sp"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:background="@drawable/bg_item_selector"
+                    android:singleLine="true"
+                    android:imeOptions="actionSearch" />
+
+                <Button
+                    android:id="@+id/btn_search_clear"
+                    android:layout_width="wrap_content"
+                    android:layout_height="40dp"
+                    android:layout_marginStart="8dp"
+                    android:text="✖"
+                    android:textColor="#94A3B8"
+                    android:textSize="12sp"
+                    android:background="@drawable/bg_button_selector"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp" />
+
+            </LinearLayout>
+
+            <!-- Search Type Filter Chips -->
+            <HorizontalScrollView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btn_search_filter_all"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:text="Tout"
+                        android:textColor="#FFFFFF"
+                        android:textSize="10.5sp"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_tab_selector"
+                        android:layout_marginEnd="6dp" />
+
+                    <Button
+                        android:id="@+id/btn_search_filter_live"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:text="📺 Direct TV"
+                        android:textColor="#94A3B8"
+                        android:textSize="10.5sp"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_tab_selector"
+                        android:layout_marginEnd="6dp" />
+
+                    <Button
+                        android:id="@+id/btn_search_filter_vod"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:text="🎬 Films VOD"
+                        android:textColor="#94A3B8"
+                        android:textSize="10.5sp"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_tab_selector"
+                        android:layout_marginEnd="6dp" />
+
+                    <Button
+                        android:id="@+id/btn_search_filter_series"
+                        android:layout_width="wrap_content"
+                        android:layout_height="32dp"
+                        android:text="🍿 Séries TV"
+                        android:textColor="#94A3B8"
+                        android:textSize="10.5sp"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_tab_selector" />
+
+                </LinearLayout>
+
+            </HorizontalScrollView>
+
+            <TextView
+                android:id="@+id/tv_search_results_count"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:text="Saisissez un texte pour rechercher dans tous les catalogues."
+                android:textColor="#64748B"
+                android:textSize="11.5sp" />
+
+            <androidx.recyclerview.widget.RecyclerView
+                android:id="@+id/recycler_search_results"
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="6dp"
+                android:scrollbars="vertical" />
+
+        </LinearLayout>
+
+    </FrameLayout>
 
     <!-- Active Channel Bottom Bar (Mobile Portrait) -->
     <LinearLayout

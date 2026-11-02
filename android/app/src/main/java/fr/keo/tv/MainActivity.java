@@ -88,6 +88,7 @@ public class MainActivity extends AppCompatActivity {
     private Button tabVod;
     private Button tabSeries;
     private Button tabFavs;
+    private Button tabSearch;
 
     // Content containers
     private View layoutContentSplit;
@@ -231,6 +232,7 @@ public class MainActivity extends AppCompatActivity {
         tabVod = findViewById(R.id.tab_vod);
         tabSeries = findViewById(R.id.tab_series);
         tabFavs = findViewById(R.id.tab_favs);
+        tabSearch = findViewById(R.id.tab_search);
 
         // Recyclers
         recyclerCategories = findViewById(R.id.recycler_categories);
@@ -312,6 +314,7 @@ public class MainActivity extends AppCompatActivity {
         if (tabVod != null) tabVod.setOnClickListener(v -> switchSection("vod"));
         if (tabSeries != null) tabSeries.setOnClickListener(v -> switchSection("series"));
         if (tabFavs != null) tabFavs.setOnClickListener(v -> switchSection("favs"));
+        if (tabSearch != null) tabSearch.setOnClickListener(v -> switchSection("search"));
 
         // Global Search setup
         if (etGlobalSearch != null) {
@@ -393,6 +396,7 @@ public class MainActivity extends AppCompatActivity {
                     activeChannel.isFav = !activeChannel.isFav;
                     updateFavButtonLabel(activeChannel.isFav);
                     channelsAdapter.notifyDataSetChanged();
+                    pushAccountsToCloud(false);
                 }
             });
         }
@@ -473,6 +477,7 @@ public class MainActivity extends AppCompatActivity {
         if (tabVod != null) tabVod.setSelected("vod".equals(currentType));
         if (tabSeries != null) tabSeries.setSelected("series".equals(currentType));
         if (tabFavs != null) tabFavs.setSelected("favs".equals(currentType));
+        if (tabSearch != null) tabSearch.setSelected("search".equals(currentType));
     }
 
     private void updateSearchFilterTabs() {
@@ -938,7 +943,6 @@ public class MainActivity extends AppCompatActivity {
             actorChip.setTypeface(Typeface.DEFAULT_BOLD);
             actorChip.setAllCaps(false);
             actorChip.setFocusable(true);
-            actorChip.setFocusableInTouchMode(true);
             actorChip.setPadding(dpToPx(12), dpToPx(5), dpToPx(12), dpToPx(5));
 
             GradientDrawable chipBg = new GradientDrawable();
@@ -1192,6 +1196,7 @@ public class MainActivity extends AppCompatActivity {
                 movieItem.isFav = !movieItem.isFav;
                 btnFav.setText(movieItem.isFav ? "★ Retirer favori" : "⭐ Favori");
                 Toast.makeText(MainActivity.this, movieItem.isFav ? "Ajouté aux favoris" : "Retiré des favoris", Toast.LENGTH_SHORT).show();
+                pushAccountsToCloud(false);
             });
 
             if (btnSearchActor != null) {
@@ -1351,6 +1356,7 @@ public class MainActivity extends AppCompatActivity {
                     seriesItem.isFav = !seriesItem.isFav;
                     btnFav.setText(seriesItem.isFav ? "★ Retirer favori" : "⭐ Favori");
                     Toast.makeText(MainActivity.this, seriesItem.isFav ? "Ajouté aux favoris" : "Retiré des favoris", Toast.LENGTH_SHORT).show();
+                    pushAccountsToCloud(false);
                 });
             }
 
@@ -1828,7 +1834,7 @@ public class MainActivity extends AppCompatActivity {
             layout.setPadding(36, 24, 36, 24);
 
             TextView tvInfo = new TextView(this);
-            tvInfo.setText("Récupérez instantanément vos abonnements IPTV enregistrés sur le portail Web (https://keotv.vercel.app/sync).\n\nSaisissez votre email et mot de passe de compte :");
+            tvInfo.setText("Synchronisez instantanément vos abonnements, favoris et timecodes VOD avec le Cloud Supabase (https://keotv.vercel.app/sync).\n\nSaisissez votre email et mot de passe de compte :");
             tvInfo.setTextColor(0xFFCBD5E1);
             tvInfo.setTextSize(12);
             tvInfo.setPadding(0, 0, 0, 16);
@@ -1849,9 +1855,9 @@ public class MainActivity extends AppCompatActivity {
             layout.addView(etPass);
 
             new AlertDialog.Builder(this)
-                    .setTitle("☁️ Rapatriement Sécurisé depuis le Cloud")
+                    .setTitle("☁️ Synchronisation Cloud (Favoris, VOD, Playlists)")
                     .setView(layout)
-                    .setPositiveButton("Rapatrier", (dialog, which) -> {
+                    .setPositiveButton("☁️ Rapatrier du Cloud", (dialog, which) -> {
                         String ident = etUser.getText().toString().trim();
                         String pass = etPass.getText().toString().trim();
 
@@ -1867,7 +1873,13 @@ public class MainActivity extends AppCompatActivity {
                         prefs.edit().putString("cloud_username", ident).apply();
                         pullAccountsFromCloud(ident, pass);
                     })
-                    .setNeutralButton("Saisie Manuelle", (dialog, which) -> showLoginDialog())
+                    .setNeutralButton("⬆️ Sauvegarder vers Cloud", (dialog, which) -> {
+                        String ident = etUser.getText().toString().trim();
+                        if (!ident.isEmpty()) {
+                            prefs.edit().putString("cloud_username", ident).apply();
+                        }
+                        pushAccountsToCloud(true);
+                    })
                     .setNegativeButton("Annuler", null)
                     .show();
         } catch (Throwable t) {
@@ -1974,8 +1986,69 @@ public class MainActivity extends AppCompatActivity {
 
                 db.savePlaylist(pl);
 
+                // 1. Restore Favorites from Cloud
+                int restoredFavCount = 0;
+                if (userObj.has("favorites") && !userObj.get("favorites").isJsonNull()) {
+                    try {
+                        JsonElement favEl = userObj.get("favorites");
+                        List<String> favList = new ArrayList<>();
+                        if (favEl.isJsonArray()) {
+                            JsonArray fArr = favEl.getAsJsonArray();
+                            for (int i = 0; i < fArr.size(); i++) {
+                                favList.add(fArr.get(i).getAsString());
+                            }
+                        } else if (favEl.isJsonObject()) {
+                            for (String key : favEl.getAsJsonObject().keySet()) {
+                                favList.add(key);
+                            }
+                        }
+                        restoredFavCount = db.restoreFavorites(favList);
+                    } catch (Exception favEx) {
+                        Log.w(TAG, "Error restoring favorites: " + favEx.getMessage());
+                    }
+                }
+
+                // 2. Restore Watched Positions from Cloud
+                int restoredPosCount = 0;
+                if (userObj.has("watched_positions") && !userObj.get("watched_positions").isJsonNull()) {
+                    try {
+                        JsonElement wpEl = userObj.get("watched_positions");
+                        SharedPreferences posPrefs = getSharedPreferences(PlayerActivity.PREFS_POSITIONS, Context.MODE_PRIVATE);
+                        String localJson = posPrefs.getString(PlayerActivity.KEY_POSITIONS_JSON, "{}");
+                        org.json.JSONObject root = new org.json.JSONObject(localJson);
+
+                        if (wpEl.isJsonObject()) {
+                            org.json.JSONObject cloudObj = new org.json.JSONObject(wpEl.toString());
+                            java.util.Iterator<String> it = cloudObj.keys();
+                            while (it.hasNext()) {
+                                String key = it.next();
+                                root.put(key, cloudObj.get(key));
+                                restoredPosCount++;
+                            }
+                        } else if (wpEl.isJsonArray()) {
+                            JsonArray arr = wpEl.getAsJsonArray();
+                            for (int i = 0; i < arr.size(); i++) {
+                                if (arr.get(i).isJsonObject()) {
+                                    JsonObject item = arr.get(i).getAsJsonObject();
+                                    String u = item.has("url") ? item.get("url").getAsString() : "";
+                                    if (!u.isEmpty()) {
+                                        root.put(u, new org.json.JSONObject(item.toString()));
+                                        restoredPosCount++;
+                                    }
+                                }
+                            }
+                        }
+                        posPrefs.edit().putString(PlayerActivity.KEY_POSITIONS_JSON, root.toString()).apply();
+                    } catch (Exception posEx) {
+                        Log.w(TAG, "Error restoring positions: " + posEx.getMessage());
+                    }
+                }
+
+                final int fRestoredFavs = restoredFavCount;
+                final int fRestoredPos = restoredPosCount;
+
                 runOnUiThread(() -> {
-                    Toast.makeText(MainActivity.this, "Authentification réussie ! Lancement de la synchronisation...", Toast.LENGTH_LONG).show();
+                    Toast.makeText(MainActivity.this, "☁️ Cloud synchronisé (" + fRestoredFavs + " favoris & " + fRestoredPos + " positions restaurés)", Toast.LENGTH_LONG).show();
                     triggerSync();
                 });
 
@@ -1989,13 +2062,86 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
+    private void pushAccountsToCloud(final boolean showToast) {
+        final SharedPreferences prefs = getSharedPreferences("keotv_prefs", MODE_PRIVATE);
+        final String ident = prefs.getString("cloud_username", "");
+        if (ident.isEmpty()) {
+            if (showToast) {
+                Toast.makeText(this, "Connectez-vous d'abord à votre compte Cloud pour sauvegarder.", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                String cleanIdent = ident.trim().toLowerCase();
+
+                // 1. Gather favorites
+                List<String> favIds = db.getFavoriteChannelIds();
+                JsonArray favArr = new JsonArray();
+                for (String f : favIds) favArr.add(f);
+
+                // 2. Gather watched positions
+                SharedPreferences posPrefs = getSharedPreferences(PlayerActivity.PREFS_POSITIONS, Context.MODE_PRIVATE);
+                String posJson = posPrefs.getString(PlayerActivity.KEY_POSITIONS_JSON, "{}");
+                JsonObject watchedObj = JsonParser.parseString(posJson).isJsonObject()
+                        ? JsonParser.parseString(posJson).getAsJsonObject() : new JsonObject();
+
+                // 3. Build PATCH payload
+                JsonObject payload = new JsonObject();
+                payload.add("favorites", favArr);
+                payload.add("watched_positions", watchedObj);
+                String isoNow = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(new Date());
+                payload.addProperty("updated_at", isoNow);
+
+                String enc = URLEncoder.encode(cleanIdent, "UTF-8");
+                String urlStr = "https://qvfmfstwrkcerzlbemzb.supabase.co/rest/v1/keotv_users?or=(username.eq."
+                        + enc + ",id.eq.usr_" + enc + ",id.eq." + enc + ")";
+
+                URL url = new URL(urlStr);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("POST");
+                conn.setRequestProperty("X-HTTP-Method-Override", "PATCH");
+                conn.setConnectTimeout(10000);
+                conn.setReadTimeout(15000);
+                conn.setRequestProperty("apikey", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs");
+                conn.setRequestProperty("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs");
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("Prefer", "return=representation");
+                conn.setDoOutput(true);
+
+                byte[] out = payload.toString().getBytes(StandardCharsets.UTF_8);
+                conn.getOutputStream().write(out);
+
+                int code = conn.getResponseCode();
+                if (code >= 200 && code < 300) {
+                    if (showToast) {
+                        final int favCount = favIds.size();
+                        runOnUiThread(() -> Toast.makeText(MainActivity.this, "☁️ Sauvegarde Cloud réussie (" + favCount + " favoris & positions VOD sauvegardés)", Toast.LENGTH_SHORT).show());
+                    }
+                } else {
+                    Log.w(TAG, "Cloud push failed with HTTP code: " + code);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to push to cloud", e);
+            }
+        }).start();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        pushAccountsToCloud(false);
+    }
+
     private void showSettingsDialog() {
         if (isFinishing() || isDestroyed()) return;
 
         try {
             final String[] items = {
                     "🛡️ Contrôle Parental & Code PIN Adulte",
-                    "☁️ Compte & Synchronisation Cloud",
+                    "☁️ Rapatrier depuis le Cloud (Playlists, Favoris, VOD)",
+                    "⬆️ Sauvegarder dans le Cloud (Favoris & Positions VOD)",
                     "📺 Lecteur Vidéo & Performances (Media3)",
                     "🧹 Vider le Cache & Resynchroniser",
                     "🔄 Rechercher des Mises à Jour (OTA)",
@@ -2014,21 +2160,24 @@ public class MainActivity extends AppCompatActivity {
                                 showCloudSyncDialog();
                                 break;
                             case 2:
-                                showPlayerSettingsDialog();
+                                pushAccountsToCloud(true);
                                 break;
                             case 3:
+                                showPlayerSettingsDialog();
+                                break;
+                            case 4:
                                 Toast.makeText(this, "Purge du cache...", Toast.LENGTH_SHORT).show();
                                 db.purgeCache(true);
                                 loadLocalData();
                                 triggerSync();
                                 break;
-                            case 4:
+                            case 5:
                                 UpdateManager.checkForUpdates(this, true);
                                 break;
-                            case 5:
+                            case 6:
                                 showDiagnosticDialog();
                                 break;
-                            case 6:
+                            case 7:
                                 performFactoryReset();
                                 break;
                         }

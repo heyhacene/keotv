@@ -524,6 +524,44 @@ public class KeoDatabase extends SQLiteOpenHelper {
         return cnt;
     }
 
+    public List<String> getFavoriteChannelIds() {
+        List<String> list = new ArrayList<>();
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = null;
+        try {
+            c = db.rawQuery("SELECT id FROM channels WHERE is_fav = 1 AND is_separator = 0", null);
+            while (c != null && c.moveToNext()) {
+                list.add(c.getString(0));
+            }
+        } catch (Exception e) {
+            android.util.Log.e("KeoDatabase", "getFavoriteChannelIds error: " + e.getMessage());
+        } finally {
+            if (c != null) try { c.close(); } catch (Exception ignored) {}
+        }
+        return list;
+    }
+
+    public int restoreFavorites(List<String> favIds) {
+        if (favIds == null || favIds.isEmpty()) return 0;
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        int count = 0;
+        try {
+            SQLiteStatement stmt = db.compileStatement("UPDATE channels SET is_fav = 1 WHERE id = ?");
+            for (String id : favIds) {
+                if (id == null || id.isEmpty()) continue;
+                stmt.bindString(1, id);
+                count += stmt.executeUpdateDelete();
+            }
+            db.setTransactionSuccessful();
+        } catch (Exception e) {
+            android.util.Log.e("KeoDatabase", "restoreFavorites error: " + e.getMessage());
+        } finally {
+            db.endTransaction();
+        }
+        return count;
+    }
+
     public List<ChannelItem> searchChannels(String query, String streamType) {
         List<ChannelItem> list = new ArrayList<>();
         if (query == null || query.trim().isEmpty()) return list;
@@ -711,7 +749,18 @@ public class KeoDatabase extends SQLiteOpenHelper {
     private void doBaseBulkInsertChannels(SQLiteDatabase db, List<ChannelItem> channels, String typeToClear) {
         db.beginTransaction();
         try {
+            java.util.Set<String> existingFavIds = new java.util.HashSet<>();
             if (typeToClear != null && !typeToClear.isEmpty()) {
+                Cursor fc = null;
+                try {
+                    fc = db.rawQuery("SELECT id FROM channels WHERE is_fav = 1 AND stream_type = ?", new String[]{typeToClear});
+                    while (fc != null && fc.moveToNext()) {
+                        existingFavIds.add(fc.getString(0));
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    if (fc != null) try { fc.close(); } catch (Exception ignored) {}
+                }
                 db.execSQL("DELETE FROM channels WHERE stream_type = ?", new String[]{typeToClear});
             }
             SQLiteStatement stmt = db.compileStatement(
@@ -719,6 +768,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
             for (ChannelItem ch : channels) {
+                boolean isFav = ch.isFav || existingFavIds.contains(ch.id);
                 stmt.bindString(1, ch.id != null ? ch.id : "");
                 stmt.bindString(2, ch.name != null ? ch.name : "");
                 stmt.bindLong(3, ch.num);
@@ -727,7 +777,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 stmt.bindString(6, ch.streamUrl != null ? ch.streamUrl : "");
                 stmt.bindString(7, ch.streamType != null ? ch.streamType : "live");
                 stmt.bindString(8, ch.logo != null ? ch.logo : "");
-                stmt.bindLong(9, ch.isFav ? 1 : 0);
+                stmt.bindLong(9, isFav ? 1 : 0);
                 stmt.bindString(10, ch.resolution != null ? ch.resolution : "HD");
                 stmt.bindLong(11, ch.isSeparator ? 1 : 0);
                 stmt.bindString(12, ch.streamId != null ? ch.streamId : "");
@@ -745,7 +795,29 @@ public class KeoDatabase extends SQLiteOpenHelper {
     private void doBulkInsertChannels(SQLiteDatabase db, List<ChannelItem> channels, String typeToClear) {
         db.beginTransaction();
         try {
+            java.util.Map<String, String[]> cachedMeta = new java.util.HashMap<>();
             if (typeToClear != null && !typeToClear.isEmpty()) {
+                Cursor mc = null;
+                try {
+                    mc = db.rawQuery("SELECT id, is_fav, movie_cast, director, plot, genre, release_date, rating FROM channels WHERE stream_type = ?", new String[]{typeToClear});
+                    while (mc != null && mc.moveToNext()) {
+                        String id = mc.getString(0);
+                        int isFav = mc.getInt(1);
+                        String cast = mc.getString(2);
+                        String director = mc.getString(3);
+                        String plot = mc.getString(4);
+                        String genre = mc.getString(5);
+                        String releaseDate = mc.getString(6);
+                        String rating = mc.getString(7);
+                        if (isFav == 1 || (cast != null && !cast.isEmpty()) || (director != null && !director.isEmpty())) {
+                            cachedMeta.put(id, new String[]{String.valueOf(isFav), cast, director, plot, genre, releaseDate, rating});
+                        }
+                    }
+                } catch (Exception ignored) {
+                } finally {
+                    if (mc != null) try { mc.close(); } catch (Exception ignored) {}
+                }
+
                 db.execSQL("DELETE FROM channels WHERE stream_type = ?", new String[]{typeToClear});
                 try {
                     db.execSQL("DELETE FROM movie_actors WHERE stream_type = ?", new String[]{typeToClear});
@@ -762,6 +834,15 @@ public class KeoDatabase extends SQLiteOpenHelper {
             } catch (Exception ignored) {}
 
             for (ChannelItem ch : channels) {
+                String[] cached = cachedMeta.get(ch.id);
+                boolean isFav = ch.isFav || (cached != null && "1".equals(cached[0]));
+                String cast = (ch.cast != null && !ch.cast.isEmpty()) ? ch.cast : (cached != null && cached[1] != null ? cached[1] : "");
+                String director = (ch.director != null && !ch.director.isEmpty()) ? ch.director : (cached != null && cached[2] != null ? cached[2] : "");
+                String plot = (ch.plot != null && !ch.plot.isEmpty()) ? ch.plot : (cached != null && cached[3] != null ? cached[3] : "");
+                String genre = (ch.genre != null && !ch.genre.isEmpty()) ? ch.genre : (cached != null && cached[4] != null ? cached[4] : "");
+                String releaseDate = (ch.releaseDate != null && !ch.releaseDate.isEmpty()) ? ch.releaseDate : (cached != null && cached[5] != null ? cached[5] : "");
+                String rating = (ch.rating != null && !ch.rating.isEmpty()) ? ch.rating : (cached != null && cached[6] != null ? cached[6] : "");
+
                 stmt.bindString(1, ch.id != null ? ch.id : "");
                 stmt.bindString(2, ch.name != null ? ch.name : "");
                 stmt.bindLong(3, ch.num);
@@ -770,24 +851,24 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 stmt.bindString(6, ch.streamUrl != null ? ch.streamUrl : "");
                 stmt.bindString(7, ch.streamType != null ? ch.streamType : "live");
                 stmt.bindString(8, ch.logo != null ? ch.logo : "");
-                stmt.bindLong(9, ch.isFav ? 1 : 0);
+                stmt.bindLong(9, isFav ? 1 : 0);
                 stmt.bindString(10, ch.resolution != null ? ch.resolution : "HD");
                 stmt.bindLong(11, ch.isSeparator ? 1 : 0);
                 stmt.bindString(12, ch.streamId != null ? ch.streamId : "");
                 stmt.bindLong(13, ch.tvArchive);
                 stmt.bindLong(14, ch.tvArchiveDuration);
                 stmt.bindString(15, ch.epgChannelId != null ? ch.epgChannelId : "");
-                stmt.bindString(16, ch.cast != null ? ch.cast : "");
-                stmt.bindString(17, ch.director != null ? ch.director : "");
-                stmt.bindString(18, ch.plot != null ? ch.plot : "");
-                stmt.bindString(19, ch.genre != null ? ch.genre : "");
-                stmt.bindString(20, ch.releaseDate != null ? ch.releaseDate : "");
-                stmt.bindString(21, ch.rating != null ? ch.rating : "");
+                stmt.bindString(16, cast);
+                stmt.bindString(17, director);
+                stmt.bindString(18, plot);
+                stmt.bindString(19, genre);
+                stmt.bindString(20, releaseDate);
+                stmt.bindString(21, rating);
                 stmt.executeInsert();
 
-                if (actorStmt != null && ch.cast != null && !ch.cast.trim().isEmpty()) {
+                if (actorStmt != null && !cast.trim().isEmpty()) {
                     try {
-                        String[] actors = ch.cast.split("[,;/]");
+                        String[] actors = cast.split("[,;/]");
                         for (String a : actors) {
                             String actorName = a.trim();
                             if (actorName.length() > 1) {
