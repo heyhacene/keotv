@@ -130,10 +130,23 @@ public class MainActivity extends AppCompatActivity {
     private KeoDatabase.CategoryItem selectedCategory = null;
     private KeoDatabase.ChannelItem activeChannel = null;
     private boolean isSearching = false;
+    private String restoredCategoryId = null;
+    private String restoredChannelId = null;
+    private String restoredSearchQuery = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        if (savedInstanceState != null) {
+            String savedType = savedInstanceState.getString("saved_current_type");
+            if (savedType != null && !savedType.isEmpty()) {
+                currentType = savedType;
+            }
+            restoredCategoryId = savedInstanceState.getString("saved_category_id");
+            restoredChannelId = savedInstanceState.getString("saved_channel_id");
+            restoredSearchQuery = savedInstanceState.getString("saved_search_query");
+        }
 
         // Global crash protector to avoid silent exits on Android TV & phone
         Thread.setDefaultUncaughtExceptionHandler((thread, throwable) -> {
@@ -153,6 +166,10 @@ public class MainActivity extends AppCompatActivity {
             db = KeoDatabase.getInstance(this);
 
             initViews();
+            if (restoredSearchQuery != null && !restoredSearchQuery.isEmpty()) {
+                if (etSearch != null) etSearch.setText(restoredSearchQuery);
+                if (etGlobalSearch != null) etGlobalSearch.setText(restoredSearchQuery);
+            }
             setupAdapters();
             loadLocalData();
 
@@ -524,24 +541,30 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void setupAdapters() {
-        int orientation = getResources().getConfiguration().orientation;
-        if (orientation == Configuration.ORIENTATION_PORTRAIT) {
-            // Horizontal bouquet chips on mobile phones
-            recyclerCategories.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
-        } else {
-            // Vertical bouquet list on Android TV and landscape
+        boolean isLandscapeSplit = findViewById(R.id.sidebar) != null;
+        if (isLandscapeSplit) {
+            // Vertical bouquet list on Android TV and mobile landscape split view
             recyclerCategories.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false));
+        } else {
+            // Horizontal bouquet chips on mobile phones in portrait
+            recyclerCategories.setLayoutManager(new LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false));
         }
+        recyclerCategories.setNestedScrollingEnabled(true);
+        recyclerCategories.setOverScrollMode(View.OVER_SCROLL_ALWAYS);
 
         categoriesAdapter = new CategoriesAdapter();
         recyclerCategories.setAdapter(categoriesAdapter);
 
         recyclerChannels.setLayoutManager(new LinearLayoutManager(this));
+        recyclerChannels.setNestedScrollingEnabled(true);
+        recyclerChannels.setOverScrollMode(View.OVER_SCROLL_ALWAYS);
         channelsAdapter = new ChannelsAdapter();
         recyclerChannels.setAdapter(channelsAdapter);
 
         if (recyclerSearchResults != null) {
             recyclerSearchResults.setLayoutManager(new LinearLayoutManager(this));
+            recyclerSearchResults.setNestedScrollingEnabled(true);
+            recyclerSearchResults.setOverScrollMode(View.OVER_SCROLL_ALWAYS);
             searchResultsAdapter = new ChannelsAdapter();
             recyclerSearchResults.setAdapter(searchResultsAdapter);
         }
@@ -632,7 +655,19 @@ public class MainActivity extends AppCompatActivity {
             runOnUiThread(() -> {
                 categoriesAdapter.setItems(cats);
                 if (!cats.isEmpty()) {
-                    selectCategory(cats.get(0));
+                    KeoDatabase.CategoryItem targetCat = cats.get(0);
+                    if (restoredCategoryId != null) {
+                        for (int i = 0; i < cats.size(); i++) {
+                            KeoDatabase.CategoryItem c = cats.get(i);
+                            if (c.id != null && c.id.equals(restoredCategoryId)) {
+                                targetCat = c;
+                                categoriesAdapter.setSelectedPos(i);
+                                break;
+                            }
+                        }
+                        restoredCategoryId = null;
+                    }
+                    selectCategory(targetCat);
                 } else {
                     channelsAdapter.setItems(new ArrayList<>());
                     if (tvChannelsHeader != null) {
@@ -667,7 +702,19 @@ public class MainActivity extends AppCompatActivity {
                     tvChannelsHeader.setText(cat.name.toUpperCase() + " (" + channels.size() + ")");
                 }
                 if (!channels.isEmpty()) {
-                    selectChannel(channels.get(0));
+                    KeoDatabase.ChannelItem targetCh = channels.get(0);
+                    if (restoredChannelId != null) {
+                        for (int i = 0; i < channels.size(); i++) {
+                            KeoDatabase.ChannelItem ch = channels.get(i);
+                            if (ch.id != null && ch.id.equals(restoredChannelId)) {
+                                targetCh = ch;
+                                channelsAdapter.setSelectedPos(i);
+                                break;
+                            }
+                        }
+                        restoredChannelId = null;
+                    }
+                    selectChannel(targetCh);
                 }
             });
         }).start();
@@ -2030,10 +2077,23 @@ public class MainActivity extends AppCompatActivity {
             return selectedPos;
         }
 
+        public void setSelectedPos(int pos) {
+            this.selectedPos = pos;
+            notifyDataSetChanged();
+        }
+
         @NonNull
         @Override
         public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_category, parent, false);
+            if (parent.getLayoutManager() != null && parent.getLayoutManager().canScrollHorizontally()) {
+                ViewGroup.LayoutParams lp = v.getLayoutParams();
+                if (lp != null) {
+                    lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
+                    lp.height = dpToPx(40);
+                    v.setLayoutParams(lp);
+                }
+            }
             return new ViewHolder(v);
         }
 
@@ -2123,6 +2183,11 @@ public class MainActivity extends AppCompatActivity {
 
         public int getSelectedPos() {
             return selectedPos;
+        }
+
+        public void setSelectedPos(int pos) {
+            this.selectedPos = pos;
+            notifyDataSetChanged();
         }
 
         public List<KeoDatabase.ChannelItem> getItems() {
@@ -2403,5 +2468,28 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         return super.onKeyDown(keyCode, event);
+    }
+
+    @Override
+    protected void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putString("saved_current_type", currentType);
+        if (selectedCategory != null) {
+            outState.putString("saved_category_id", selectedCategory.id);
+        }
+        if (activeChannel != null) {
+            outState.putString("saved_channel_id", activeChannel.id);
+        }
+        if (etSearch != null && etSearch.getText() != null) {
+            outState.putString("saved_search_query", etSearch.getText().toString());
+        } else if (etGlobalSearch != null && etGlobalSearch.getText() != null) {
+            outState.putString("saved_search_query", etGlobalSearch.getText().toString());
+        }
+    }
+
+    @Override
+    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        recreate();
     }
 }

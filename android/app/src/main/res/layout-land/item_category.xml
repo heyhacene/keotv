@@ -4,11 +4,11 @@
     android:layout_height="wrap_content"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:paddingStart="16dp"
-    android:paddingEnd="16dp"
-    android:paddingTop="13dp"
-    android:paddingBottom="13dp"
-    android:layout_marginBottom="5dp"
+    android:paddingStart="14dp"
+    android:paddingEnd="14dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp"
+    android:layout_marginBottom="4dp"
     android:background="@drawable/bg_item_selector"
     android:focusable="true"
     android:clickable="true">
@@ -19,7 +19,7 @@
         android:layout_height="wrap_content"
         android:layout_weight="1"
         android:textColor="#F8FAFC"
-        android:textSize="16sp"
+        android:textSize="15sp"
         android:textStyle="bold"
         android:maxLines="1"
         android:ellipsize="end" />
@@ -29,12 +29,12 @@
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:textColor="#94A3B8"
-        android:textSize="12.5sp"
+        android:textSize="12sp"
         android:textStyle="bold"
-        android:paddingStart="10dp"
-        android:paddingEnd="10dp"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp"
+        android:paddingStart="9dp"
+        android:paddingEnd="9dp"
+        android:paddingTop="3dp"
+        android:paddingBottom="3dp"
         android:background="#1E293B" />
 
 </LinearLayout>

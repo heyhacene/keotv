@@ -23,7 +23,7 @@
         <activity
             android:name=".MainActivity"
             android:label="@string/title_activity_main"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|screenLayout|uiMode|navigation"
+            android:configChanges="keyboardHidden|keyboard|uiMode|navigation"
             android:launchMode="singleTask"
             android:screenOrientation="sensor"
             android:exported="true">
