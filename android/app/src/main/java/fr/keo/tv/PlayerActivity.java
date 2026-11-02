@@ -668,7 +668,7 @@ public class PlayerActivity extends AppCompatActivity {
         GradientDrawable centerBg = new GradientDrawable();
         centerBg.setColor(Color.parseColor("#CC090D16"));
         centerBg.setCornerRadius(dp(38));
-        centerBg.setStroke(dp(1.5f), Color.parseColor("#4038BDF8"));
+        centerBg.setStroke(dp(2), Color.parseColor("#4038BDF8"));
         centerControlsCard.setBackground(centerBg);
 
         // Center Rewind button
@@ -724,11 +724,11 @@ public class PlayerActivity extends AppCompatActivity {
         playLp.setMarginEnd(dp(16));
         btnCenterPlayPause.setLayoutParams(playLp);
 
-        GradientDrawable playBg = new GradientDrawable();
-        playBg.setColor(Color.parseColor("#FF0284C7"));
-        playBg.setCornerRadius(dp(35));
-        playBg.setStroke(dp(2.5f), Color.parseColor("#38BDF8"));
-        btnCenterPlayPause.setBackground(playBg);
+        GradientDrawable centerPlayBg = new GradientDrawable();
+        centerPlayBg.setColor(Color.parseColor("#FF0284C7"));
+        centerPlayBg.setCornerRadius(dp(35));
+        centerPlayBg.setStroke(dp(3), Color.parseColor("#38BDF8"));
+        btnCenterPlayPause.setBackground(centerPlayBg);
         btnCenterPlayPause.setOnClickListener(v -> togglePlayPause());
         btnCenterPlayPause.setOnFocusChangeListener((v, hasFocus) -> {
             GradientDrawable d = (GradientDrawable) btnCenterPlayPause.getBackground();
