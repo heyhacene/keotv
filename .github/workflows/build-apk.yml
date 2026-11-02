@@ -57,7 +57,8 @@ jobs:
         run: |
           chmod +x ./gradlew
           echo "🚀 Compilation Release officielle native avec Gradle..."
-          ./gradlew assembleRelease --stacktrace
+          set -o pipefail
+          ./gradlew assembleRelease --stacktrace 2>&1 | tee ../gradle-build.log
 
           UNSIGNED_APK=$(find app/build/outputs/apk/release -name "*.apk" | head -n 1)
           echo "APK généré : $UNSIGNED_APK"
@@ -89,6 +90,16 @@ jobs:
           $APKSIGNER verify --verbose ../KeoTV.apk
           cp ../KeoTV.apk "../KeoTV-Build-${{ github.run_number }}.apk"
 
+      - name: Affichage des logs d'erreur de compilation
+        if: failure()
+        run: |
+          echo "=== DERNIERES LIGNES DU RAPPORT GRADLE ==="
+          if [ -f gradle-build.log ]; then
+            tail -n 250 gradle-build.log
+          elif [ -f android/gradle-build.log ]; then
+            tail -n 250 android/gradle-build.log
+          fi
+
       - name: Sauvegarde des rapports de compilation en cas d'erreur
         if: failure()
         uses: actions/upload-artifact@v4
@@ -96,6 +107,7 @@ jobs:
           name: gradle-failure-reports
           path: |
             gradle-build.log
+            android/gradle-build.log
 
       - name: Publication de l'APK en téléchargement (Artifacts)
         uses: actions/upload-artifact@v4
