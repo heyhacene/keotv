@@ -877,6 +877,17 @@ public class MainActivity extends AppCompatActivity {
         return 0L;
     }
 
+    private org.json.JSONObject getSavedSeriesProgress(String seriesId) {
+        if (seriesId == null || seriesId.isEmpty()) return null;
+        try {
+            SharedPreferences prefs = getSharedPreferences(PlayerActivity.PREFS_POSITIONS, Context.MODE_PRIVATE);
+            String jsonStr = prefs.getString(PlayerActivity.KEY_POSITIONS_JSON, "{}");
+            org.json.JSONObject root = new org.json.JSONObject(jsonStr);
+            return root.optJSONObject("series_" + seriesId);
+        } catch (Exception ignored) {}
+        return null;
+    }
+
     private String formatPlaybackTime(long ms) {
         long totalSec = ms / 1000;
         long h = totalSec / 3600;
@@ -1202,8 +1213,8 @@ public class MainActivity extends AppCompatActivity {
 
             if (dialog.getWindow() != null) {
                 DisplayMetrics dm = getResources().getDisplayMetrics();
-                int w = (int) (dm.widthPixels * 0.92f);
-                int h = (int) (dm.heightPixels * 0.90f);
+                int w = (int) (dm.widthPixels * 0.94f);
+                int h = (int) (dm.heightPixels * 0.92f);
                 dialog.getWindow().setLayout(w, h);
                 dialog.getWindow().setGravity(Gravity.CENTER);
             }
@@ -1226,10 +1237,16 @@ public class MainActivity extends AppCompatActivity {
             TextView tvTitle = view.findViewById(R.id.tv_series_title);
             TextView tvRating = view.findViewById(R.id.tv_series_rating);
             TextView tvMeta = view.findViewById(R.id.tv_series_meta);
+            TextView tvDirector = view.findViewById(R.id.tv_series_director);
             ImageView ivCover = view.findViewById(R.id.iv_series_cover);
             TextView tvPlot = view.findViewById(R.id.tv_series_plot);
+            TextView tvCast = view.findViewById(R.id.tv_series_cast);
+            LinearLayout layoutActorsContainer = view.findViewById(R.id.layout_series_actors_container);
+            Button btnResume = view.findViewById(R.id.btn_resume_series);
             LinearLayout layoutSeasons = view.findViewById(R.id.layout_seasons);
             RecyclerView recyclerEpisodes = view.findViewById(R.id.recycler_episodes);
+            Button btnSearchActor = view.findViewById(R.id.btn_search_series_actor);
+            Button btnFav = view.findViewById(R.id.btn_fav_series);
             Button btnClose = view.findViewById(R.id.btn_close_series);
 
             recyclerEpisodes.setLayoutManager(new LinearLayoutManager(this));
@@ -1237,18 +1254,6 @@ public class MainActivity extends AppCompatActivity {
             tvTitle.setText(seriesItem.name);
             if (seriesItem.logo != null && !seriesItem.logo.isEmpty()) {
                 ImageLoader.load(this, seriesItem.logo, ivCover);
-            }
-
-            // Pre-populate cached metadata
-            if (seriesItem.rating != null && !seriesItem.rating.isEmpty()) {
-                tvRating.setText("⭐ " + seriesItem.rating);
-            }
-            if (seriesItem.plot != null && !seriesItem.plot.isEmpty()) {
-                tvPlot.setText(seriesItem.plot);
-            }
-            if (seriesItem.genre != null && !seriesItem.genre.isEmpty() && tvMeta != null) {
-                String meta = (seriesItem.releaseDate != null ? seriesItem.releaseDate + " • " : "") + seriesItem.genre;
-                tvMeta.setText(meta);
             }
 
             final AlertDialog dialog = new AlertDialog.Builder(this)
@@ -1259,8 +1264,112 @@ public class MainActivity extends AppCompatActivity {
                 dialog.getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             }
 
+            final String[] firstActor = new String[]{""};
+            final String rawId = seriesItem.id.replace("xtream_series_", "");
+
+            // Pre-populate cached metadata
+            if (seriesItem.rating != null && !seriesItem.rating.isEmpty()) {
+                tvRating.setText("⭐ " + seriesItem.rating);
+            }
+            if (seriesItem.plot != null && !seriesItem.plot.isEmpty()) {
+                tvPlot.setText(seriesItem.plot);
+            }
+            if (seriesItem.director != null && !seriesItem.director.isEmpty() && tvDirector != null) {
+                tvDirector.setText("Réalisateur : " + seriesItem.director);
+            }
+            if (seriesItem.genre != null && !seriesItem.genre.isEmpty() && tvMeta != null) {
+                String meta = (seriesItem.releaseDate != null ? seriesItem.releaseDate + " • " : "") + seriesItem.genre;
+                tvMeta.setText(meta);
+            }
+            if (seriesItem.cast != null && !seriesItem.cast.isEmpty()) {
+                populateActorChips(layoutActorsContainer, seriesItem.cast, dialog, seriesItem, firstActor);
+            }
+
+            // Check saved series resume progress
+            org.json.JSONObject savedProg = getSavedSeriesProgress(rawId);
+            if (savedProg != null && btnResume != null) {
+                final String savedUrl = savedProg.optString("url", "");
+                final String savedTitle = savedProg.optString("title", "");
+                final long savedPos = savedProg.optLong("positionMs", 0L);
+                if (savedPos > 15000L && !savedUrl.isEmpty()) {
+                    btnResume.setVisibility(View.VISIBLE);
+                    String shortTitle = savedTitle.replace(seriesItem.name, "").replaceAll("^\\s*-\\s*", "").trim();
+                    if (shortTitle.isEmpty()) shortTitle = savedTitle;
+                    btnResume.setText("▶ Reprendre : " + shortTitle + " (" + formatPlaybackTime(savedPos) + ")");
+                    btnResume.setOnClickListener(v -> {
+                        dialog.dismiss();
+                        List<String> urls = new ArrayList<>();
+                        urls.add(savedUrl);
+                        List<String> titles = new ArrayList<>();
+                        titles.add(savedTitle.isEmpty() ? seriesItem.name : savedTitle);
+                        PlayerActivity.pendingUrls = urls;
+                        PlayerActivity.pendingTitles = titles;
+                        PlayerActivity.pendingIndex = 0;
+                        PlayerActivity.pendingIsLive = false;
+                        PlayerActivity.pendingSeriesId = rawId;
+                        Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
+                        startActivity(intent);
+                    });
+                    btnResume.setOnLongClickListener(v -> {
+                        new AlertDialog.Builder(MainActivity.this)
+                                .setTitle(seriesItem.name)
+                                .setMessage("Options de reprise de la série :")
+                                .setPositiveButton("↺ Recommencer cet épisode", (d, which) -> {
+                                    dialog.dismiss();
+                                    List<String> urls = new ArrayList<>();
+                                    urls.add(savedUrl);
+                                    List<String> titles = new ArrayList<>();
+                                    titles.add(savedTitle.isEmpty() ? seriesItem.name : savedTitle);
+                                    PlayerActivity.pendingUrls = urls;
+                                    PlayerActivity.pendingTitles = titles;
+                                    PlayerActivity.pendingIndex = 0;
+                                    PlayerActivity.pendingIsLive = false;
+                                    PlayerActivity.pendingSeriesId = rawId;
+                                    PlayerActivity.pendingForceRestart = true;
+                                    Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
+                                    startActivity(intent);
+                                })
+                                .setNegativeButton("▶ Reprendre (" + formatPlaybackTime(savedPos) + ")", (d, which) -> {
+                                    btnResume.performClick();
+                                })
+                                .setNeutralButton("Annuler", null)
+                                .show();
+                        return true;
+                    });
+                } else {
+                    btnResume.setVisibility(View.GONE);
+                }
+            } else if (btnResume != null) {
+                btnResume.setVisibility(View.GONE);
+            }
+
+            // Favorites button
+            if (btnFav != null) {
+                btnFav.setText(seriesItem.isFav ? "★ Retirer favori" : "⭐ Favori");
+                btnFav.setOnClickListener(v -> {
+                    db.toggleFavorite(seriesItem.id);
+                    seriesItem.isFav = !seriesItem.isFav;
+                    btnFav.setText(seriesItem.isFav ? "★ Retirer favori" : "⭐ Favori");
+                    Toast.makeText(MainActivity.this, seriesItem.isFav ? "Ajouté aux favoris" : "Retiré des favoris", Toast.LENGTH_SHORT).show();
+                });
+            }
+
+            // Search actor / series button
+            if (btnSearchActor != null) {
+                btnSearchActor.setOnClickListener(v -> {
+                    dialog.dismiss();
+                    if (seriesItem.cast != null && !seriesItem.cast.isEmpty()) {
+                        db.updateChannelMetadata(seriesItem.id, seriesItem.cast, seriesItem.director, seriesItem.plot, seriesItem.genre, seriesItem.releaseDate, seriesItem.rating);
+                    }
+                    if (firstActor[0] != null && !firstActor[0].isEmpty()) {
+                        switchToSearch(firstActor[0]);
+                    } else {
+                        switchToSearch(seriesItem.name);
+                    }
+                });
+            }
+
             if (pl != null && pl.serverUrl != null && !pl.serverUrl.isEmpty()) {
-                final String rawId = seriesItem.id.replace("xtream_series_", "");
                 xtreamClient.fetchSeriesInfo(pl.serverUrl, pl.username, pl.password, rawId, new XtreamClient.SeriesInfoCallback() {
                     @Override
                     public void onSuccess(JsonObject seriesDetails) {
@@ -1300,8 +1409,14 @@ public class MainActivity extends AppCompatActivity {
                         seriesItem.releaseDate = releaseDate;
                         seriesItem.rating = rating;
 
+                        if (tvDirector != null && !director.isEmpty()) {
+                            tvDirector.setText("Réalisateur : " + director);
+                        }
                         if (tvMeta != null && (!genre.isEmpty() || !releaseDate.isEmpty())) {
                             tvMeta.setText((!releaseDate.isEmpty() ? releaseDate + " • " : "") + genre);
+                        }
+                        if (!cast.isEmpty()) {
+                            populateActorChips(layoutActorsContainer, cast, dialog, seriesItem, firstActor);
                         }
 
                         final String fCast = cast;
@@ -1365,6 +1480,14 @@ public class MainActivity extends AppCompatActivity {
             btnClose.setOnClickListener(v -> dialog.dismiss());
             dialog.show();
 
+            if (dialog.getWindow() != null) {
+                DisplayMetrics dm = getResources().getDisplayMetrics();
+                int w = (int) (dm.widthPixels * 0.94f);
+                int h = (int) (dm.heightPixels * 0.92f);
+                dialog.getWindow().setLayout(w, h);
+                dialog.getWindow().setGravity(Gravity.CENTER);
+            }
+
         } catch (Throwable t) {
             Log.e(TAG, "Failed to show series detail dialog", t);
         }
@@ -1408,7 +1531,7 @@ public class MainActivity extends AppCompatActivity {
             list.add(item);
         }
 
-        recycler.setAdapter(new EpisodesAdapter(list, (clickedItem, index) -> {
+        recycler.setAdapter(new EpisodesAdapter(list, streamUrls, displayTitles, seriesId, dialog, (clickedItem, index) -> {
             dialog.dismiss();
             PlayerActivity.pendingUrls = streamUrls;
             PlayerActivity.pendingTitles = displayTitles;
@@ -1435,10 +1558,18 @@ public class MainActivity extends AppCompatActivity {
 
     private class EpisodesAdapter extends RecyclerView.Adapter<EpisodesAdapter.ViewHolder> {
         private final List<EpisodeItem> episodes;
+        private final List<String> streamUrls;
+        private final List<String> displayTitles;
+        private final String seriesId;
+        private final AlertDialog parentDialog;
         private final OnEpisodeClickListener listener;
 
-        EpisodesAdapter(List<EpisodeItem> episodes, OnEpisodeClickListener listener) {
+        EpisodesAdapter(List<EpisodeItem> episodes, List<String> streamUrls, List<String> displayTitles, String seriesId, AlertDialog parentDialog, OnEpisodeClickListener listener) {
             this.episodes = episodes;
+            this.streamUrls = streamUrls;
+            this.displayTitles = displayTitles;
+            this.seriesId = seriesId;
+            this.parentDialog = parentDialog;
             this.listener = listener;
         }
 
@@ -1455,13 +1586,58 @@ public class MainActivity extends AppCompatActivity {
             holder.tvNum.setText("E" + item.num);
             holder.tvTitle.setText(item.title);
             holder.tvPlot.setText(item.plot != null && !item.plot.isEmpty() ? item.plot : "Épisode de la série.");
-            holder.tvDuration.setText(item.duration != null && !item.duration.isEmpty() ? item.duration : "");
+
+            long epSavedPos = getSavedPositionForUrl(item.url);
+            if (epSavedPos > 15000L) {
+                holder.tvDuration.setText((item.duration != null && !item.duration.isEmpty() ? item.duration + " • " : "") + "⏱ " + formatPlaybackTime(epSavedPos));
+                holder.tvDuration.setTextColor(0xFF38BDF8);
+            } else {
+                holder.tvDuration.setText(item.duration != null && !item.duration.isEmpty() ? item.duration : "");
+                holder.tvDuration.setTextColor(0xFF64748B);
+            }
 
             holder.itemView.setOnClickListener(v -> {
                 int pos = holder.getBindingAdapterPosition();
                 if (pos != RecyclerView.NO_POSITION && listener != null) {
                     listener.onEpisodeClick(item, pos);
                 }
+            });
+
+            holder.itemView.setOnLongClickListener(v -> {
+                int pos = holder.getBindingAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) {
+                    long posMs = getSavedPositionForUrl(item.url);
+                    if (posMs > 15000L) {
+                        new AlertDialog.Builder(MainActivity.this)
+                                .setTitle(item.title)
+                                .setMessage("Options de lecture de l'épisode :")
+                                .setPositiveButton("↺ Recommencer du début", (d, which) -> {
+                                    if (parentDialog != null) parentDialog.dismiss();
+                                    PlayerActivity.pendingUrls = streamUrls;
+                                    PlayerActivity.pendingTitles = displayTitles;
+                                    PlayerActivity.pendingIndex = pos;
+                                    PlayerActivity.pendingIsLive = false;
+                                    PlayerActivity.pendingSeriesId = seriesId;
+                                    PlayerActivity.pendingForceRestart = true;
+                                    Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
+                                    startActivity(intent);
+                                })
+                                .setNegativeButton("▶ Reprendre (" + formatPlaybackTime(posMs) + ")", (d, which) -> {
+                                    if (parentDialog != null) parentDialog.dismiss();
+                                    PlayerActivity.pendingUrls = streamUrls;
+                                    PlayerActivity.pendingTitles = displayTitles;
+                                    PlayerActivity.pendingIndex = pos;
+                                    PlayerActivity.pendingIsLive = false;
+                                    PlayerActivity.pendingSeriesId = seriesId;
+                                    Intent intent = new Intent(MainActivity.this, PlayerActivity.class);
+                                    startActivity(intent);
+                                })
+                                .setNeutralButton("Annuler", null)
+                                .show();
+                        return true;
+                    }
+                }
+                return false;
             });
         }
 

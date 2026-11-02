@@ -1,0 +1,262 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@drawable/bg_card"
+    android:padding="20dp">
+
+    <!-- Header: Title & Rating Badge -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="8dp">
+
+        <TextView
+            android:id="@+id/tv_movie_title"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Titre du Film"
+            android:textColor="#F8FAFC"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:maxLines="2"
+            android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/tv_movie_rating"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="⭐ 8.5"
+            android:textColor="#F59E0B"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:background="#2BF59E0B"
+            android:layout_marginStart="12dp" />
+
+    </LinearLayout>
+
+    <!-- Subtitle Meta: Year, Duration, Genre -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingBottom="10dp">
+
+        <TextView
+            android:id="@+id/tv_movie_year"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="2024"
+            android:textColor="#38BDF8"
+            android:textSize="12.5sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/tv_movie_duration"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=" • 1h 54m"
+            android:textColor="#94A3B8"
+            android:textSize="12.5sp" />
+
+        <TextView
+            android:id="@+id/tv_movie_genre"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text=" • Action / Drame"
+            android:textColor="#94A3B8"
+            android:textSize="12.5sp" />
+
+    </LinearLayout>
+
+    <!-- Main Content: Poster on left, Details on right -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal">
+
+        <!-- Movie Poster -->
+        <ImageView
+            android:id="@+id/iv_movie_poster"
+            android:layout_width="160dp"
+            android:layout_height="match_parent"
+            android:scaleType="centerCrop"
+            android:background="#1E293B"
+            android:layout_marginEnd="18dp" />
+
+        <!-- Details Info -->
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="RÉSUMÉ"
+                android:textColor="#64748B"
+                android:textSize="10.5sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.08" />
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="4dp"
+                android:scrollbars="vertical">
+
+                <TextView
+                    android:id="@+id/tv_movie_plot"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="#E2E8F0"
+                    android:textSize="12sp"
+                    android:lineSpacingExtra="3dp"
+                    android:text="Chargement des informations du film..." />
+
+            </ScrollView>
+
+            <TextView
+                android:id="@+id/tv_movie_director"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:textColor="#94A3B8"
+                android:textSize="11.5sp"
+                android:text="Réalisateur : -"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <!-- Individual Actor Chips Header -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:text="ACTEURS (cliquez sur un acteur pour voir ses films) :"
+                android:textColor="#38BDF8"
+                android:textSize="10.5sp"
+                android:textStyle="bold"
+                android:letterSpacing="0.04" />
+
+            <!-- Horizontal Scrollable Actor Chips -->
+            <HorizontalScrollView
+                android:id="@+id/hsv_movie_actors"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/layout_actors_container"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/tv_movie_cast"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="#64748B"
+                        android:textSize="11sp"
+                        android:text="Chargement des acteurs..." />
+
+                </LinearLayout>
+
+            </HorizontalScrollView>
+
+            <!-- Fallback Search Button -->
+            <Button
+                android:id="@+id/btn_search_actor"
+                android:layout_width="wrap_content"
+                android:layout_height="32dp"
+                android:layout_marginTop="6dp"
+                android:text="🔍 Rechercher ce film ou premier acteur"
+                android:textColor="#94A3B8"
+                android:textSize="10.5sp"
+                android:background="@drawable/bg_button_selector"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:visibility="gone"
+                android:focusable="true" />
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+    <!-- Bottom Buttons Row -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="end|center_vertical"
+        android:layout_marginTop="12dp">
+
+        <Button
+            android:id="@+id/btn_restart_movie"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:text="↺ Recommencer du début"
+            android:textColor="#CBD5E1"
+            android:textSize="11.5sp"
+            android:background="@drawable/bg_button_selector"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:layout_marginEnd="10dp"
+            android:visibility="gone"
+            android:focusable="true" />
+
+        <Button
+            android:id="@+id/btn_play_movie"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:text="▶ Regarder le Film"
+            android:textColor="#FFFFFF"
+            android:textSize="12.5sp"
+            android:textStyle="bold"
+            android:background="@drawable/bg_button_selector"
+            android:paddingStart="22dp"
+            android:paddingEnd="22dp"
+            android:layout_marginEnd="10dp"
+            android:focusable="true" />
+
+        <Button
+            android:id="@+id/btn_fav_movie"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:text="⭐ Favori"
+            android:textColor="#F8FAFC"
+            android:textSize="11.5sp"
+            android:background="@drawable/bg_button_selector"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:layout_marginEnd="10dp"
+            android:focusable="true" />
+
+        <Button
+            android:id="@+id/btn_close_movie"
+            android:layout_width="wrap_content"
+            android:layout_height="40dp"
+            android:text="✕ Fermer"
+            android:textColor="#94A3B8"
+            android:textSize="11.5sp"
+            android:background="@drawable/bg_button_selector"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:focusable="true" />
+
+    </LinearLayout>
+
+</LinearLayout>
