@@ -105,6 +105,8 @@ public class MainActivity extends AppCompatActivity {
     private RecyclerView recyclerSearchResults;
     private ChannelsAdapter searchResultsAdapter;
     private String globalSearchFilter = "all";
+    private Runnable pendingTmdbSearchRunnable = null;
+    private final Handler searchHandler = new Handler(Looper.getMainLooper());
 
     // Recyclers
     private RecyclerView recyclerCategories;
@@ -488,7 +490,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void performGlobalSearch(String query, String filter) {
-        String q = query.trim();
+        final String q = query != null ? query.trim() : "";
+        if (pendingTmdbSearchRunnable != null) {
+            searchHandler.removeCallbacks(pendingTmdbSearchRunnable);
+            pendingTmdbSearchRunnable = null;
+        }
+
         if (q.isEmpty()) {
             if (tvSearchResultsCount != null) {
                 tvSearchResultsCount.setText("Saisissez un texte pour rechercher dans tous les catalogues.");
@@ -500,17 +507,154 @@ public class MainActivity extends AppCompatActivity {
         }
 
         new Thread(() -> {
-            String streamTypeFilter = "all".equals(filter) ? null : filter;
+            final String streamTypeFilter = "all".equals(filter) ? null : filter;
+            // 1. Instant local search (direct name, cast, director, plot, actor table)
             final List<KeoDatabase.ChannelItem> results = db.searchChannels(q, streamTypeFilter);
+            final List<KeoDatabase.ChannelItem> currentResults = new ArrayList<>(results);
+
             runOnUiThread(() -> {
                 if (tvSearchResultsCount != null) {
-                    tvSearchResultsCount.setText(results.size() + " résultat(s) trouvé(s) pour '" + q + "'");
+                    tvSearchResultsCount.setText(currentResults.size() + " résultat(s) trouvé(s) pour '" + q + "'");
                 }
                 if (searchResultsAdapter != null) {
-                    searchResultsAdapter.setItems(results);
+                    searchResultsAdapter.setItems(new ArrayList<>(currentResults));
                 }
             });
+
+            // 2. Online Actor Filmography Enrichment (TMDB)
+            // Query TMDB to see if 'q' is an actor or director to enrich films & series
+            if (q.length() >= 3 && !"live".equals(streamTypeFilter)) {
+                pendingTmdbSearchRunnable = () -> new Thread(() -> {
+                    enrichSearchResultsWithActorCredits(q, streamTypeFilter, currentResults);
+                }).start();
+                searchHandler.postDelayed(pendingTmdbSearchRunnable, 250);
+            }
         }).start();
+    }
+
+    private void enrichSearchResultsWithActorCredits(String query, String streamTypeFilter, List<KeoDatabase.ChannelItem> currentResults) {
+        if (query == null || query.length() < 3) return;
+        try {
+            String enc = URLEncoder.encode(query, "UTF-8");
+            String searchUrl = "https://api.themoviedb.org/3/search/person?api_key=f090bb54758cabf231fb605d3e3e0468&query=" + enc + "&language=fr-FR";
+            String searchJson = XtreamClient.fetchUrl(searchUrl);
+            JsonObject searchObj = JsonParser.parseString(searchJson).getAsJsonObject();
+            JsonArray results = searchObj.has("results") && searchObj.get("results").isJsonArray()
+                    ? searchObj.getAsJsonArray("results") : null;
+            if (results == null || results.size() == 0) return;
+
+            JsonObject bestPerson = null;
+            for (int i = 0; i < Math.min(4, results.size()); i++) {
+                JsonObject p = results.get(i).getAsJsonObject();
+                String name = p.has("name") ? p.get("name").getAsString() : "";
+                double pop = p.has("popularity") ? p.get("popularity").getAsDouble() : 0.0;
+                String dept = p.has("known_for_department") ? p.get("known_for_department").getAsString() : "";
+                if (name.equalsIgnoreCase(query)) {
+                    bestPerson = p;
+                    break;
+                }
+                if (bestPerson == null && (dept.equalsIgnoreCase("Acting") || dept.equalsIgnoreCase("Directing") || pop > 1.5)) {
+                    bestPerson = p;
+                }
+            }
+            if (bestPerson == null) return;
+
+            int personId = bestPerson.get("id").getAsInt();
+            final String personName = bestPerson.has("name") ? bestPerson.get("name").getAsString() : query;
+
+            // Fetch combined credits (movies + series)
+            String creditsUrl = "https://api.themoviedb.org/3/person/" + personId + "/combined_credits?api_key=f090bb54758cabf231fb605d3e3e0468&language=fr-FR";
+            String creditsJson = XtreamClient.fetchUrl(creditsUrl);
+            JsonObject creditsObj = JsonParser.parseString(creditsJson).getAsJsonObject();
+            JsonArray castArr = creditsObj.has("cast") && creditsObj.get("cast").isJsonArray()
+                    ? creditsObj.getAsJsonArray("cast") : new JsonArray();
+
+            List<String> titles = new ArrayList<>();
+            for (int i = 0; i < castArr.size(); i++) {
+                JsonObject c = castArr.get(i).getAsJsonObject();
+                if (c.has("title") && !c.get("title").isJsonNull()) {
+                    addTitleVariants(titles, c.get("title").getAsString());
+                }
+                if (c.has("name") && !c.get("name").isJsonNull()) {
+                    addTitleVariants(titles, c.get("name").getAsString());
+                }
+                if (c.has("original_title") && !c.get("original_title").isJsonNull()) {
+                    addTitleVariants(titles, c.get("original_title").getAsString());
+                }
+                if (c.has("original_name") && !c.get("original_name").isJsonNull()) {
+                    addTitleVariants(titles, c.get("original_name").getAsString());
+                }
+                if (titles.size() >= 75) break;
+            }
+
+            if (titles.isEmpty()) return;
+
+            List<KeoDatabase.ChannelItem> creditChannels = db.searchChannelsByTitles(titles, streamTypeFilter);
+            if (creditChannels.isEmpty()) return;
+
+            java.util.Set<String> existingIds = new java.util.HashSet<>();
+            synchronized (currentResults) {
+                for (KeoDatabase.ChannelItem item : currentResults) {
+                    existingIds.add(item.id);
+                }
+            }
+
+            int addedCount = 0;
+            for (KeoDatabase.ChannelItem newItem : creditChannels) {
+                if (!existingIds.contains(newItem.id)) {
+                    synchronized (currentResults) {
+                        currentResults.add(newItem);
+                        existingIds.add(newItem.id);
+                    }
+                    addedCount++;
+                    try {
+                        String newCast = (newItem.cast != null && !newItem.cast.isEmpty())
+                                ? (newItem.cast.contains(personName) ? newItem.cast : newItem.cast + ", " + personName)
+                                : personName;
+                        newItem.cast = newCast;
+                        db.updateChannelMetadata(newItem.id, newCast, newItem.director, newItem.plot, newItem.genre, newItem.releaseDate, newItem.rating);
+                    } catch (Exception ignored) {}
+                }
+            }
+
+            if (addedCount > 0) {
+                final int totalCount = currentResults.size();
+                final int addedFromFilmography = addedCount;
+                runOnUiThread(() -> {
+                    if (tvSearchResultsCount != null) {
+                        tvSearchResultsCount.setText(totalCount + " résultat(s) pour '" + personName + "' (dont " + addedFromFilmography + " via filmographie)");
+                    }
+                    if (searchResultsAdapter != null) {
+                        searchResultsAdapter.setItems(new ArrayList<>(currentResults));
+                    }
+                });
+            }
+        } catch (Exception e) {
+            Log.d(TAG, "enrichSearchResultsWithActorCredits error: " + e.getMessage());
+        }
+    }
+
+    private void addTitleVariants(List<String> list, String title) {
+        if (title == null) return;
+        String t = title.trim();
+        if (t.length() < 3) return;
+        if (t.matches("^\\d+$")) return;
+        if (!list.contains(t)) list.add(t);
+
+        String lower = t.toLowerCase();
+        String stripped = null;
+        if (lower.startsWith("le ") || lower.startsWith("la ") || lower.startsWith("un ")) {
+            stripped = t.substring(3).trim();
+        } else if (lower.startsWith("les ") || lower.startsWith("the ") || lower.startsWith("des ")) {
+            stripped = t.substring(4).trim();
+        } else if (lower.startsWith("l'") || lower.startsWith("d'")) {
+            stripped = t.substring(2).trim();
+        } else if (lower.startsWith("une ")) {
+            stripped = t.substring(4).trim();
+        }
+        if (stripped != null && stripped.length() >= 4 && !list.contains(stripped)) {
+            list.add(stripped);
+        }
     }
 
     private void updateFavButtonLabel(boolean isFav) {

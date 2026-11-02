@@ -280,10 +280,32 @@ public class XtreamClient {
 
                             String cast = getOptString(obj, "cast", "");
                             if (cast.isEmpty()) cast = getOptString(obj, "actors", "");
+                            if (cast.isEmpty()) cast = getOptString(obj, "starring", "");
+                            if (cast.isEmpty()) cast = getOptString(obj, "stars", "");
+                            if (cast.isEmpty() && obj.has("info") && obj.get("info").isJsonObject()) {
+                                JsonObject info = obj.getAsJsonObject("info");
+                                cast = getOptString(info, "cast", "");
+                                if (cast.isEmpty()) cast = getOptString(info, "actors", "");
+                                if (cast.isEmpty()) cast = getOptString(info, "starring", "");
+                            }
+
                             String director = getOptString(obj, "director", "");
+                            if (director.isEmpty()) director = getOptString(obj, "directors", "");
+                            if (director.isEmpty() && obj.has("info") && obj.get("info").isJsonObject()) {
+                                director = getOptString(obj.getAsJsonObject("info"), "director", "");
+                            }
+
                             String plot = getOptString(obj, "plot", "");
                             if (plot.isEmpty()) plot = getOptString(obj, "description", "");
+                            if (plot.isEmpty()) plot = getOptString(obj, "summary", "");
+                            if (plot.isEmpty() && obj.has("info") && obj.get("info").isJsonObject()) {
+                                JsonObject info = obj.getAsJsonObject("info");
+                                plot = getOptString(info, "plot", "");
+                                if (plot.isEmpty()) plot = getOptString(info, "description", "");
+                            }
+
                             String genre = getOptString(obj, "genre", "");
+                            if (genre.isEmpty()) genre = getOptString(obj, "genres", "");
                             String releaseDate = getOptString(obj, "release_date", "");
                             if (releaseDate.isEmpty()) releaseDate = getOptString(obj, "releasedate", "");
                             if (releaseDate.isEmpty()) releaseDate = getOptString(obj, "year", "");
@@ -360,9 +382,31 @@ public class XtreamClient {
 
                             String cast = getOptString(obj, "cast", "");
                             if (cast.isEmpty()) cast = getOptString(obj, "actors", "");
+                            if (cast.isEmpty()) cast = getOptString(obj, "starring", "");
+                            if (cast.isEmpty()) cast = getOptString(obj, "stars", "");
+                            if (cast.isEmpty() && obj.has("info") && obj.get("info").isJsonObject()) {
+                                JsonObject info = obj.getAsJsonObject("info");
+                                cast = getOptString(info, "cast", "");
+                                if (cast.isEmpty()) cast = getOptString(info, "actors", "");
+                            }
+
                             String director = getOptString(obj, "director", "");
+                            if (director.isEmpty()) director = getOptString(obj, "directors", "");
+                            if (director.isEmpty() && obj.has("info") && obj.get("info").isJsonObject()) {
+                                director = getOptString(obj.getAsJsonObject("info"), "director", "");
+                            }
+
                             String plot = getOptString(obj, "plot", "");
+                            if (plot.isEmpty()) plot = getOptString(obj, "description", "");
+                            if (plot.isEmpty()) plot = getOptString(obj, "summary", "");
+                            if (plot.isEmpty() && obj.has("info") && obj.get("info").isJsonObject()) {
+                                JsonObject info = obj.getAsJsonObject("info");
+                                plot = getOptString(info, "plot", "");
+                                if (plot.isEmpty()) plot = getOptString(info, "description", "");
+                            }
+
                             String genre = getOptString(obj, "genre", "");
+                            if (genre.isEmpty()) genre = getOptString(obj, "genres", "");
                             String releaseDate = getOptString(obj, "releaseDate", "");
                             if (releaseDate.isEmpty()) releaseDate = getOptString(obj, "year", "");
                             String rating = getOptString(obj, "rating", "");

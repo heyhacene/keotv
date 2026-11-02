@@ -571,11 +571,12 @@ public class KeoDatabase extends SQLiteOpenHelper {
         Cursor c = null;
         try {
             String sql = "SELECT DISTINCT " + CHANNEL_COLUMNS
-                    + " FROM channels WHERE (name LIKE ? OR movie_cast LIKE ? OR director LIKE ? "
+                    + " FROM channels WHERE (name LIKE ? OR movie_cast LIKE ? OR director LIKE ? OR plot LIKE ? "
                     + " OR id IN (SELECT channel_id FROM movie_actors WHERE actor_name LIKE ?)) "
                     + " AND is_separator = 0";
 
             List<String> argsList = new ArrayList<>();
+            argsList.add(q);
             argsList.add(q);
             argsList.add(q);
             argsList.add(q);
@@ -618,6 +619,54 @@ public class KeoDatabase extends SQLiteOpenHelper {
             if (c != null) {
                 try { c.close(); } catch (Exception ignored) {}
             }
+        }
+        return list;
+    }
+
+    public List<ChannelItem> searchChannelsByTitles(List<String> titles, String streamType) {
+        List<ChannelItem> list = new ArrayList<>();
+        if (titles == null || titles.isEmpty()) return list;
+        SQLiteDatabase db = getReadableDatabase();
+
+        List<String> cleanTitles = new ArrayList<>();
+        for (String t : titles) {
+            if (t == null) continue;
+            String s = t.trim();
+            if (s.length() < 3) continue;
+            if (s.matches("^\\d+$")) continue;
+            if (!cleanTitles.contains(s)) {
+                cleanTitles.add(s);
+                if (cleanTitles.size() >= 60) break;
+            }
+        }
+        if (cleanTitles.isEmpty()) return list;
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("SELECT DISTINCT ").append(CHANNEL_COLUMNS).append(" FROM channels WHERE is_separator = 0 AND (");
+        List<String> args = new ArrayList<>();
+        for (int i = 0; i < cleanTitles.size(); i++) {
+            if (i > 0) sb.append(" OR ");
+            sb.append("name LIKE ?");
+            args.add("%" + cleanTitles.get(i) + "%");
+        }
+        sb.append(")");
+
+        if (streamType != null && !streamType.isEmpty() && !"all".equalsIgnoreCase(streamType)) {
+            sb.append(" AND stream_type = ?");
+            args.add(streamType);
+        }
+        sb.append(" ORDER BY name ASC LIMIT 100");
+
+        Cursor c = null;
+        try {
+            c = db.rawQuery(sb.toString(), args.toArray(new String[0]));
+            while (c != null && c.moveToNext()) {
+                list.add(cursorToChannel(c));
+            }
+        } catch (Throwable t) {
+            android.util.Log.e("KeoDatabase", "searchChannelsByTitles error: " + t.getMessage());
+        } finally {
+            if (c != null) try { c.close(); } catch (Exception ignored) {}
         }
         return list;
     }
