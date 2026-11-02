@@ -684,23 +684,29 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void selectCategory(KeoDatabase.CategoryItem cat) {
+        if (cat == null) return;
         selectedCategory = cat;
         new Thread(() -> {
-            final List<KeoDatabase.ChannelItem> channels;
-            if ("replay".equals(currentType)) {
-                channels = db.getReplayChannelsByGroup(cat.id);
-            } else if ("grp_favs".equals(cat.id)) {
-                channels = db.getFavoriteChannels();
-            } else if ("grp_favs_live".equals(cat.id)) {
-                channels = db.getFavoriteChannels("live");
-            } else if ("grp_favs_vod".equals(cat.id)) {
-                channels = db.getFavoriteChannels("vod");
-            } else if ("grp_favs_series".equals(cat.id)) {
-                channels = db.getFavoriteChannels("series");
-            } else {
-                channels = db.getChannelsByGroup(cat.id);
+            List<KeoDatabase.ChannelItem> channelsList = new ArrayList<>();
+            try {
+                if ("replay".equals(currentType)) {
+                    channelsList = db.getReplayChannelsByGroup(cat.id);
+                } else if ("grp_favs".equals(cat.id)) {
+                    channelsList = db.getFavoriteChannels();
+                } else if ("grp_favs_live".equals(cat.id)) {
+                    channelsList = db.getFavoriteChannels("live");
+                } else if ("grp_favs_vod".equals(cat.id)) {
+                    channelsList = db.getFavoriteChannels("vod");
+                } else if ("grp_favs_series".equals(cat.id)) {
+                    channelsList = db.getFavoriteChannels("series");
+                } else {
+                    channelsList = db.getChannelsByGroup(cat.id);
+                }
+            } catch (Throwable t) {
+                Log.e(TAG, "Error querying channels for category: " + cat.id, t);
             }
 
+            final List<KeoDatabase.ChannelItem> channels = (channelsList != null) ? channelsList : new ArrayList<>();
             runOnUiThread(() -> {
                 channelsAdapter.setItems(channels);
                 if (tvChannelsHeader != null) {
@@ -711,7 +717,7 @@ public class MainActivity extends AppCompatActivity {
                     if (restoredChannelId != null) {
                         for (int i = 0; i < channels.size(); i++) {
                             KeoDatabase.ChannelItem ch = channels.get(i);
-                            if (ch.id != null && ch.id.equals(restoredChannelId)) {
+                            if (ch != null && ch.id != null && ch.id.equals(restoredChannelId)) {
                                 targetCh = ch;
                                 channelsAdapter.setSelectedPos(i);
                                 break;
@@ -720,6 +726,8 @@ public class MainActivity extends AppCompatActivity {
                         restoredChannelId = null;
                     }
                     selectChannel(targetCh);
+                } else {
+                    activeChannel = null;
                 }
             });
         }).start();
