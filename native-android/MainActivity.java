@@ -2026,10 +2026,10 @@ public class MainActivity extends AppCompatActivity {
                                 restoredPosCount++;
                             }
                         } else if (wpEl.isJsonArray()) {
-                            JsonArray arr = wpEl.getAsJsonArray();
-                            for (int i = 0; i < arr.size(); i++) {
-                                if (arr.get(i).isJsonObject()) {
-                                    JsonObject item = arr.get(i).getAsJsonObject();
+                            JsonArray wpArr = wpEl.getAsJsonArray();
+                            for (int i = 0; i < wpArr.size(); i++) {
+                                if (wpArr.get(i).isJsonObject()) {
+                                    JsonObject item = wpArr.get(i).getAsJsonObject();
                                     String u = item.has("url") ? item.get("url").getAsString() : "";
                                     if (!u.isEmpty()) {
                                         root.put(u, new org.json.JSONObject(item.toString()));
