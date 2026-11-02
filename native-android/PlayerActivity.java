@@ -2319,6 +2319,12 @@ public class PlayerActivity extends AppCompatActivity {
         }
     }
 
+    private void updatePlayPauseButtonIcon() {
+        if (btnCenterPlayPause != null) {
+            boolean playing = player != null && player.isPlaying();
+            btnCenterPlayPause.setText(playing ? "⏸" : "▶");
+        }
+    }
 
     private void togglePlayPause() {
         if (player == null) return;
