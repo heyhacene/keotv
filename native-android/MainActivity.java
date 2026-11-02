@@ -78,8 +78,10 @@ public class MainActivity extends AppCompatActivity {
 
     // Mobile Portrait tabs compatibility
     private Button tabLive;
+    private Button tabReplay;
     private Button tabVod;
     private Button tabSeries;
+    private Button tabFavs;
 
     // Content containers
     private View layoutContentSplit;
@@ -111,6 +113,8 @@ public class MainActivity extends AppCompatActivity {
     private Button btnReplay;
 
     private final Map<String, String> epgCurrentTitleCache = new ConcurrentHashMap<>();
+    private final Map<String, String> epgNextTitleCache = new ConcurrentHashMap<>();
+    private final Map<String, String> epgPastTitleCache = new ConcurrentHashMap<>();
     private Runnable epgDebounceRunnable;
 
     private CategoriesAdapter categoriesAdapter;
@@ -200,8 +204,10 @@ public class MainActivity extends AppCompatActivity {
 
         // Mobile portrait tabs
         tabLive = findViewById(R.id.tab_live);
+        tabReplay = findViewById(R.id.tab_replay);
         tabVod = findViewById(R.id.tab_vod);
         tabSeries = findViewById(R.id.tab_series);
+        tabFavs = findViewById(R.id.tab_favs);
 
         // Recyclers
         recyclerCategories = findViewById(R.id.recycler_categories);
@@ -279,8 +285,10 @@ public class MainActivity extends AppCompatActivity {
 
         // Mobile portrait tabs click listeners
         if (tabLive != null) tabLive.setOnClickListener(v -> switchSection("live"));
+        if (tabReplay != null) tabReplay.setOnClickListener(v -> switchSection("replay"));
         if (tabVod != null) tabVod.setOnClickListener(v -> switchSection("vod"));
         if (tabSeries != null) tabSeries.setOnClickListener(v -> switchSection("series"));
+        if (tabFavs != null) tabFavs.setOnClickListener(v -> switchSection("favs"));
 
         // Global Search setup
         if (etGlobalSearch != null) {
@@ -433,8 +441,10 @@ public class MainActivity extends AppCompatActivity {
 
         // Mobile tabs highlight
         if (tabLive != null) tabLive.setSelected("live".equals(currentType));
+        if (tabReplay != null) tabReplay.setSelected("replay".equals(currentType));
         if (tabVod != null) tabVod.setSelected("vod".equals(currentType));
         if (tabSeries != null) tabSeries.setSelected("series".equals(currentType));
+        if (tabFavs != null) tabFavs.setSelected("favs".equals(currentType));
     }
 
     private void updateSearchFilterTabs() {
@@ -601,8 +611,14 @@ public class MainActivity extends AppCompatActivity {
                 cats = db.getReplayCategories();
             } else if ("favs".equals(currentType)) {
                 cats = new ArrayList<>();
-                int favCount = db.getFavoriteCount();
-                cats.add(new KeoDatabase.CategoryItem("grp_favs", "⭐ Tous les favoris", "favs", favCount, 0));
+                int favAll = db.getFavoriteCount();
+                cats.add(new KeoDatabase.CategoryItem("grp_favs", "⭐ Tous les favoris", "favs", favAll, 0));
+                int favLive = db.getFavoriteCount("live");
+                if (favLive > 0) cats.add(new KeoDatabase.CategoryItem("grp_favs_live", "📺 Chaînes TV", "favs", favLive, 1));
+                int favVod = db.getFavoriteCount("vod");
+                if (favVod > 0) cats.add(new KeoDatabase.CategoryItem("grp_favs_vod", "🎬 Films", "favs", favVod, 2));
+                int favSeries = db.getFavoriteCount("series");
+                if (favSeries > 0) cats.add(new KeoDatabase.CategoryItem("grp_favs_series", "🍿 Séries", "favs", favSeries, 3));
             } else {
                 cats = db.getCategories(currentType);
             }
@@ -627,6 +643,14 @@ public class MainActivity extends AppCompatActivity {
             final List<KeoDatabase.ChannelItem> channels;
             if ("replay".equals(currentType)) {
                 channels = db.getReplayChannelsByGroup(cat.id);
+            } else if ("grp_favs".equals(cat.id)) {
+                channels = db.getFavoriteChannels();
+            } else if ("grp_favs_live".equals(cat.id)) {
+                channels = db.getFavoriteChannels("live");
+            } else if ("grp_favs_vod".equals(cat.id)) {
+                channels = db.getFavoriteChannels("vod");
+            } else if ("grp_favs_series".equals(cat.id)) {
+                channels = db.getFavoriteChannels("series");
             } else {
                 channels = db.getChannelsByGroup(cat.id);
             }
@@ -681,21 +705,39 @@ public class MainActivity extends AppCompatActivity {
                 if (isFinishing() || isDestroyed()) return;
                 if (current != null && current.title != null && !current.title.isEmpty()) {
                     epgCurrentTitleCache.put(ch.id, current.title);
-
-                    // Update UI directly without re-binding or resetting focus (eliminates flickering)
-                    if (activeChannel != null && ch.id.equals(activeChannel.id)) {
-                        if (tvDetailEpg != null) {
-                            tvDetailEpg.setText("🔴 " + current.title);
+                }
+                if (next != null && next.title != null && !next.title.isEmpty()) {
+                    epgNextTitleCache.put(ch.id, next.title);
+                }
+                if (programs != null && !programs.isEmpty()) {
+                    long now = System.currentTimeMillis();
+                    for (XtreamClient.EpgProgram p : programs) {
+                        if (p.stopMs <= now && p.title != null && !p.title.isEmpty()) {
+                            epgPastTitleCache.put(ch.id, p.title);
                         }
-                        if (recyclerChannels != null && channelsAdapter != null) {
-                            int pos = channelsAdapter.getPositionForId(ch.id);
-                            if (pos != -1) {
-                                RecyclerView.ViewHolder vh = recyclerChannels.findViewHolderForAdapterPosition(pos);
-                                if (vh instanceof ChannelsAdapter.ViewHolder) {
-                                    ChannelsAdapter.ViewHolder cvh = (ChannelsAdapter.ViewHolder) vh;
-                                    if (cvh.tvEpgNow != null) {
-                                        cvh.tvEpgNow.setText("🔴 " + current.title);
-                                    }
+                    }
+                }
+
+                // Update UI directly without re-binding or resetting focus (eliminates flickering)
+                if (activeChannel != null && ch.id.equals(activeChannel.id)) {
+                    if (tvDetailEpg != null && current != null) {
+                        tvDetailEpg.setText("🔴 " + current.title + (next != null ? "  |  ⏭️ " + next.title : ""));
+                    }
+                    if (recyclerChannels != null && channelsAdapter != null) {
+                        int pos = channelsAdapter.getPositionForId(ch.id);
+                        if (pos != -1) {
+                            RecyclerView.ViewHolder vh = recyclerChannels.findViewHolderForAdapterPosition(pos);
+                            if (vh instanceof ChannelsAdapter.ViewHolder) {
+                                ChannelsAdapter.ViewHolder cvh = (ChannelsAdapter.ViewHolder) vh;
+                                if (cvh.tvEpgNow != null && current != null) {
+                                    cvh.tvEpgNow.setText("🔴 " + current.title);
+                                }
+                                if (cvh.tvEpgNext != null && next != null) {
+                                    cvh.tvEpgNext.setText("⏭️ " + next.title);
+                                }
+                                String past = epgPastTitleCache.get(ch.id);
+                                if (cvh.tvEpgPast != null && past != null) {
+                                    cvh.tvEpgPast.setText("◄ " + past);
                                 }
                             }
                         }
@@ -755,6 +797,49 @@ public class MainActivity extends AppCompatActivity {
         startActivity(intent);
     }
 
+    private long getSavedPositionForUrl(String url) {
+        if (url == null || url.isEmpty()) return 0L;
+        try {
+            SharedPreferences prefs = getSharedPreferences(PlayerActivity.PREFS_POSITIONS, Context.MODE_PRIVATE);
+            String jsonStr = prefs.getString(PlayerActivity.KEY_POSITIONS_JSON, "{}");
+            org.json.JSONObject root = new org.json.JSONObject(jsonStr);
+            org.json.JSONObject item = root.optJSONObject(url);
+            if (item != null) {
+                return item.optLong("positionMs", 0L);
+            }
+        } catch (Exception ignored) {}
+        return 0L;
+    }
+
+    private String formatPlaybackTime(long ms) {
+        long totalSec = ms / 1000;
+        long h = totalSec / 3600;
+        long m = (totalSec % 3600) / 60;
+        long s = totalSec % 60;
+        if (h > 0) {
+            return String.format(Locale.getDefault(), "%d:%02d:%02d", h, m, s);
+        } else {
+            return String.format(Locale.getDefault(), "%02d:%02d", m, s);
+        }
+    }
+
+    private void launchMoviePlayer(String url, String title, boolean forceRestart) {
+        List<String> urls = new ArrayList<>();
+        List<String> titles = new ArrayList<>();
+        urls.add(url);
+        titles.add(title);
+        PlayerActivity.pendingUrls = urls;
+        PlayerActivity.pendingTitles = titles;
+        PlayerActivity.pendingIndex = 0;
+        PlayerActivity.pendingIsLive = false;
+        PlayerActivity.pendingSeriesId = null;
+        PlayerActivity.pendingForceRestart = forceRestart;
+        if (forceRestart) {
+            PlayerActivity.pendingStartPositionMs = 0L;
+        }
+        startActivity(new Intent(this, PlayerActivity.class));
+    }
+
     // --- FICHE FILM (VOD MOVIE DETAIL DIALOG) ---
     private void showMovieDetailDialog(final KeoDatabase.ChannelItem movieItem) {
         if (isFinishing() || isDestroyed() || movieItem == null) return;
@@ -772,7 +857,9 @@ public class MainActivity extends AppCompatActivity {
             TextView tvPlot = view.findViewById(R.id.tv_movie_plot);
             TextView tvDirector = view.findViewById(R.id.tv_movie_director);
             TextView tvCast = view.findViewById(R.id.tv_movie_cast);
+            LinearLayout layoutActorsContainer = view.findViewById(R.id.layout_actors_container);
             Button btnSearchActor = view.findViewById(R.id.btn_search_actor);
+            Button btnRestart = view.findViewById(R.id.btn_restart_movie);
             Button btnPlay = view.findViewById(R.id.btn_play_movie);
             Button btnFav = view.findViewById(R.id.btn_fav_movie);
             Button btnClose = view.findViewById(R.id.btn_close_movie);
@@ -792,6 +879,24 @@ public class MainActivity extends AppCompatActivity {
 
             final String[] firstActor = new String[]{""};
             final String[] streamUrlHolder = new String[]{movieItem.streamUrl};
+            final long[] savedPosHolder = new long[]{getSavedPositionForUrl(movieItem.streamUrl)};
+
+            Runnable updatePlayButtons = () -> {
+                long pos = savedPosHolder[0];
+                if (pos > 15000L) {
+                    btnPlay.setText("▶ Reprendre (" + formatPlaybackTime(pos) + ")");
+                    if (btnRestart != null) {
+                        btnRestart.setVisibility(View.VISIBLE);
+                        btnRestart.setText("↺ Recommencer du début");
+                    }
+                } else {
+                    btnPlay.setText("▶ Regarder le Film");
+                    if (btnRestart != null) {
+                        btnRestart.setVisibility(View.GONE);
+                    }
+                }
+            };
+            updatePlayButtons.run();
 
             if (pl != null && pl.serverUrl != null && !pl.serverUrl.isEmpty()) {
                 xtreamClient.fetchVodInfo(pl.serverUrl, pl.username, pl.password, movieItem.id, new XtreamClient.VodInfoCallback() {
@@ -828,12 +933,67 @@ public class MainActivity extends AppCompatActivity {
                             tvDirector.setText("Réalisateur : " + info.get("director").getAsString());
                         }
                         if (info.has("cast") && !info.get("cast").isJsonNull()) {
-                            String castStr = info.get("cast").getAsString();
-                            tvCast.setText("Acteurs : " + castStr);
+                            String castStr = info.get("cast").getAsString().trim();
                             if (castStr.contains(",")) {
                                 firstActor[0] = castStr.split(",")[0].trim();
                             } else {
                                 firstActor[0] = castStr.trim();
+                            }
+
+                            // Populate individual clickable actor badges
+                            if (layoutActorsContainer != null && !castStr.isEmpty()) {
+                                layoutActorsContainer.removeAllViews();
+                                String[] actorList = castStr.split("[,;/]");
+                                int addedCount = 0;
+                                for (String rawActor : actorList) {
+                                    final String actorName = rawActor.trim();
+                                    if (actorName.isEmpty()) continue;
+                                    addedCount++;
+
+                                    Button actorChip = new Button(MainActivity.this);
+                                    actorChip.setText("👤 " + actorName);
+                                    actorChip.setTextColor(0xFFE2E8F0);
+                                    actorChip.setTextSize(11.5f);
+                                    actorChip.setTypeface(Typeface.DEFAULT_BOLD);
+                                    actorChip.setAllCaps(false);
+                                    actorChip.setFocusable(true);
+                                    actorChip.setFocusableInTouchMode(true);
+                                    actorChip.setPadding(dpToPx(12), dpToPx(5), dpToPx(12), dpToPx(5));
+
+                                    GradientDrawable chipBg = new GradientDrawable();
+                                    chipBg.setColor(0x2B334155);
+                                    chipBg.setCornerRadius(dpToPx(14));
+                                    chipBg.setStroke(dpToPx(1), 0xFF475569);
+                                    actorChip.setBackground(chipBg);
+
+                                    LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                                            ViewGroup.LayoutParams.WRAP_CONTENT, dpToPx(34));
+                                    lp.setMarginEnd(dpToPx(8));
+                                    actorChip.setLayoutParams(lp);
+
+                                    actorChip.setOnFocusChangeListener((v, hasFocus) -> {
+                                        GradientDrawable bg = (GradientDrawable) actorChip.getBackground();
+                                        if (hasFocus) {
+                                            bg.setColor(0xFF0284C7);
+                                            bg.setStroke(dpToPx(2), Color.WHITE);
+                                            actorChip.setScaleX(1.05f);
+                                            actorChip.setScaleY(1.05f);
+                                        } else {
+                                            bg.setColor(0x2B334155);
+                                            bg.setStroke(dpToPx(1), 0xFF475569);
+                                            actorChip.setScaleX(1.0f);
+                                            actorChip.setScaleY(1.0f);
+                                        }
+                                    });
+
+                                    actorChip.setOnClickListener(v -> {
+                                        dialog.dismiss();
+                                        switchToSearch(actorName);
+                                    });
+
+                                    layoutActorsContainer.addView(actorChip);
+                                    if (addedCount >= 16) break;
+                                }
                             }
                         }
                         if (info.has("movie_image") && !info.get("movie_image").isJsonNull()) {
@@ -843,6 +1003,12 @@ public class MainActivity extends AppCompatActivity {
                             String ext = movieData.get("container_extension").getAsString();
                             String rawId = movieItem.id.replace("xtream_vod_", "");
                             streamUrlHolder[0] = pl.serverUrl.replaceAll("/+$", "") + "/movie/" + pl.username + "/" + pl.password + "/" + rawId + "." + ext;
+
+                            long constructedPos = getSavedPositionForUrl(streamUrlHolder[0]);
+                            if (constructedPos > 15000L) {
+                                savedPosHolder[0] = constructedPos;
+                            }
+                            runOnUiThread(updatePlayButtons);
                         }
                     }
 
@@ -855,17 +1021,35 @@ public class MainActivity extends AppCompatActivity {
 
             btnPlay.setOnClickListener(v -> {
                 dialog.dismiss();
-                List<String> urls = new ArrayList<>();
-                List<String> titles = new ArrayList<>();
-                urls.add(streamUrlHolder[0]);
-                titles.add(tvTitle.getText().toString());
-                PlayerActivity.pendingUrls = urls;
-                PlayerActivity.pendingTitles = titles;
-                PlayerActivity.pendingIndex = 0;
-                PlayerActivity.pendingIsLive = false;
-                PlayerActivity.pendingSeriesId = null;
-                startActivity(new Intent(MainActivity.this, PlayerActivity.class));
+                launchMoviePlayer(streamUrlHolder[0], tvTitle.getText().toString(), false);
             });
+
+            btnPlay.setOnLongClickListener(v -> {
+                if (savedPosHolder[0] > 15000L) {
+                    new AlertDialog.Builder(MainActivity.this)
+                            .setTitle(tvTitle.getText().toString())
+                            .setMessage("Options de lecture du film :")
+                            .setPositiveButton("↺ Recommencer du début", (d, which) -> {
+                                dialog.dismiss();
+                                launchMoviePlayer(streamUrlHolder[0], tvTitle.getText().toString(), true);
+                            })
+                            .setNegativeButton("▶ Reprendre (" + formatPlaybackTime(savedPosHolder[0]) + ")", (d, which) -> {
+                                dialog.dismiss();
+                                launchMoviePlayer(streamUrlHolder[0], tvTitle.getText().toString(), false);
+                            })
+                            .setNeutralButton("Annuler", null)
+                            .show();
+                    return true;
+                }
+                return false;
+            });
+
+            if (btnRestart != null) {
+                btnRestart.setOnClickListener(v -> {
+                    dialog.dismiss();
+                    launchMoviePlayer(streamUrlHolder[0], tvTitle.getText().toString(), true);
+                });
+            }
 
             btnFav.setText(movieItem.isFav ? "★ Retirer favori" : "⭐ Favori");
             btnFav.setOnClickListener(v -> {
@@ -875,17 +1059,28 @@ public class MainActivity extends AppCompatActivity {
                 Toast.makeText(MainActivity.this, movieItem.isFav ? "Ajouté aux favoris" : "Retiré des favoris", Toast.LENGTH_SHORT).show();
             });
 
-            btnSearchActor.setOnClickListener(v -> {
-                dialog.dismiss();
-                if (!firstActor[0].isEmpty()) {
-                    switchToSearch(firstActor[0]);
-                } else {
-                    switchToSearch(tvTitle.getText().toString());
-                }
-            });
+            if (btnSearchActor != null) {
+                btnSearchActor.setOnClickListener(v -> {
+                    dialog.dismiss();
+                    if (!firstActor[0].isEmpty()) {
+                        switchToSearch(firstActor[0]);
+                    } else {
+                        switchToSearch(tvTitle.getText().toString());
+                    }
+                });
+            }
 
             btnClose.setOnClickListener(v -> dialog.dismiss());
             dialog.show();
+
+            if (dialog.getWindow() != null) {
+                DisplayMetrics dm = getResources().getDisplayMetrics();
+                int w = (int) (dm.widthPixels * 0.92f);
+                int h = (int) (dm.heightPixels * 0.90f);
+                dialog.getWindow().setLayout(w, h);
+                dialog.getWindow().setGravity(Gravity.CENTER);
+            }
+
             btnPlay.requestFocus();
 
         } catch (Throwable t) {
@@ -1746,6 +1941,74 @@ public class MainActivity extends AppCompatActivity {
 
     // --- RECYCLER VIEW ADAPTERS ---
 
+    private String formatCategoryNameWithIcon(String name, String type) {
+        if (name == null) return "";
+        if (name.startsWith("⭐") || name.startsWith("📺") || name.startsWith("🎬") ||
+            name.startsWith("🍿") || name.startsWith("⚽") || name.startsWith("🔄") || name.startsWith("🇫🇷")) {
+            return name;
+        }
+
+        String upper = name.toUpperCase(Locale.ROOT);
+        String icon;
+
+        if (upper.contains("FAVORI")) {
+            icon = "⭐ ";
+        } else if (upper.contains("SPORT") || upper.contains("FOOT") || upper.contains("BEIN") ||
+                   upper.contains("CANAL+ SPORT") || upper.contains("RMC") || upper.contains("LIGUE") ||
+                   upper.contains("EUROSPORT") || upper.contains("DAZN") || upper.contains("FORMULA") ||
+                   upper.contains("F1") || upper.contains("MOTO") || upper.contains("NBA")) {
+            icon = "⚽ ";
+        } else if (upper.contains("CINEMA") || upper.contains("FILM") || upper.contains("ACTION") ||
+                   upper.contains("COMEDIE") || upper.contains("THRILLER") || upper.contains("HORREUR") ||
+                   upper.contains("BOX OFFICE") || upper.contains("MARVEL") || upper.contains("DISNEY+ FILM")) {
+            icon = "🎬 ";
+        } else if (upper.contains("SERIE") || upper.contains("NETFLIX") || upper.contains("AMAZON") ||
+                   upper.contains("DISNEY") || upper.contains("HBO") || upper.contains("APPLE") ||
+                   upper.contains("PARAMOUNT") || upper.contains("CANAL+ SERIES")) {
+            icon = "🍿 ";
+        } else if (upper.contains("ENFANT") || upper.contains("JEUNESSE") || upper.contains("KIDS") ||
+                   upper.contains("CARTOON") || upper.contains("ANIMATION") || upper.contains("GULLI") ||
+                   upper.contains("DISNEY JR") || upper.contains("NICKELODEON")) {
+            icon = "🧒 ";
+        } else if (upper.contains("DOC") || upper.contains("DISCOVERY") || upper.contains("PLANETE") ||
+                   upper.contains("NATIONAL GEO") || upper.contains("HISTOIRE") || upper.contains("SCIENCE")) {
+            icon = "🌍 ";
+        } else if (upper.contains("NEWS") || upper.contains("INFO") || upper.contains("BFM") ||
+                   upper.contains("LCI") || upper.contains("CNEWS") || upper.contains("FRANCE 24")) {
+            icon = "📰 ";
+        } else if (upper.contains("MUSIC") || upper.contains("MTV") || upper.contains("TRACE") ||
+                   upper.contains("MEZZO") || upper.contains("CONCERT") || upper.contains("RADIO")) {
+            icon = "🎵 ";
+        } else if (upper.contains("FRANCE") || upper.contains("FR |") || upper.contains("TNT") ||
+                   upper.contains("GENERALISTE")) {
+            icon = "🇫🇷 ";
+        } else if (upper.contains("BELGIQUE") || upper.contains("BE |")) {
+            icon = "🇧🇪 ";
+        } else if (upper.contains("SUISSE") || upper.contains("CH |")) {
+            icon = "🇨🇭 ";
+        } else if (upper.contains("ESPAGNE") || upper.contains("ES |")) {
+            icon = "🇪🇸 ";
+        } else if (upper.contains("ITALIE") || upper.contains("IT |")) {
+            icon = "🇮🇹 ";
+        } else if (upper.contains("PORTUGAL") || upper.contains("PT |")) {
+            icon = "🇵🇹 ";
+        } else if (upper.contains("ARAB") || upper.contains("AR |")) {
+            icon = "🇸🇦 ";
+        } else if (upper.contains("4K") || upper.contains("UHD")) {
+            icon = "💎 ";
+        } else if ("vod".equals(type)) {
+            icon = "🎬 ";
+        } else if ("series".equals(type)) {
+            icon = "🍿 ";
+        } else if ("replay".equals(type)) {
+            icon = "🔄 ";
+        } else {
+            icon = "📺 ";
+        }
+
+        return icon + name;
+    }
+
     private class CategoriesAdapter extends RecyclerView.Adapter<CategoriesAdapter.ViewHolder> {
         private final List<KeoDatabase.CategoryItem> items = new ArrayList<>();
         private int selectedPos = 0;
@@ -1771,7 +2034,7 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
             KeoDatabase.CategoryItem item = items.get(position);
-            holder.tvName.setText(item.name);
+            holder.tvName.setText(formatCategoryNameWithIcon(item.name, item.type));
             holder.tvCount.setText(String.valueOf(item.count));
             holder.itemView.setSelected(selectedPos == position);
 
@@ -1910,16 +2173,80 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 // PAST Slot (Replay)
-                if (item.tvArchive == 1 || "replay".equals(currentType)) {
+                String pastCached = epgPastTitleCache.get(item.id);
+                if (pastCached != null && !pastCached.isEmpty()) {
+                    holder.tvEpgPast.setText("◄ " + pastCached);
+                    holder.tvEpgPast.setTextColor(0xFF38BDF8);
+                } else if (item.tvArchive == 1 || "replay".equals(currentType)) {
                     holder.tvEpgPast.setText("◄ Replay disponible");
                     holder.tvEpgPast.setTextColor(0xFF38BDF8);
                 } else {
-                    holder.tvEpgPast.setText("◄ 19:30 Passé");
+                    holder.tvEpgPast.setText("◄ Replay");
                     holder.tvEpgPast.setTextColor(0xFF64748B);
                 }
 
                 // NEXT Slot
-                holder.tvEpgNext.setText("⏭️ À suivre");
+                String nextCached = epgNextTitleCache.get(item.id);
+                if (nextCached != null && !nextCached.isEmpty()) {
+                    holder.tvEpgNext.setText("⏭️ " + nextCached);
+                } else {
+                    holder.tvEpgNext.setText("⏭️ À suivre");
+                }
+
+                // EPG Timeline navigation & clicks
+                holder.tvEpgPast.setOnClickListener(v -> showCatchupDialog(item));
+                holder.tvEpgPast.setOnKeyListener((v, keyCode, event) -> {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                            holder.itemView.requestFocus();
+                            return true;
+                        } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                            if (holder.tvEpgNow != null) {
+                                holder.tvEpgNow.requestFocus();
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                });
+
+                holder.tvEpgNow.setOnClickListener(v -> launchPlayerFullscreen());
+                holder.tvEpgNow.setOnKeyListener((v, keyCode, event) -> {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                            if (holder.tvEpgPast != null) {
+                                holder.tvEpgPast.requestFocus();
+                                return true;
+                            }
+                        } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                            if (holder.tvEpgNext != null) {
+                                holder.tvEpgNext.requestFocus();
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                });
+
+                holder.tvEpgNext.setOnClickListener(v -> {
+                    String next = epgNextTitleCache.get(item.id);
+                    if (next != null && !next.isEmpty()) {
+                        Toast.makeText(MainActivity.this, "À suivre sur " + item.name + " : " + next, Toast.LENGTH_LONG).show();
+                    } else {
+                        Toast.makeText(MainActivity.this, "Prochain programme : " + item.name, Toast.LENGTH_SHORT).show();
+                    }
+                });
+                holder.tvEpgNext.setOnKeyListener((v, keyCode, event) -> {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                        if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                            if (holder.tvEpgNow != null) {
+                                holder.tvEpgNow.requestFocus();
+                                return true;
+                            }
+                        }
+                    }
+                    return false;
+                });
 
             } else {
                 if (holder.layoutEpgTimeline != null) holder.layoutEpgTimeline.setVisibility(View.GONE);
@@ -1968,6 +2295,18 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
+            // Long click on channel row directly opens Catchup / Replay
+            holder.itemView.setOnLongClickListener(v -> {
+                int pos = holder.getBindingAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) {
+                    selectedPos = pos;
+                    selectChannel(item);
+                    showCatchupDialog(item);
+                    return true;
+                }
+                return false;
+            });
+
             holder.itemView.setOnFocusChangeListener((v, hasFocus) -> {
                 if (hasFocus) {
                     int pos = holder.getBindingAdapterPosition();
@@ -1987,6 +2326,13 @@ public class MainActivity extends AppCompatActivity {
                         if (etSearch != null && etSearch.isShown()) {
                             etSearch.requestFocus();
                             return true;
+                        }
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        if (holder.layoutEpgTimeline != null && holder.layoutEpgTimeline.getVisibility() == View.VISIBLE) {
+                            if (holder.tvEpgNow != null && holder.tvEpgNow.isShown()) {
+                                holder.tvEpgNow.requestFocus();
+                                return true;
+                            }
                         }
                     }
                 } else if (event.getAction() == KeyEvent.ACTION_UP) {

@@ -8,7 +8,7 @@
     <!-- 1. LEFT SIDEBAR (v1.3 Navigation Layout) -->
     <LinearLayout
         android:id="@+id/sidebar"
-        android:layout_width="76dp"
+        android:layout_width="96dp"
         android:layout_height="match_parent"
         android:orientation="vertical"
         android:gravity="center_horizontal"
@@ -24,88 +24,88 @@
             android:layout_height="wrap_content"
             android:text="KeoTV"
             android:textColor="#38BDF8"
-            android:textSize="12sp"
+            android:textSize="14sp"
             android:textStyle="bold"
             android:letterSpacing="0.05"
-            android:layout_marginBottom="16dp" />
+            android:layout_marginBottom="14dp" />
 
         <!-- Navigation Buttons -->
         <Button
             android:id="@+id/btn_nav_live"
-            android:layout_width="68dp"
-            android:layout_height="48dp"
-            android:text="📺\nDirect"
+            android:layout_width="86dp"
+            android:layout_height="56dp"
+            android:text="📺\nDIRECT"
             android:textColor="#FFFFFF"
-            android:textSize="9sp"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:lineSpacingExtra="1dp"
+            android:lineSpacingExtra="2dp"
             android:background="@drawable/bg_nav_item_selector"
-            android:layout_marginBottom="4dp"
+            android:layout_marginBottom="6dp"
             android:focusable="true" />
 
         <Button
             android:id="@+id/btn_nav_replay"
-            android:layout_width="68dp"
-            android:layout_height="48dp"
-            android:text="🔄\nReplay"
+            android:layout_width="86dp"
+            android:layout_height="56dp"
+            android:text="🔄\nREPLAY"
             android:textColor="#94A3B8"
-            android:textSize="9sp"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:lineSpacingExtra="1dp"
+            android:lineSpacingExtra="2dp"
             android:background="@drawable/bg_nav_item_selector"
-            android:layout_marginBottom="4dp"
+            android:layout_marginBottom="6dp"
             android:focusable="true" />
 
         <Button
             android:id="@+id/btn_nav_vod"
-            android:layout_width="68dp"
-            android:layout_height="48dp"
-            android:text="🎬\nFilms"
+            android:layout_width="86dp"
+            android:layout_height="56dp"
+            android:text="🎬\nFILMS"
             android:textColor="#94A3B8"
-            android:textSize="9sp"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:lineSpacingExtra="1dp"
+            android:lineSpacingExtra="2dp"
             android:background="@drawable/bg_nav_item_selector"
-            android:layout_marginBottom="4dp"
+            android:layout_marginBottom="6dp"
             android:focusable="true" />
 
         <Button
             android:id="@+id/btn_nav_series"
-            android:layout_width="68dp"
-            android:layout_height="48dp"
-            android:text="🍿\nSéries"
+            android:layout_width="86dp"
+            android:layout_height="56dp"
+            android:text="🍿\nSÉRIES"
             android:textColor="#94A3B8"
-            android:textSize="9sp"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:lineSpacingExtra="1dp"
+            android:lineSpacingExtra="2dp"
             android:background="@drawable/bg_nav_item_selector"
-            android:layout_marginBottom="4dp"
+            android:layout_marginBottom="6dp"
             android:focusable="true" />
 
         <Button
             android:id="@+id/btn_nav_favs"
-            android:layout_width="68dp"
-            android:layout_height="48dp"
-            android:text="⭐\nFavoris"
-            android:textColor="#94A3B8"
-            android:textSize="9sp"
+            android:layout_width="86dp"
+            android:layout_height="56dp"
+            android:text="⭐\nFAVORIS"
+            android:textColor="#F59E0B"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:lineSpacingExtra="1dp"
+            android:lineSpacingExtra="2dp"
             android:background="@drawable/bg_nav_item_selector"
-            android:layout_marginBottom="4dp"
+            android:layout_marginBottom="6dp"
             android:focusable="true" />
 
         <Button
             android:id="@+id/btn_nav_search"
-            android:layout_width="68dp"
-            android:layout_height="48dp"
-            android:text="🔍\nChercher"
+            android:layout_width="86dp"
+            android:layout_height="56dp"
+            android:text="🔍\nCHERCHER"
             android:textColor="#94A3B8"
-            android:textSize="9sp"
+            android:textSize="11sp"
             android:textStyle="bold"
-            android:lineSpacingExtra="1dp"
+            android:lineSpacingExtra="2dp"
             android:background="@drawable/bg_nav_item_selector"
-            android:layout_marginBottom="4dp"
+            android:layout_marginBottom="6dp"
             android:focusable="true" />
 
         <!-- Vertical Spacer -->
@@ -117,26 +117,26 @@
         <!-- Utility Buttons -->
         <Button
             android:id="@+id/btn_nav_settings"
-            android:layout_width="68dp"
-            android:layout_height="46dp"
-            android:text="⚙️\nOptions"
+            android:layout_width="86dp"
+            android:layout_height="48dp"
+            android:text="⚙️\nOPTIONS"
             android:textColor="#94A3B8"
-            android:textSize="9sp"
+            android:textSize="10sp"
             android:textStyle="bold"
-            android:lineSpacingExtra="1dp"
+            android:lineSpacingExtra="2dp"
             android:background="@drawable/bg_nav_item_selector"
-            android:layout_marginBottom="4dp"
+            android:layout_marginBottom="6dp"
             android:focusable="true" />
 
         <Button
             android:id="@+id/btn_nav_sync"
-            android:layout_width="68dp"
-            android:layout_height="46dp"
-            android:text="☁️\nSynchro"
+            android:layout_width="86dp"
+            android:layout_height="48dp"
+            android:text="☁️\nSYNCHRO"
             android:textColor="#34D399"
-            android:textSize="9sp"
+            android:textSize="10sp"
             android:textStyle="bold"
-            android:lineSpacingExtra="1dp"
+            android:lineSpacingExtra="2dp"
             android:background="@drawable/bg_nav_item_selector"
             android:focusable="true" />
 
@@ -222,6 +222,18 @@
 
             <Button
                 android:id="@+id/tab_series"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/tab_favs"
+                android:layout_width="0dp"
+                android:layout_height="0dp"
+                android:visibility="gone" />
+
+            <Button
+                android:id="@+id/tab_replay"
                 android:layout_width="0dp"
                 android:layout_height="0dp"
                 android:visibility="gone" />

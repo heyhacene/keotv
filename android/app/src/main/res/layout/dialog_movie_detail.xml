@@ -1,20 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:minWidth="640dp"
-    android:maxWidth="820dp"
+    android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@drawable/bg_card"
-    android:padding="24dp">
+    android:padding="28dp">
 
-    <!-- Header: Title, Year, Duration, Rating -->
+    <!-- Header: Title & Rating Badge -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center_vertical"
-        android:paddingBottom="12dp">
+        android:paddingBottom="10dp">
 
         <TextView
             android:id="@+id/tv_movie_title"
@@ -23,7 +21,7 @@
             android:layout_weight="1"
             android:text="Titre du Film"
             android:textColor="#F8FAFC"
-            android:textSize="20sp"
+            android:textSize="24sp"
             android:textStyle="bold"
             android:maxLines="2"
             android:ellipsize="end" />
@@ -34,17 +32,18 @@
             android:layout_height="wrap_content"
             android:text="⭐ 8.5"
             android:textColor="#F59E0B"
-            android:textSize="13sp"
+            android:textSize="14sp"
             android:textStyle="bold"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp"
-            android:paddingTop="3dp"
-            android:paddingBottom="3dp"
-            android:background="#26F59E0B"
-            android:layout_marginStart="8dp" />
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="5dp"
+            android:paddingBottom="5dp"
+            android:background="#2BF59E0B"
+            android:layout_marginStart="14dp" />
 
     </LinearLayout>
 
+    <!-- Subtitle Meta: Year, Duration, Genre -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -58,7 +57,7 @@
             android:layout_height="wrap_content"
             android:text="2024"
             android:textColor="#38BDF8"
-            android:textSize="12sp"
+            android:textSize="13sp"
             android:textStyle="bold" />
 
         <TextView
@@ -67,7 +66,7 @@
             android:layout_height="wrap_content"
             android:text=" • 1h 54m"
             android:textColor="#94A3B8"
-            android:textSize="12sp" />
+            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/tv_movie_genre"
@@ -75,29 +74,30 @@
             android:layout_height="wrap_content"
             android:text=" • Action / Drame"
             android:textColor="#94A3B8"
-            android:textSize="12sp" />
+            android:textSize="13sp" />
 
     </LinearLayout>
 
-    <!-- Main Content: Poster on left, Synopsis & Cast on right -->
+    <!-- Main Content: Big Poster on left, Details on right -->
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:orientation="horizontal">
 
         <!-- Movie Poster -->
         <ImageView
             android:id="@+id/iv_movie_poster"
-            android:layout_width="160dp"
-            android:layout_height="230dp"
+            android:layout_width="210dp"
+            android:layout_height="match_parent"
             android:scaleType="centerCrop"
             android:background="#1E293B"
-            android:layout_marginEnd="20dp" />
+            android:layout_marginEnd="24dp" />
 
         <!-- Details Info -->
         <LinearLayout
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="match_parent"
             android:layout_weight="1"
             android:orientation="vertical">
 
@@ -107,21 +107,23 @@
                 android:text="RÉSUMÉ"
                 android:textColor="#64748B"
                 android:textSize="11sp"
-                android:textStyle="bold" />
+                android:textStyle="bold"
+                android:letterSpacing="0.08" />
 
             <ScrollView
                 android:layout_width="match_parent"
-                android:layout_height="100dp"
-                android:layout_marginTop="4dp"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginTop="6dp"
                 android:scrollbars="vertical">
 
                 <TextView
                     android:id="@+id/tv_movie_plot"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:textColor="#CBD5E1"
-                    android:textSize="12sp"
-                    android:lineSpacingExtra="3dp"
+                    android:textColor="#E2E8F0"
+                    android:textSize="13sp"
+                    android:lineSpacingExtra="4dp"
                     android:text="Chargement des informations du film..." />
 
             </ScrollView>
@@ -132,33 +134,62 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="10dp"
                 android:textColor="#94A3B8"
-                android:textSize="11sp"
+                android:textSize="12sp"
                 android:text="Réalisateur : -"
                 android:maxLines="1"
                 android:ellipsize="end" />
 
+            <!-- Individual Actor Chips Header -->
             <TextView
-                android:id="@+id/tv_movie_cast"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="12dp"
+                android:text="ACTEURS (cliquez sur un acteur pour voir ses films) :"
                 android:textColor="#38BDF8"
                 android:textSize="11sp"
-                android:text="Acteurs : -"
-                android:maxLines="2"
-                android:ellipsize="end" />
+                android:textStyle="bold"
+                android:letterSpacing="0.05" />
 
+            <!-- Horizontal Scrollable Actor Chips -->
+            <HorizontalScrollView
+                android:id="@+id/hsv_movie_actors"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:scrollbars="none">
+
+                <LinearLayout
+                    android:id="@+id/layout_actors_container"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:id="@+id/tv_movie_cast"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="#64748B"
+                        android:textSize="12sp"
+                        android:text="Chargement des acteurs..." />
+
+                </LinearLayout>
+
+            </HorizontalScrollView>
+
+            <!-- Fallback Search Button -->
             <Button
                 android:id="@+id/btn_search_actor"
                 android:layout_width="wrap_content"
-                android:layout_height="32dp"
+                android:layout_height="34dp"
                 android:layout_marginTop="8dp"
-                android:text="🔍 Rechercher les films de ces acteurs"
-                android:textColor="#FFFFFF"
+                android:text="🔍 Rechercher ce film ou premier acteur"
+                android:textColor="#94A3B8"
                 android:textSize="11sp"
                 android:background="@drawable/bg_button_selector"
                 android:paddingStart="12dp"
                 android:paddingEnd="12dp"
+                android:visibility="gone"
                 android:focusable="true" />
 
         </LinearLayout>
@@ -170,13 +201,41 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:gravity="end"
+        android:gravity="end|center_vertical"
         android:layout_marginTop="20dp">
+
+        <Button
+            android:id="@+id/btn_restart_movie"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:text="↺ Recommencer du début"
+            android:textColor="#CBD5E1"
+            android:textSize="12sp"
+            android:background="@drawable/bg_button_selector"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:layout_marginEnd="12dp"
+            android:visibility="gone"
+            android:focusable="true" />
+
+        <Button
+            android:id="@+id/btn_play_movie"
+            android:layout_width="wrap_content"
+            android:layout_height="44dp"
+            android:text="▶ Regarder le Film"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:background="@drawable/bg_button_selector"
+            android:paddingStart="26dp"
+            android:paddingEnd="26dp"
+            android:layout_marginEnd="12dp"
+            android:focusable="true" />
 
         <Button
             android:id="@+id/btn_fav_movie"
             android:layout_width="wrap_content"
-            android:layout_height="42dp"
+            android:layout_height="44dp"
             android:text="⭐ Favori"
             android:textColor="#F8FAFC"
             android:textSize="12sp"
@@ -187,29 +246,15 @@
             android:focusable="true" />
 
         <Button
-            android:id="@+id/btn_play_movie"
-            android:layout_width="wrap_content"
-            android:layout_height="42dp"
-            android:text="▶ Regarder le Film"
-            android:textColor="#FFFFFF"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:background="@drawable/bg_button_selector"
-            android:paddingStart="24dp"
-            android:paddingEnd="24dp"
-            android:layout_marginEnd="12dp"
-            android:focusable="true" />
-
-        <Button
             android:id="@+id/btn_close_movie"
             android:layout_width="wrap_content"
-            android:layout_height="42dp"
-            android:text="Fermer"
+            android:layout_height="44dp"
+            android:text="✕ Fermer"
             android:textColor="#94A3B8"
             android:textSize="12sp"
             android:background="@drawable/bg_button_selector"
-            android:paddingStart="16dp"
-            android:paddingEnd="16dp"
+            android:paddingStart="18dp"
+            android:paddingEnd="18dp"
             android:focusable="true" />
 
     </LinearLayout>

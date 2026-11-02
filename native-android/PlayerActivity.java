@@ -19,9 +19,12 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.graphics.drawable.ClipDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -171,15 +174,28 @@ public class PlayerActivity extends AppCompatActivity {
 
     private TextView btnExit;
 
-    // Bottom Controls Bar (Scrollable for mobile and TV)
-    private HorizontalScrollView bottomControlsHsv;
-    private LinearLayout bottomControls;
-    private TextView btnPrevChannel;
-    private TextView btnPlayPause;
-    private TextView btnNextChannel;
+    // Center Controls (Play/Pause, Rewind, Forward in middle of screen)
+    private LinearLayout centerControlsCard;
+    private TextView btnCenterRew;
+    private TextView btnCenterPlayPause;
+    private TextView btnCenterFwd;
+
+    // Bottom Container: Timecode scrubber row + options row below it
+    private LinearLayout bottomControlsContainer;
+    private LinearLayout timeScrubberLayout;
+    private TextView tvCurrentTime;
+    private SeekBar timeSeekBar;
+    private TextView tvTotalTime;
+    private boolean isUserSeeking = false;
+
+    // Bottom Options Bar (Options ONLY: Audio, Subtitles, Format, etc. - no duplicate transport buttons)
+    private HorizontalScrollView bottomOptionsHsv;
+    private LinearLayout bottomOptions;
     private TextView btnAudioTrack;
     private TextView btnSubtitles;
     private TextView btnAspectRatio;
+    private TextView btnNextEpisode;
+    private TextView btnRotate;
 
     // Center Feedback Toast Card for Zapping & Options
     private LinearLayout zapFeedbackCard;
@@ -206,6 +222,10 @@ public class PlayerActivity extends AppCompatActivity {
     private final Runnable hideOsdRunnable = new Runnable() {
         @Override
         public void run() {
+            // When paused or seeking, keep controls visible
+            if (player != null && !player.isPlaying()) return;
+            if (isUserSeeking) return;
+
             if (osdContainer != null) {
                 osdContainer.animate()
                         .alpha(0f)
@@ -214,12 +234,22 @@ public class PlayerActivity extends AppCompatActivity {
                             if (osdContainer != null) osdContainer.setVisibility(View.GONE);
                         });
             }
-            if (bottomControlsHsv != null) {
-                bottomControlsHsv.animate()
+            if (centerControlsCard != null) {
+                centerControlsCard.animate()
+                        .alpha(0f)
+                        .scaleX(0.92f)
+                        .scaleY(0.92f)
+                        .setDuration(300)
+                        .withEndAction(() -> {
+                            if (centerControlsCard != null) centerControlsCard.setVisibility(View.GONE);
+                        });
+            }
+            if (bottomControlsContainer != null) {
+                bottomControlsContainer.animate()
                         .alpha(0f)
                         .setDuration(300)
                         .withEndAction(() -> {
-                            if (bottomControlsHsv != null) bottomControlsHsv.setVisibility(View.GONE);
+                            if (bottomControlsContainer != null) bottomControlsContainer.setVisibility(View.GONE);
                         });
             }
             if (epgOverlayCard != null) {
@@ -252,10 +282,23 @@ public class PlayerActivity extends AppCompatActivity {
         public void run() {
             if (player != null && !isLive) {
                 checkPlaybackProgress();
+                updateTimelineProgress();
             }
             mainHandler.postDelayed(this, 1000);
         }
     };
+
+    private void updateTimelineProgress() {
+        if (player == null || isLive || isUserSeeking || timeSeekBar == null) return;
+        long pos = player.getCurrentPosition();
+        long dur = player.getDuration();
+        if (dur > 0 && dur != C.TIME_UNSET) {
+            timeSeekBar.setMax((int) (dur / 1000));
+            timeSeekBar.setProgress((int) (pos / 1000));
+            if (tvCurrentTime != null) tvCurrentTime.setText(formatTimeMs(pos));
+            if (tvTotalTime != null) tvTotalTime.setText(formatTimeMs(dur));
+        }
+    }
 
     private final Runnable countdownTickRunnable = new Runnable() {
         @Override
@@ -339,15 +382,7 @@ public class PlayerActivity extends AppCompatActivity {
         root.setBackgroundColor(Color.BLACK);
 
         playerView = new PlayerView(this);
-        if (isLive) {
-            playerView.setUseController(false);
-        } else {
-            playerView.setUseController(true);
-            playerView.setShowNextButton(true);
-            playerView.setShowPreviousButton(true);
-            playerView.setControllerShowTimeoutMs(3000);
-            playerView.setControllerAutoShow(false);
-        }
+        playerView.setUseController(false);
         root.addView(playerView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -623,90 +658,394 @@ public class PlayerActivity extends AppCompatActivity {
         cardParams.setMargins(0, 0, dp(32), dp(80));
         root.addView(nextEpisodeCard, cardParams);
 
-        // Bottom Controls Bar (Scrollable for mobile and TV)
-        bottomControlsHsv = new HorizontalScrollView(this);
-        bottomControlsHsv.setHorizontalScrollBarEnabled(false);
-        bottomControlsHsv.setFillViewport(true);
+        // --- 1. CENTER PLAYBACK CONTROLS (Rewind, Play/Pause, Forward in middle of screen) ---
+        centerControlsCard = new LinearLayout(this);
+        centerControlsCard.setOrientation(LinearLayout.HORIZONTAL);
+        centerControlsCard.setGravity(Gravity.CENTER);
+        centerControlsCard.setPadding(dp(18), dp(12), dp(18), dp(12));
+        centerControlsCard.setVisibility(View.GONE);
+
+        GradientDrawable centerBg = new GradientDrawable();
+        centerBg.setColor(Color.parseColor("#CC090D16"));
+        centerBg.setCornerRadius(dp(38));
+        centerBg.setStroke(dp(1.5f), Color.parseColor("#4038BDF8"));
+        centerControlsCard.setBackground(centerBg);
+
+        // Center Rewind button
+        btnCenterRew = new TextView(this);
+        btnCenterRew.setText(isLive ? "⏮ Chaîne -" : "⏪ -10s");
+        btnCenterRew.setTextColor(Color.WHITE);
+        btnCenterRew.setTextSize(13f);
+        btnCenterRew.setTypeface(Typeface.DEFAULT_BOLD);
+        btnCenterRew.setGravity(Gravity.CENTER);
+        btnCenterRew.setPadding(dp(16), dp(12), dp(16), dp(12));
+        btnCenterRew.setFocusable(true);
+        btnCenterRew.setFocusableInTouchMode(true);
+        GradientDrawable rewBg = new GradientDrawable();
+        rewBg.setColor(Color.parseColor("#331E293B"));
+        rewBg.setCornerRadius(dp(24));
+        rewBg.setStroke(dp(1), Color.parseColor("#334155"));
+        btnCenterRew.setBackground(rewBg);
+        btnCenterRew.setOnClickListener(v -> {
+            showOsd();
+            if (isLive) {
+                zapPreviousChannel();
+            } else {
+                seekRelative(-10000);
+            }
+        });
+        btnCenterRew.setOnFocusChangeListener((v, hasFocus) -> {
+            GradientDrawable d = (GradientDrawable) btnCenterRew.getBackground();
+            if (hasFocus) {
+                d.setColor(Color.parseColor("#FF0284C7"));
+                d.setStroke(dp(2), Color.WHITE);
+                btnCenterRew.setScaleX(1.08f);
+                btnCenterRew.setScaleY(1.08f);
+            } else {
+                d.setColor(Color.parseColor("#331E293B"));
+                d.setStroke(dp(1), Color.parseColor("#334155"));
+                btnCenterRew.setScaleX(1.0f);
+                btnCenterRew.setScaleY(1.0f);
+            }
+        });
+        centerControlsCard.addView(btnCenterRew);
+
+        // Center Play / Pause button (large prominent circle)
+        btnCenterPlayPause = new TextView(this);
+        btnCenterPlayPause.setText(player != null && player.isPlaying() ? "⏸" : "▶");
+        btnCenterPlayPause.setTextColor(Color.WHITE);
+        btnCenterPlayPause.setTextSize(28f);
+        btnCenterPlayPause.setTypeface(Typeface.DEFAULT_BOLD);
+        btnCenterPlayPause.setGravity(Gravity.CENTER);
+        btnCenterPlayPause.setFocusable(true);
+        btnCenterPlayPause.setFocusableInTouchMode(true);
+        LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(dp(70), dp(70));
+        playLp.setMarginStart(dp(16));
+        playLp.setMarginEnd(dp(16));
+        btnCenterPlayPause.setLayoutParams(playLp);
+
+        GradientDrawable playBg = new GradientDrawable();
+        playBg.setColor(Color.parseColor("#FF0284C7"));
+        playBg.setCornerRadius(dp(35));
+        playBg.setStroke(dp(2.5f), Color.parseColor("#38BDF8"));
+        btnCenterPlayPause.setBackground(playBg);
+        btnCenterPlayPause.setOnClickListener(v -> togglePlayPause());
+        btnCenterPlayPause.setOnFocusChangeListener((v, hasFocus) -> {
+            GradientDrawable d = (GradientDrawable) btnCenterPlayPause.getBackground();
+            if (hasFocus) {
+                d.setColor(Color.parseColor("#FF0284C7"));
+                d.setStroke(dp(3), Color.WHITE);
+                btnCenterPlayPause.setScaleX(1.12f);
+                btnCenterPlayPause.setScaleY(1.12f);
+            } else {
+                d.setColor(Color.parseColor("#CC0369A1"));
+                d.setStroke(dp(2), Color.parseColor("#38BDF8"));
+                btnCenterPlayPause.setScaleX(1.0f);
+                btnCenterPlayPause.setScaleY(1.0f);
+            }
+        });
+        centerControlsCard.addView(btnCenterPlayPause);
+
+        // Center Forward button
+        btnCenterFwd = new TextView(this);
+        btnCenterFwd.setText(isLive ? "⏭ Chaîne +" : "⏩ +10s");
+        btnCenterFwd.setTextColor(Color.WHITE);
+        btnCenterFwd.setTextSize(13f);
+        btnCenterFwd.setTypeface(Typeface.DEFAULT_BOLD);
+        btnCenterFwd.setGravity(Gravity.CENTER);
+        btnCenterFwd.setPadding(dp(16), dp(12), dp(16), dp(12));
+        btnCenterFwd.setFocusable(true);
+        btnCenterFwd.setFocusableInTouchMode(true);
+        GradientDrawable fwdBg = new GradientDrawable();
+        fwdBg.setColor(Color.parseColor("#331E293B"));
+        fwdBg.setCornerRadius(dp(24));
+        fwdBg.setStroke(dp(1), Color.parseColor("#334155"));
+        btnCenterFwd.setBackground(fwdBg);
+        btnCenterFwd.setOnClickListener(v -> {
+            showOsd();
+            if (isLive) {
+                zapNextChannel();
+            } else {
+                seekRelative(10000);
+            }
+        });
+        btnCenterFwd.setOnFocusChangeListener((v, hasFocus) -> {
+            GradientDrawable d = (GradientDrawable) btnCenterFwd.getBackground();
+            if (hasFocus) {
+                d.setColor(Color.parseColor("#FF0284C7"));
+                d.setStroke(dp(2), Color.WHITE);
+                btnCenterFwd.setScaleX(1.08f);
+                btnCenterFwd.setScaleY(1.08f);
+            } else {
+                d.setColor(Color.parseColor("#331E293B"));
+                d.setStroke(dp(1), Color.parseColor("#334155"));
+                btnCenterFwd.setScaleX(1.0f);
+                btnCenterFwd.setScaleY(1.0f);
+            }
+        });
+        centerControlsCard.addView(btnCenterFwd);
+
+        btnCenterPlayPause.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    if (btnCenterRew != null) {
+                        btnCenterRew.requestFocus();
+                        return true;
+                    }
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    if (btnCenterFwd != null) {
+                        btnCenterFwd.requestFocus();
+                        return true;
+                    }
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    if (!isLive && timeSeekBar != null) {
+                        timeSeekBar.requestFocus();
+                        return true;
+                    } else if (btnAudioTrack != null) {
+                        btnAudioTrack.requestFocus();
+                        return true;
+                    }
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    if (btnExit != null) {
+                        btnExit.requestFocus();
+                        return true;
+                    }
+                }
+            }
+            return false;
+        });
+
+        FrameLayout.LayoutParams centerParams = new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        root.addView(centerControlsCard, centerParams);
+
+        // --- 2. BOTTOM CONTAINER (Timeline Scrubber + Options ONLY, no duplicate play/rewind buttons) ---
+        bottomControlsContainer = new LinearLayout(this);
+        bottomControlsContainer.setOrientation(LinearLayout.VERTICAL);
+        bottomControlsContainer.setGravity(Gravity.CENTER_HORIZONTAL);
+        bottomControlsContainer.setPadding(dp(24), dp(12), dp(24), dp(18));
 
         GradientDrawable bottomBg = new GradientDrawable(
                 GradientDrawable.Orientation.BOTTOM_TOP,
-                new int[]{Color.parseColor("#E6090D16"), Color.parseColor("#99090D16"), Color.TRANSPARENT}
+                new int[]{Color.parseColor("#F2090D16"), Color.parseColor("#B3090D16"), Color.TRANSPARENT}
         );
-        bottomControlsHsv.setBackground(bottomBg);
+        bottomControlsContainer.setBackground(bottomBg);
 
-        bottomControls = new LinearLayout(this);
-        bottomControls.setOrientation(LinearLayout.HORIZONTAL);
-        bottomControls.setGravity(Gravity.CENTER);
-        bottomControls.setPadding(dp(16), dp(12), dp(16), dp(22));
+        // Row 1: Timecode Scrubber (strictly for VOD / Series / Replay)
+        if (!isLive) {
+            timeScrubberLayout = new LinearLayout(this);
+            timeScrubberLayout.setOrientation(LinearLayout.HORIZONTAL);
+            timeScrubberLayout.setGravity(Gravity.CENTER_VERTICAL);
+            timeScrubberLayout.setPadding(dp(8), dp(4), dp(8), dp(6));
 
-        btnPrevChannel = createOsdButton("⏮  Précédente", v -> zapPreviousChannel());
-        bottomControls.addView(btnPrevChannel);
+            tvCurrentTime = new TextView(this);
+            tvCurrentTime.setText("00:00:00");
+            tvCurrentTime.setTextColor(Color.parseColor("#38BDF8"));
+            tvCurrentTime.setTextSize(13f);
+            tvCurrentTime.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+            timeScrubberLayout.addView(tvCurrentTime);
 
-        btnPlayPause = createOsdButton("⏸  Pause", v -> togglePlayPause());
-        LinearLayout.LayoutParams ppParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        ppParams.setMarginStart(dp(10));
-        btnPlayPause.setLayoutParams(ppParams);
-        bottomControls.addView(btnPlayPause);
+            timeSeekBar = new SeekBar(this);
+            timeSeekBar.setFocusable(true);
+            timeSeekBar.setFocusableInTouchMode(true);
+            timeSeekBar.setPadding(dp(14), 0, dp(14), 0);
 
-        btnNextChannel = createOsdButton("⏭  Suivante", v -> zapNextChannel());
-        LinearLayout.LayoutParams npParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        npParams.setMarginStart(dp(10));
-        btnNextChannel.setLayoutParams(npParams);
-        bottomControls.addView(btnNextChannel);
+            // Styling SeekBar: Cyan progress and slate background track
+            GradientDrawable progressTrack = new GradientDrawable();
+            progressTrack.setColor(Color.parseColor("#38BDF8"));
+            progressTrack.setCornerRadius(dp(4));
+            ClipDrawable clipProgress = new ClipDrawable(progressTrack, Gravity.START, ClipDrawable.HORIZONTAL);
 
-        btnAudioTrack = createOsdButton("🔊  Audio", v -> showAudioTrackDialog());
-        LinearLayout.LayoutParams audParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        audParams.setMarginStart(dp(14));
-        btnAudioTrack.setLayoutParams(audParams);
-        bottomControls.addView(btnAudioTrack);
+            GradientDrawable bgTrack = new GradientDrawable();
+            bgTrack.setColor(Color.parseColor("#334155"));
+            bgTrack.setCornerRadius(dp(4));
+
+            LayerDrawable layers = new LayerDrawable(new android.graphics.drawable.Drawable[]{bgTrack, clipProgress});
+            layers.setId(0, android.R.id.background);
+            layers.setId(1, android.R.id.progress);
+            timeSeekBar.setProgressDrawable(layers);
+
+            GradientDrawable thumbNormal = new GradientDrawable();
+            thumbNormal.setShape(GradientDrawable.OVAL);
+            thumbNormal.setColor(Color.parseColor("#38BDF8"));
+            thumbNormal.setStroke(dp(2), Color.WHITE);
+            thumbNormal.setSize(dp(18), dp(18));
+            timeSeekBar.setThumb(thumbNormal);
+            timeSeekBar.setSplitTrack(false);
+
+            timeSeekBar.setOnFocusChangeListener((v, hasFocus) -> {
+                GradientDrawable t = new GradientDrawable();
+                t.setShape(GradientDrawable.OVAL);
+                if (hasFocus) {
+                    t.setColor(Color.parseColor("#0284C7"));
+                    t.setStroke(dp(3), Color.WHITE);
+                    t.setSize(dp(22), dp(22));
+                } else {
+                    t.setColor(Color.parseColor("#38BDF8"));
+                    t.setStroke(dp(2), Color.WHITE);
+                    t.setSize(dp(18), dp(18));
+                }
+                timeSeekBar.setThumb(t);
+            });
+
+            timeSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    if (fromUser) {
+                        long targetMs = progress * 1000L;
+                        if (tvCurrentTime != null) {
+                            tvCurrentTime.setText(formatTimeMs(targetMs));
+                        }
+                    }
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {
+                    isUserSeeking = true;
+                    osdHandler.removeCallbacks(hideOsdRunnable);
+                }
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {
+                    isUserSeeking = false;
+                    if (player != null) {
+                        player.seekTo(seekBar.getProgress() * 1000L);
+                    }
+                    if (player != null && player.isPlaying() && pendingOsdTimeoutMs > 0) {
+                        osdHandler.postDelayed(hideOsdRunnable, pendingOsdTimeoutMs);
+                    }
+                }
+            });
+
+            timeSeekBar.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                        seekRelative(-10000);
+                        updateTimelineProgress();
+                        return true;
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        seekRelative(10000);
+                        updateTimelineProgress();
+                        return true;
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                        if (btnCenterPlayPause != null) {
+                            btnCenterPlayPause.requestFocus();
+                            return true;
+                        }
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        if (btnAudioTrack != null) {
+                            btnAudioTrack.requestFocus();
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            });
+
+            LinearLayout.LayoutParams seekParams = new LinearLayout.LayoutParams(0, dp(32), 1.0f);
+            seekParams.setMarginStart(dp(10));
+            seekParams.setMarginEnd(dp(10));
+            timeScrubberLayout.addView(timeSeekBar, seekParams);
+
+            tvTotalTime = new TextView(this);
+            tvTotalTime.setText("00:00:00");
+            tvTotalTime.setTextColor(Color.parseColor("#94A3B8"));
+            tvTotalTime.setTextSize(13f);
+            tvTotalTime.setTypeface(Typeface.MONOSPACE);
+            timeScrubberLayout.addView(tvTotalTime);
+
+            bottomControlsContainer.addView(timeScrubberLayout, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+
+        // Row 2: Options ONLY (Audio, Subtitles, Aspect Ratio, Next Episode, Orientation)
+        bottomOptionsHsv = new HorizontalScrollView(this);
+        bottomOptionsHsv.setHorizontalScrollBarEnabled(false);
+        bottomOptionsHsv.setFillViewport(true);
+
+        bottomOptions = new LinearLayout(this);
+        bottomOptions.setOrientation(LinearLayout.HORIZONTAL);
+        bottomOptions.setGravity(Gravity.CENTER);
+        bottomOptions.setPadding(dp(8), dp(4), dp(8), dp(4));
+
+        btnAudioTrack = createOsdButton("🔊  Piste Audio", v -> showAudioTrackDialog());
+        btnAudioTrack.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                if (!isLive && timeSeekBar != null) {
+                    timeSeekBar.requestFocus();
+                    return true;
+                } else if (btnCenterPlayPause != null) {
+                    btnCenterPlayPause.requestFocus();
+                    return true;
+                }
+            }
+            return false;
+        });
+        bottomOptions.addView(btnAudioTrack);
 
         btnSubtitles = createOsdButton("💬  Sous-titres", v -> showSubtitlesDialog());
         LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        subParams.setMarginStart(dp(10));
+        subParams.setMarginStart(dp(12));
         btnSubtitles.setLayoutParams(subParams);
-        bottomControls.addView(btnSubtitles);
+        btnSubtitles.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                if (!isLive && timeSeekBar != null) {
+                    timeSeekBar.requestFocus();
+                    return true;
+                } else if (btnCenterPlayPause != null) {
+                    btnCenterPlayPause.requestFocus();
+                    return true;
+                }
+            }
+            return false;
+        });
+        bottomOptions.addView(btnSubtitles);
 
         btnAspectRatio = createOsdButton("📐  Format", v -> toggleAspectRatio());
         LinearLayout.LayoutParams aspParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        aspParams.setMarginStart(dp(10));
+        aspParams.setMarginStart(dp(12));
         btnAspectRatio.setLayoutParams(aspParams);
-        bottomControls.addView(btnAspectRatio);
+        btnAspectRatio.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                if (!isLive && timeSeekBar != null) {
+                    timeSeekBar.requestFocus();
+                    return true;
+                } else if (btnCenterPlayPause != null) {
+                    btnCenterPlayPause.requestFocus();
+                    return true;
+                }
+            }
+            return false;
+        });
+        bottomOptions.addView(btnAspectRatio);
 
-        // Rotation button (allows 1-tap switch between Landscape and Portrait on mobile)
+        if (!isLive && pendingSeriesId != null && !pendingSeriesId.isEmpty()) {
+            btnNextEpisode = createOsdButton("⏭  Épisode Suivant", v -> launchNextEpisode());
+            LinearLayout.LayoutParams neParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            neParams.setMarginStart(dp(12));
+            btnNextEpisode.setLayoutParams(neParams);
+            bottomOptions.addView(btnNextEpisode);
+        }
+
         if (!isTv) {
-            TextView btnRotate = createOsdButton("🔄  Rotation", v -> toggleScreenOrientation());
+            btnRotate = createOsdButton("🔄  Rotation", v -> toggleScreenOrientation());
             LinearLayout.LayoutParams rotParams = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            rotParams.setMarginStart(dp(10));
+            rotParams.setMarginStart(dp(12));
             btnRotate.setLayoutParams(rotParams);
-            bottomControls.addView(btnRotate);
+            bottomOptions.addView(btnRotate);
         }
 
-        if (!isLive) {
-            TextView btnRew = createOsdButton("⏪ -10s", v -> seekRelative(-10000));
-            LinearLayout.LayoutParams rewParams = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            rewParams.setMarginStart(dp(10));
-            btnRew.setLayoutParams(rewParams);
-            bottomControls.addView(btnRew);
+        bottomOptionsHsv.addView(bottomOptions);
+        bottomControlsContainer.addView(bottomOptionsHsv, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
-            TextView btnFwd = createOsdButton("⏩ +10s", v -> seekRelative(10000));
-            LinearLayout.LayoutParams fwdParams = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            fwdParams.setMarginStart(dp(10));
-            btnFwd.setLayoutParams(fwdParams);
-            bottomControls.addView(btnFwd);
-        }
-
-        bottomControlsHsv.addView(bottomControls);
         FrameLayout.LayoutParams bottomParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM);
-        root.addView(bottomControlsHsv, bottomParams);
+        root.addView(bottomControlsContainer, bottomParams);
 
         // Center Zap Feedback Pill
         zapFeedbackCard = new LinearLayout(this);
@@ -918,8 +1257,14 @@ public class PlayerActivity extends AppCompatActivity {
 
             @Override
             public void onIsPlayingChanged(boolean isPlaying) {
-                if (btnPlayPause != null) {
-                    btnPlayPause.setText(isPlaying ? "⏸  Pause" : "▶  Lecture");
+                updatePlayPauseButtonIcon();
+                if (isPlaying) {
+                    if (pendingOsdTimeoutMs > 0) {
+                        osdHandler.removeCallbacks(hideOsdRunnable);
+                        osdHandler.postDelayed(hideOsdRunnable, pendingOsdTimeoutMs);
+                    }
+                } else {
+                    osdHandler.removeCallbacks(hideOsdRunnable);
                 }
             }
 
@@ -1254,11 +1599,23 @@ public class PlayerActivity extends AppCompatActivity {
         osdContainer.setVisibility(View.VISIBLE);
         osdContainer.animate().cancel();
         osdContainer.setAlpha(1f);
-        if (bottomControlsHsv != null) {
-            bottomControlsHsv.setVisibility(View.VISIBLE);
-            bottomControlsHsv.animate().cancel();
-            bottomControlsHsv.setAlpha(1f);
+
+        if (centerControlsCard != null) {
+            centerControlsCard.setVisibility(View.VISIBLE);
+            centerControlsCard.animate().cancel();
+            centerControlsCard.setAlpha(1f);
+            centerControlsCard.setScaleX(1f);
+            centerControlsCard.setScaleY(1f);
         }
+
+        if (bottomControlsContainer != null) {
+            bottomControlsContainer.setVisibility(View.VISIBLE);
+            bottomControlsContainer.animate().cancel();
+            bottomControlsContainer.setAlpha(1f);
+        }
+
+        updatePlayPauseButtonIcon();
+        updateTimelineProgress();
 
         // Show rich semi-transparent EPG overlay for the currently active channel (Live TV mode)
         if (isLive && epgOverlayCard != null) {
@@ -1266,7 +1623,7 @@ public class PlayerActivity extends AppCompatActivity {
             updateEpgOverlayForIndex(currentIdx);
         }
 
-        if (pendingOsdTimeoutMs > 0) {
+        if (pendingOsdTimeoutMs > 0 && player != null && player.isPlaying()) {
             osdHandler.postDelayed(hideOsdRunnable, pendingOsdTimeoutMs);
         }
     }
@@ -1473,10 +1830,15 @@ public class PlayerActivity extends AppCompatActivity {
             osdContainer.setAlpha(0f);
             osdContainer.setVisibility(View.GONE);
         }
-        if (bottomControlsHsv != null) {
-            bottomControlsHsv.animate().cancel();
-            bottomControlsHsv.setAlpha(0f);
-            bottomControlsHsv.setVisibility(View.GONE);
+        if (centerControlsCard != null) {
+            centerControlsCard.animate().cancel();
+            centerControlsCard.setAlpha(0f);
+            centerControlsCard.setVisibility(View.GONE);
+        }
+        if (bottomControlsContainer != null) {
+            bottomControlsContainer.animate().cancel();
+            bottomControlsContainer.setAlpha(0f);
+            bottomControlsContainer.setVisibility(View.GONE);
         }
         if (epgOverlayCard != null) {
             epgOverlayCard.animate().cancel();
@@ -1486,29 +1848,23 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private boolean isOsdVisible() {
-        return osdContainer != null && osdContainer.getVisibility() == View.VISIBLE && osdContainer.getAlpha() > 0.3f;
+        return (centerControlsCard != null && centerControlsCard.getVisibility() == View.VISIBLE && centerControlsCard.getAlpha() > 0.3f)
+                || (osdContainer != null && osdContainer.getVisibility() == View.VISIBLE && osdContainer.getAlpha() > 0.3f)
+                || (bottomControlsContainer != null && bottomControlsContainer.getVisibility() == View.VISIBLE && bottomControlsContainer.getAlpha() > 0.3f);
     }
 
     private boolean isControllerVisible() {
-        return playerView != null && playerView.isControllerFullyVisible();
+        return isOsdVisible();
     }
 
     private void toggleOsd() {
-        if (!isLive && playerView != null) {
-            if (isControllerVisible() || isOsdVisible()) {
-                playerView.hideController();
-                hideOsdImmediately();
-            } else {
-                playerView.showController();
-                showOsd();
-            }
-            return;
-        }
-        if (osdContainer == null) return;
         if (isOsdVisible()) {
             hideOsdImmediately();
         } else {
             showOsd();
+            if (btnCenterPlayPause != null) {
+                btnCenterPlayPause.requestFocus();
+            }
         }
     }
 
@@ -1656,90 +2012,91 @@ public class PlayerActivity extends AppCompatActivity {
                 }
             }
 
-            // 3. Back key handling: hides controls/OSD if visible, else closes player
+            // 3. Back key handling: hides controls/OSD if visible, else saves position & closes player
             if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
-                if (isControllerVisible()) {
-                    if (playerView != null) playerView.hideController();
-                    hideOsdImmediately();
-                    return true;
-                }
                 if (isOsdVisible()) {
                     hideOsdImmediately();
                     return true;
                 }
+                saveCurrentPlaybackPosition(false);
                 finish();
                 return true;
             }
 
-            // 4. LIVE TV ZAPPING & REMOTE CONTROLS
-            // D-Pad UP: ALWAYS zap to next channel (Chaîne +)
-            // D-Pad DOWN: ALWAYS zap to previous channel (Chaîne -)
-            // OK / Center: Toggle OSD & EPG overlay banner
-            if (isLive) {
-                boolean isBottomButtonFocused = (btnPlayPause != null && btnPlayPause.isFocused()) ||
-                        (btnAudioTrack != null && btnAudioTrack.isFocused()) ||
-                        (btnSubtitles != null && btnSubtitles.isFocused()) ||
-                        (btnAspectRatio != null && btnAspectRatio.isFocused()) ||
-                        (btnPrevChannel != null && btnPrevChannel.isFocused()) ||
-                        (btnNextChannel != null && btnNextChannel.isFocused());
+            // 4. OK / CENTER BUTTON (1st click = Pause & Show Controls; 2nd click = Resume Playback & Hide Controls)
+            if (key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                if (!isOsdVisible()) {
+                    // Click 1: Pause video, display center controls + bottom scrubber + options, focus center Play button
+                    if (player.isPlaying()) {
+                        player.pause();
+                    }
+                    showOsd();
+                    if (btnCenterPlayPause != null) {
+                        btnCenterPlayPause.requestFocus();
+                    }
+                    return true;
+                } else {
+                    // Controls are currently visible:
+                    // Check if an options button is focused (Audio, Subtitles, Format, Next episode, Exit)
+                    boolean isOptionFocused = (btnAudioTrack != null && btnAudioTrack.isFocused()) ||
+                            (btnSubtitles != null && btnSubtitles.isFocused()) ||
+                            (btnAspectRatio != null && btnAspectRatio.isFocused()) ||
+                            (btnNextEpisode != null && btnNextEpisode.isFocused()) ||
+                            (btnRotate != null && btnRotate.isFocused()) ||
+                            (btnExit != null && btnExit.isFocused());
+                    if (isOptionFocused) {
+                        return super.dispatchKeyEvent(event);
+                    }
 
-                // D-Pad UP or Channel UP -> Chaîne + (zapNextChannel)
+                    // If center Rewind or Forward is focused:
+                    if (btnCenterRew != null && btnCenterRew.isFocused()) {
+                        if (isLive) zapPreviousChannel(); else seekRelative(-10000);
+                        return true;
+                    }
+                    if (btnCenterFwd != null && btnCenterFwd.isFocused()) {
+                        if (isLive) zapNextChannel(); else seekRelative(10000);
+                        return true;
+                    }
+
+                    // Click 2 (on Center Play button, SeekBar, or default): Resume playback & hide controls!
+                    if (!player.isPlaying()) {
+                        player.play();
+                    }
+                    hideOsdImmediately();
+                    return true;
+                }
+            }
+
+            // 5. LIVE TV D-PAD NAVIGATION (Up/Down always zap channels seamlessly)
+            if (isLive) {
                 if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_CHANNEL_UP || key == KeyEvent.KEYCODE_PAGE_UP) {
                     zapNextChannel();
                     return true;
                 }
-
-                // D-Pad DOWN or Channel DOWN -> Chaîne - (zapPreviousChannel)
                 if (key == KeyEvent.KEYCODE_DPAD_DOWN || key == KeyEvent.KEYCODE_CHANNEL_DOWN || key == KeyEvent.KEYCODE_PAGE_DOWN) {
                     zapPreviousChannel();
                     return true;
                 }
-
-                // Center / OK / Enter
-                if (key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER || key == KeyEvent.KEYCODE_NUMPAD_ENTER) {
-                    if (isBottomButtonFocused) {
-                        return super.dispatchKeyEvent(event);
-                    }
-                    toggleOsd();
-                    return true;
-                }
-
-                // Left / Right: if bottom controls are focused, navigate between them; otherwise allow Left/Right zapping or OSD
-                if (isBottomButtonFocused && (key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT)) {
-                    showOsd();
-                    return super.dispatchKeyEvent(event);
-                }
             }
 
-            // 5. VOD / SERIES / REPLAY NAVIGATION
+            // 6. VOD / SERIES / REPLAY NAVIGATION
             if (!isLive) {
-                if (isControllerVisible()) {
-                    showOsd();
-                    return super.dispatchKeyEvent(event);
-                }
-
-                if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN ||
-                        key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER ||
-                        key == KeyEvent.KEYCODE_NUMPAD_ENTER) {
-                    if (playerView != null) playerView.showController();
-                    showOsd();
-                    return true;
-                }
-
-                if (key == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                    long currentPos = player.getCurrentPosition();
-                    player.seekTo(currentPos + 10000);
-                    showOsd();
-                    if (playerView != null) playerView.showController();
-                    return true;
-                }
-
-                if (key == KeyEvent.KEYCODE_MEDIA_REWIND || key == KeyEvent.KEYCODE_DPAD_LEFT) {
-                    long currentPos = player.getCurrentPosition();
-                    player.seekTo(Math.max(0, currentPos - 10000));
-                    showOsd();
-                    if (playerView != null) playerView.showController();
-                    return true;
+                if (!isOsdVisible()) {
+                    if (key == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        seekRelative(10000);
+                        showOsd();
+                        return true;
+                    }
+                    if (key == KeyEvent.KEYCODE_MEDIA_REWIND || key == KeyEvent.KEYCODE_DPAD_LEFT) {
+                        seekRelative(-10000);
+                        showOsd();
+                        return true;
+                    }
+                    if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        showOsd();
+                        if (btnCenterPlayPause != null) btnCenterPlayPause.requestFocus();
+                        return true;
+                    }
                 }
             }
 
@@ -1751,13 +2108,6 @@ public class PlayerActivity extends AppCompatActivity {
                     player.play();
                 }
                 showOsd();
-                return true;
-            }
-
-            // 9. Back button (when controls are already hidden) saves position and returns to TV Guide
-            if (key == KeyEvent.KEYCODE_BACK || key == KeyEvent.KEYCODE_ESCAPE) {
-                saveCurrentPlaybackPosition(false);
-                finish();
                 return true;
             }
         }
@@ -1974,15 +2324,13 @@ public class PlayerActivity extends AppCompatActivity {
         if (player == null) return;
         if (player.isPlaying()) {
             player.pause();
-            if (btnPlayPause != null) {
-                btnPlayPause.setText("▶  Lecture");
-            }
+            updatePlayPauseButtonIcon();
+            showOsd();
             showZapFeedback("⏸ Pause", "Lecture suspendue");
         } else {
             player.play();
-            if (btnPlayPause != null) {
-                btnPlayPause.setText("⏸  Pause");
-            }
+            updatePlayPauseButtonIcon();
+            hideOsdImmediately();
             showZapFeedback("▶ Lecture", "Reprise de la lecture");
         }
     }

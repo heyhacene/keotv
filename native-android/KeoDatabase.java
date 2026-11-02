@@ -404,9 +404,53 @@ public class KeoDatabase extends SQLiteOpenHelper {
         return list;
     }
 
+    public List<ChannelItem> getFavoriteChannels(String typeFilter) {
+        if (typeFilter == null || typeFilter.isEmpty()) {
+            return getFavoriteChannels();
+        }
+        List<ChannelItem> list = new ArrayList<>();
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id "
+                + "FROM channels WHERE is_fav = 1 AND is_separator = 0 AND stream_type = ? ORDER BY name ASC", new String[]{typeFilter});
+
+        while (c.moveToNext()) {
+            ChannelItem item = new ChannelItem();
+            item.id = c.getString(0);
+            item.name = c.getString(1);
+            item.num = c.getInt(2);
+            item.groupId = c.getString(3);
+            item.groupName = c.getString(4);
+            item.streamUrl = c.getString(5);
+            item.streamType = c.getString(6);
+            item.logo = c.getString(7);
+            item.isFav = true;
+            item.resolution = c.getString(9);
+            item.isSeparator = c.getInt(10) == 1;
+            item.streamId = c.getString(11);
+            item.tvArchive = c.getInt(12);
+            item.tvArchiveDuration = c.getInt(13);
+            item.epgChannelId = c.getString(14);
+            list.add(item);
+        }
+        c.close();
+        return list;
+    }
+
     public int getFavoriteCount() {
         SQLiteDatabase db = getReadableDatabase();
         Cursor c = db.rawQuery("SELECT COUNT(*) FROM channels WHERE is_fav = 1 AND is_separator = 0", null);
+        int cnt = 0;
+        if (c.moveToFirst()) cnt = c.getInt(0);
+        c.close();
+        return cnt;
+    }
+
+    public int getFavoriteCount(String typeFilter) {
+        if (typeFilter == null || typeFilter.isEmpty()) {
+            return getFavoriteCount();
+        }
+        SQLiteDatabase db = getReadableDatabase();
+        Cursor c = db.rawQuery("SELECT COUNT(*) FROM channels WHERE is_fav = 1 AND is_separator = 0 AND stream_type = ?", new String[]{typeFilter});
         int cnt = 0;
         if (c.moveToFirst()) cnt = c.getInt(0);
         c.close();
