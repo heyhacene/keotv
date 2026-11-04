@@ -20,10 +20,12 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.graphics.drawable.ClipDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -666,9 +668,9 @@ public class PlayerActivity extends AppCompatActivity {
         centerControlsCard.setVisibility(View.GONE);
 
         GradientDrawable centerBg = new GradientDrawable();
-        centerBg.setColor(Color.parseColor("#CC090D16"));
+        centerBg.setColor(Color.parseColor("#55090D16"));
         centerBg.setCornerRadius(dp(38));
-        centerBg.setStroke(dp(2), Color.parseColor("#4038BDF8"));
+        centerBg.setStroke(dp(1), Color.parseColor("#4038BDF8"));
         centerControlsCard.setBackground(centerBg);
 
         // Center Rewind button
@@ -682,7 +684,7 @@ public class PlayerActivity extends AppCompatActivity {
         btnCenterRew.setFocusable(true);
         btnCenterRew.setFocusableInTouchMode(true);
         GradientDrawable rewBg = new GradientDrawable();
-        rewBg.setColor(Color.parseColor("#331E293B"));
+        rewBg.setColor(Color.parseColor("#221E293B"));
         rewBg.setCornerRadius(dp(24));
         rewBg.setStroke(dp(1), Color.parseColor("#334155"));
         btnCenterRew.setBackground(rewBg);
@@ -697,12 +699,12 @@ public class PlayerActivity extends AppCompatActivity {
         btnCenterRew.setOnFocusChangeListener((v, hasFocus) -> {
             GradientDrawable d = (GradientDrawable) btnCenterRew.getBackground();
             if (hasFocus) {
-                d.setColor(Color.parseColor("#FF0284C7"));
+                d.setColor(Color.parseColor("#CC0284C7"));
                 d.setStroke(dp(2), Color.WHITE);
                 btnCenterRew.setScaleX(1.08f);
                 btnCenterRew.setScaleY(1.08f);
             } else {
-                d.setColor(Color.parseColor("#331E293B"));
+                d.setColor(Color.parseColor("#221E293B"));
                 d.setStroke(dp(1), Color.parseColor("#334155"));
                 btnCenterRew.setScaleX(1.0f);
                 btnCenterRew.setScaleY(1.0f);
@@ -725,20 +727,20 @@ public class PlayerActivity extends AppCompatActivity {
         btnCenterPlayPause.setLayoutParams(playLp);
 
         GradientDrawable centerPlayBg = new GradientDrawable();
-        centerPlayBg.setColor(Color.parseColor("#FF0284C7"));
+        centerPlayBg.setColor(Color.parseColor("#800284C7"));
         centerPlayBg.setCornerRadius(dp(35));
-        centerPlayBg.setStroke(dp(3), Color.parseColor("#38BDF8"));
+        centerPlayBg.setStroke(dp(2), Color.parseColor("#38BDF8"));
         btnCenterPlayPause.setBackground(centerPlayBg);
         btnCenterPlayPause.setOnClickListener(v -> togglePlayPause());
         btnCenterPlayPause.setOnFocusChangeListener((v, hasFocus) -> {
             GradientDrawable d = (GradientDrawable) btnCenterPlayPause.getBackground();
             if (hasFocus) {
-                d.setColor(Color.parseColor("#FF0284C7"));
+                d.setColor(Color.parseColor("#CC0284C7"));
                 d.setStroke(dp(3), Color.WHITE);
                 btnCenterPlayPause.setScaleX(1.12f);
                 btnCenterPlayPause.setScaleY(1.12f);
             } else {
-                d.setColor(Color.parseColor("#CC0369A1"));
+                d.setColor(Color.parseColor("#800284C7"));
                 d.setStroke(dp(2), Color.parseColor("#38BDF8"));
                 btnCenterPlayPause.setScaleX(1.0f);
                 btnCenterPlayPause.setScaleY(1.0f);
@@ -757,7 +759,7 @@ public class PlayerActivity extends AppCompatActivity {
         btnCenterFwd.setFocusable(true);
         btnCenterFwd.setFocusableInTouchMode(true);
         GradientDrawable fwdBg = new GradientDrawable();
-        fwdBg.setColor(Color.parseColor("#331E293B"));
+        fwdBg.setColor(Color.parseColor("#221E293B"));
         fwdBg.setCornerRadius(dp(24));
         fwdBg.setStroke(dp(1), Color.parseColor("#334155"));
         btnCenterFwd.setBackground(fwdBg);
@@ -772,12 +774,12 @@ public class PlayerActivity extends AppCompatActivity {
         btnCenterFwd.setOnFocusChangeListener((v, hasFocus) -> {
             GradientDrawable d = (GradientDrawable) btnCenterFwd.getBackground();
             if (hasFocus) {
-                d.setColor(Color.parseColor("#FF0284C7"));
+                d.setColor(Color.parseColor("#CC0284C7"));
                 d.setStroke(dp(2), Color.WHITE);
                 btnCenterFwd.setScaleX(1.08f);
                 btnCenterFwd.setScaleY(1.08f);
             } else {
-                d.setColor(Color.parseColor("#331E293B"));
+                d.setColor(Color.parseColor("#221E293B"));
                 d.setStroke(dp(1), Color.parseColor("#334155"));
                 btnCenterFwd.setScaleX(1.0f);
                 btnCenterFwd.setScaleY(1.0f);
@@ -817,6 +819,10 @@ public class PlayerActivity extends AppCompatActivity {
 
         FrameLayout.LayoutParams centerParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+        if (!isLive) {
+            // For VOD/Series/Replay: position playback controls slightly lower down to leave center of film clear
+            centerParams.topMargin = dp(65);
+        }
         root.addView(centerControlsCard, centerParams);
 
         // --- 2. BOTTOM CONTAINER (Timeline Scrubber + Options ONLY, no duplicate play/rewind buttons) ---
@@ -827,7 +833,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         GradientDrawable bottomBg = new GradientDrawable(
                 GradientDrawable.Orientation.BOTTOM_TOP,
-                new int[]{Color.parseColor("#F2090D16"), Color.parseColor("#B3090D16"), Color.TRANSPARENT}
+                new int[]{Color.parseColor("#99090D16"), Color.parseColor("#4D090D16"), Color.TRANSPARENT}
         );
         bottomControlsContainer.setBackground(bottomBg);
 
@@ -1285,6 +1291,11 @@ public class PlayerActivity extends AppCompatActivity {
             @Override
             public void onPlayerError(PlaybackException error) {
                 handlePlayerError(error);
+            }
+
+            @Override
+            public void onTracksChanged(Tracks tracks) {
+                updateTrackButtonLabels(tracks);
             }
         };
         player.addListener(playerListener);
@@ -2363,6 +2374,222 @@ public class PlayerActivity extends AppCompatActivity {
         showZapFeedback("📐 Format d'image", name);
     }
 
+    private void updateTrackButtonLabels(Tracks tracks) {
+        if (tracks == null) return;
+        try {
+            String activeAudio = null;
+            String activeSub = null;
+            boolean subDisabled = player != null && player.getTrackSelectionParameters().disabledTrackTypes.contains(C.TRACK_TYPE_TEXT);
+
+            for (Tracks.Group group : tracks.getGroups()) {
+                if (group.getType() == C.TRACK_TYPE_AUDIO) {
+                    for (int i = 0; i < group.length; i++) {
+                        if (group.isTrackSelected(i)) {
+                            Format f = group.getTrackFormat(i);
+                            activeAudio = f.language != null ? f.language.toUpperCase() : (f.label != null && !f.label.isEmpty() ? f.label : "Piste " + (i + 1));
+                            break;
+                        }
+                    }
+                } else if (group.getType() == C.TRACK_TYPE_TEXT && !subDisabled) {
+                    for (int i = 0; i < group.length; i++) {
+                        if (group.isTrackSelected(i)) {
+                            Format f = group.getTrackFormat(i);
+                            activeSub = f.language != null ? f.language.toUpperCase() : (f.label != null && !f.label.isEmpty() ? f.label : "ST " + (i + 1));
+                            break;
+                        }
+                    }
+                }
+            }
+
+            final String fAudio = activeAudio;
+            final String fSub = activeSub;
+            final boolean fDisabled = subDisabled;
+            runOnUiThread(() -> {
+                if (btnAudioTrack != null) {
+                    btnAudioTrack.setText(fAudio != null ? "🔊 Audio (" + fAudio + ")" : "🔊 Piste Audio");
+                }
+                if (btnSubtitles != null) {
+                    if (fDisabled || fSub == null) {
+                        btnSubtitles.setText("💬 ST (OFF)");
+                    } else {
+                        btnSubtitles.setText("💬 ST (" + fSub + ")");
+                    }
+                }
+            });
+        } catch (Exception ignored) {}
+    }
+
+    private interface TrackSelectCallback {
+        void onSelected(int index);
+    }
+
+    private void showStyledTrackSelectionDialog(String title, String subtitle, List<String> items, int selectedIndex, TrackSelectCallback callback) {
+        if (isFinishing() || isDestroyed()) return;
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(20), dp(16), dp(20), dp(16));
+        GradientDrawable rootBg = new GradientDrawable();
+        rootBg.setColor(Color.parseColor("#0F172A"));
+        rootBg.setCornerRadius(dp(16));
+        rootBg.setStroke(dp(1), Color.parseColor("#334155"));
+        root.setBackground(rootBg);
+
+        // Header Title
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(title);
+        tvTitle.setTextSize(17f);
+        tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        tvTitle.setTextColor(Color.WHITE);
+        root.addView(tvTitle);
+
+        if (subtitle != null && !subtitle.isEmpty()) {
+            TextView tvSub = new TextView(this);
+            tvSub.setText(subtitle);
+            tvSub.setTextSize(12f);
+            tvSub.setTextColor(Color.parseColor("#94A3B8"));
+            tvSub.setPadding(0, dp(4), 0, dp(12));
+            root.addView(tvSub);
+        }
+
+        ScrollView sv = new ScrollView(this);
+        LinearLayout itemsContainer = new LinearLayout(this);
+        itemsContainer.setOrientation(LinearLayout.VERTICAL);
+        itemsContainer.setPadding(0, dp(4), 0, dp(8));
+
+        AlertDialog dialog = builder.setView(root).create();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
+
+        for (int i = 0; i < items.size(); i++) {
+            final int idx = i;
+            final boolean isSelected = (i == selectedIndex);
+
+            LinearLayout itemRow = new LinearLayout(this);
+            itemRow.setOrientation(LinearLayout.HORIZONTAL);
+            itemRow.setGravity(Gravity.CENTER_VERTICAL);
+            itemRow.setPadding(dp(14), dp(12), dp(14), dp(12));
+            itemRow.setFocusable(true);
+            itemRow.setFocusableInTouchMode(true);
+
+            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            rowLp.setMargins(0, dp(4), 0, dp(4));
+            itemRow.setLayoutParams(rowLp);
+
+            GradientDrawable rowBg = new GradientDrawable();
+            rowBg.setCornerRadius(dp(10));
+            if (isSelected) {
+                rowBg.setColor(Color.parseColor("#330284C7"));
+                rowBg.setStroke(dp(2), Color.parseColor("#38BDF8"));
+            } else {
+                rowBg.setColor(Color.parseColor("#1E293B"));
+                rowBg.setStroke(dp(1), Color.parseColor("#334155"));
+            }
+            itemRow.setBackground(rowBg);
+
+            TextView tvItemTitle = new TextView(this);
+            tvItemTitle.setText(items.get(i));
+            tvItemTitle.setTextSize(14f);
+            tvItemTitle.setTypeface(isSelected ? Typeface.DEFAULT_BOLD : Typeface.DEFAULT);
+            tvItemTitle.setTextColor(isSelected ? Color.WHITE : Color.parseColor("#CBD5E1"));
+            LinearLayout.LayoutParams titleLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+            itemRow.addView(tvItemTitle, titleLp);
+
+            if (isSelected) {
+                TextView tvBadge = new TextView(this);
+                tvBadge.setText("✓ ACTIF");
+                tvBadge.setTextSize(11f);
+                tvBadge.setTypeface(Typeface.DEFAULT_BOLD);
+                tvBadge.setTextColor(Color.parseColor("#38BDF8"));
+                tvBadge.setPadding(dp(8), dp(3), dp(8), dp(3));
+                GradientDrawable badgeBg = new GradientDrawable();
+                badgeBg.setColor(Color.parseColor("#0C4A6E"));
+                badgeBg.setCornerRadius(dp(12));
+                badgeBg.setStroke(dp(1), Color.parseColor("#0284C7"));
+                tvBadge.setBackground(badgeBg);
+                itemRow.addView(tvBadge);
+            }
+
+            itemRow.setOnFocusChangeListener((v, hasFocus) -> {
+                GradientDrawable d = (GradientDrawable) itemRow.getBackground();
+                if (hasFocus) {
+                    d.setColor(Color.parseColor("#FF0284C7"));
+                    d.setStroke(dp(2), Color.WHITE);
+                    itemRow.setScaleX(1.02f);
+                    itemRow.setScaleY(1.02f);
+                    tvItemTitle.setTextColor(Color.WHITE);
+                } else {
+                    if (isSelected) {
+                        d.setColor(Color.parseColor("#330284C7"));
+                        d.setStroke(dp(2), Color.parseColor("#38BDF8"));
+                        tvItemTitle.setTextColor(Color.WHITE);
+                    } else {
+                        d.setColor(Color.parseColor("#1E293B"));
+                        d.setStroke(dp(1), Color.parseColor("#334155"));
+                        tvItemTitle.setTextColor(Color.parseColor("#CBD5E1"));
+                    }
+                    itemRow.setScaleX(1.0f);
+                    itemRow.setScaleY(1.0f);
+                }
+            });
+
+            itemRow.setOnClickListener(v -> {
+                dialog.dismiss();
+                callback.onSelected(idx);
+            });
+
+            itemRow.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)) {
+                    itemRow.performClick();
+                    return true;
+                }
+                return false;
+            });
+
+            itemsContainer.addView(itemRow);
+        }
+
+        sv.addView(itemsContainer);
+        LinearLayout.LayoutParams svLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+        svLp.height = Math.min(items.size() * dp(56) + dp(20), dp(320));
+        root.addView(sv, svLp);
+
+        TextView btnClose = new TextView(this);
+        btnClose.setText("Fermer");
+        btnClose.setTextSize(13f);
+        btnClose.setTypeface(Typeface.DEFAULT_BOLD);
+        btnClose.setTextColor(Color.parseColor("#94A3B8"));
+        btnClose.setGravity(Gravity.CENTER);
+        btnClose.setPadding(dp(16), dp(10), dp(16), dp(10));
+        btnClose.setFocusable(true);
+        GradientDrawable closeBg = new GradientDrawable();
+        closeBg.setColor(Color.parseColor("#1E293B"));
+        closeBg.setCornerRadius(dp(8));
+        btnClose.setBackground(closeBg);
+        btnClose.setOnClickListener(v -> dialog.dismiss());
+        btnClose.setOnFocusChangeListener((v, hasFocus) -> {
+            GradientDrawable d = (GradientDrawable) btnClose.getBackground();
+            if (hasFocus) {
+                d.setColor(Color.parseColor("#334155"));
+                d.setStroke(dp(2), Color.WHITE);
+                btnClose.setTextColor(Color.WHITE);
+            } else {
+                d.setColor(Color.parseColor("#1E293B"));
+                d.setStroke(0, Color.TRANSPARENT);
+                btnClose.setTextColor(Color.parseColor("#94A3B8"));
+            }
+        });
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        closeLp.topMargin = dp(8);
+        root.addView(btnClose, closeLp);
+
+        dialog.show();
+    }
+
     private void showAudioTrackDialog() {
         if (player == null) return;
         Tracks tracks = player.getCurrentTracks();
@@ -2395,24 +2622,19 @@ public class PlayerActivity extends AppCompatActivity {
             return;
         }
 
-        CharSequence[] items = trackNames.toArray(new CharSequence[0]);
-        new AlertDialog.Builder(this)
-                .setTitle("Piste audio")
-                .setSingleChoiceItems(items, selectedIndex, (dialog, which) -> {
-                    Tracks.Group chosenGroup = audioGroups.get(which);
-                    int trackIdx = trackIndices.get(which);
-                    player.setTrackSelectionParameters(
-                            player.getTrackSelectionParameters()
-                                    .buildUpon()
-                                    .setOverrideForType(new TrackSelectionOverride(
-                                            chosenGroup.getMediaTrackGroup(), Collections.singletonList(trackIdx)))
-                                    .build()
-                    );
-                    showZapFeedback("🔊 Piste audio", items[which].toString());
-                    dialog.dismiss();
-                })
-                .setNegativeButton("Annuler", null)
-                .show();
+        showStyledTrackSelectionDialog("🔊 Pistes Audio", "Sélectionnez votre langue audio :", trackNames, selectedIndex, which -> {
+            Tracks.Group chosenGroup = audioGroups.get(which);
+            int trackIdx = trackIndices.get(which);
+            player.setTrackSelectionParameters(
+                    player.getTrackSelectionParameters()
+                            .buildUpon()
+                            .setOverrideForType(new TrackSelectionOverride(
+                                    chosenGroup.getMediaTrackGroup(), Collections.singletonList(trackIdx)))
+                            .build()
+            );
+            updateTrackButtonLabels(player.getCurrentTracks());
+            showZapFeedback("🔊 Piste audio", trackNames.get(which));
+        });
     }
 
     private void showSubtitlesDialog() {
@@ -2447,35 +2669,31 @@ public class PlayerActivity extends AppCompatActivity {
             }
         }
 
-        CharSequence[] items = trackNames.toArray(new CharSequence[0]);
-        new AlertDialog.Builder(this)
-                .setTitle("Sous-titres")
-                .setSingleChoiceItems(items, selectedIndex, (dialog, which) -> {
-                    if (which == 0) {
-                        player.setTrackSelectionParameters(
-                                player.getTrackSelectionParameters()
-                                        .buildUpon()
-                                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                                        .build()
-                        );
-                        showZapFeedback("💬 Sous-titres", "Désactivés");
-                    } else {
-                        Tracks.Group chosenGroup = textGroups.get(which);
-                        int trackIdx = trackIndices.get(which);
-                        player.setTrackSelectionParameters(
-                                player.getTrackSelectionParameters()
-                                        .buildUpon()
-                                        .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                                        .setOverrideForType(new TrackSelectionOverride(
-                                                chosenGroup.getMediaTrackGroup(), Collections.singletonList(trackIdx)))
-                                        .build()
-                        );
-                        showZapFeedback("💬 Sous-titres", items[which].toString());
-                    }
-                    dialog.dismiss();
-                })
-                .setNegativeButton("Annuler", null)
-                .show();
+        showStyledTrackSelectionDialog("💬 Sous-titres", "Sélectionnez vos sous-titres :", trackNames, selectedIndex, which -> {
+            if (which == 0) {
+                player.setTrackSelectionParameters(
+                        player.getTrackSelectionParameters()
+                                .buildUpon()
+                                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
+                                .build()
+                );
+                updateTrackButtonLabels(player.getCurrentTracks());
+                showZapFeedback("💬 Sous-titres", "Désactivés");
+            } else {
+                Tracks.Group chosenGroup = textGroups.get(which);
+                int trackIdx = trackIndices.get(which);
+                player.setTrackSelectionParameters(
+                        player.getTrackSelectionParameters()
+                                .buildUpon()
+                                .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+                                .setOverrideForType(new TrackSelectionOverride(
+                                        chosenGroup.getMediaTrackGroup(), Collections.singletonList(trackIdx)))
+                                .build()
+                );
+                updateTrackButtonLabels(player.getCurrentTracks());
+                showZapFeedback("💬 Sous-titres", trackNames.get(which));
+            }
+        });
     }
 
     private void showZapFeedback(String title, String subtitle) {

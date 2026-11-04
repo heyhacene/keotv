@@ -21,6 +21,7 @@ import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Calendar;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -712,6 +713,56 @@ public class XtreamClient {
                 }
             } catch (Exception ignored) {}
             return "";
+        }
+
+        public String getFormattedDayLabel() {
+            try {
+                long timeToCheck = startMs > 0 ? startMs : (startTimestamp > 0 ? startTimestamp * 1000L : 0);
+                if (timeToCheck == 0 && start != null && start.length() >= 10) {
+                    SimpleDateFormat pSdf = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+                    Date d = pSdf.parse(start.substring(0, 10));
+                    if (d != null) timeToCheck = d.getTime();
+                }
+                if (timeToCheck > 0) {
+                    Calendar calProg = Calendar.getInstance();
+                    calProg.setTimeInMillis(timeToCheck);
+
+                    Calendar calNow = Calendar.getInstance();
+
+                    boolean sameYear = calProg.get(Calendar.YEAR) == calNow.get(Calendar.YEAR);
+                    int dayDiff = calNow.get(Calendar.DAY_OF_YEAR) - calProg.get(Calendar.DAY_OF_YEAR);
+
+                    if (sameYear && dayDiff == 0) {
+                        return "Aujourd'hui";
+                    } else if (sameYear && dayDiff == 1) {
+                        return "Hier";
+                    } else {
+                        SimpleDateFormat dayFmt = new SimpleDateFormat("EEEE d MMM", Locale.FRENCH);
+                        String s = dayFmt.format(new Date(timeToCheck));
+                        if (s != null && !s.isEmpty()) {
+                            return Character.toUpperCase(s.charAt(0)) + s.substring(1);
+                        }
+                        return s;
+                    }
+                }
+            } catch (Exception ignored) {}
+            return "Replay";
+        }
+
+        public String getFormattedTimeWithDuration() {
+            String time = getFormattedTime();
+            int dur = durationMinutes;
+            if (dur <= 0 && stopMs > startMs) {
+                dur = (int) ((stopMs - startMs) / 60000L);
+            }
+            if (dur > 0) {
+                int hours = dur / 60;
+                int mins = dur % 60;
+                String durStr = hours > 0 ? (hours + "h" + (mins > 0 ? (mins < 10 ? "0" + mins : "" + mins) : "")) : (mins + " min");
+                if (time == null || time.isEmpty()) return durStr;
+                return time + " (" + durStr + ")";
+            }
+            return time != null ? time : "";
         }
     }
 

@@ -7,6 +7,7 @@ import android.content.SharedPreferences;
 import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
 import android.os.Handler;
@@ -25,6 +26,7 @@ import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -52,9 +54,11 @@ import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.TimeZone;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -211,6 +215,7 @@ public class MainActivity extends AppCompatActivity {
                     KeoDatabase.PlaylistItem pl = (db != null) ? db.getActivePlaylist() : null;
                     if (pl != null && pl.serverUrl != null && !pl.serverUrl.isEmpty()) {
                         updateHeaderPlaylistInfo(pl);
+                        syncCloudSilently();
                     } else {
                         showCloudSyncDialog();
                     }
@@ -2136,6 +2141,9 @@ public class MainActivity extends AppCompatActivity {
     // --- REPLAY & CATCHUP DIALOG ---
     private void showCatchupDialog(final KeoDatabase.ChannelItem ch) {
         if (ch == null || isFinishing() || isDestroyed()) return;
+        // Strict guard: Replay is strictly for Linear TV, never for VOD or Series
+        if ("vod".equals(ch.streamType) || "series".equals(ch.streamType)) return;
+
         final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
         if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) {
             Toast.makeText(this, "Compte non configuré", Toast.LENGTH_SHORT).show();
@@ -2156,19 +2164,205 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
 
-                String[] items = new String[pastPrograms.size()];
-                for (int i = 0; i < pastPrograms.size(); i++) {
-                    XtreamClient.EpgProgram p = pastPrograms.get(i);
-                    items[i] = p.getFormattedTime() + " - " + p.title;
+                AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                LinearLayout root = new LinearLayout(MainActivity.this);
+                root.setOrientation(LinearLayout.VERTICAL);
+                root.setPadding(dpToPx(20), dpToPx(16), dpToPx(20), dpToPx(16));
+                GradientDrawable rootBg = new GradientDrawable();
+                rootBg.setColor(0xFF0F172A);
+                rootBg.setCornerRadius(dpToPx(16));
+                rootBg.setStroke(dpToPx(1), 0xFF334155);
+                root.setBackground(rootBg);
+
+                // Header Layout (Title + Badge)
+                LinearLayout header = new LinearLayout(MainActivity.this);
+                header.setOrientation(LinearLayout.HORIZONTAL);
+                header.setGravity(Gravity.CENTER_VERTICAL);
+
+                TextView tvTitle = new TextView(MainActivity.this);
+                tvTitle.setText("🔄 Replay : " + (ch.name != null ? ch.name : "Chaîne TV"));
+                tvTitle.setTextSize(17f);
+                tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
+                tvTitle.setTextColor(Color.WHITE);
+                header.addView(tvTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+                TextView tvBadge = new TextView(MainActivity.this);
+                tvBadge.setText(pastPrograms.size() + " émissions");
+                tvBadge.setTextSize(11f);
+                tvBadge.setTypeface(Typeface.DEFAULT_BOLD);
+                tvBadge.setTextColor(0xFF38BDF8);
+                tvBadge.setPadding(dpToPx(8), dpToPx(3), dpToPx(8), dpToPx(3));
+                GradientDrawable countBg = new GradientDrawable();
+                countBg.setColor(0xFF0C4A6E);
+                countBg.setCornerRadius(dpToPx(12));
+                countBg.setStroke(dpToPx(1), 0xFF0284C7);
+                tvBadge.setBackground(countBg);
+                header.addView(tvBadge);
+
+                root.addView(header);
+
+                TextView tvSub = new TextView(MainActivity.this);
+                tvSub.setText("Sélectionnez une émission passée pour lancer le replay :");
+                tvSub.setTextSize(12f);
+                tvSub.setTextColor(0xFF94A3B8);
+                tvSub.setPadding(0, dpToPx(4), 0, dpToPx(12));
+                root.addView(tvSub);
+
+                ScrollView sv = new ScrollView(MainActivity.this);
+                LinearLayout listContainer = new LinearLayout(MainActivity.this);
+                listContainer.setOrientation(LinearLayout.VERTICAL);
+
+                AlertDialog dialog = builder.setView(root).create();
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
                 }
 
-                new AlertDialog.Builder(MainActivity.this)
-                        .setTitle("🔄 Replay : " + ch.name)
-                        .setItems(items, (dialog, which) -> {
-                            playCatchupStream(ch, pastPrograms.get(which), pl);
-                        })
-                        .setNegativeButton("Fermer", null)
-                        .show();
+                for (int i = 0; i < pastPrograms.size(); i++) {
+                    final XtreamClient.EpgProgram prog = pastPrograms.get(i);
+
+                    LinearLayout card = new LinearLayout(MainActivity.this);
+                    card.setOrientation(LinearLayout.VERTICAL);
+                    card.setPadding(dpToPx(14), dpToPx(12), dpToPx(14), dpToPx(12));
+                    card.setFocusable(true);
+                    card.setFocusableInTouchMode(true);
+
+                    LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    cardLp.setMargins(0, dpToPx(4), 0, dpToPx(4));
+                    card.setLayoutParams(cardLp);
+
+                    GradientDrawable cardBg = new GradientDrawable();
+                    cardBg.setColor(0xFF1E293B);
+                    cardBg.setCornerRadius(dpToPx(10));
+                    cardBg.setStroke(dpToPx(1), 0xFF334155);
+                    card.setBackground(cardBg);
+
+                    // Row 1: Day Badge + Time & Duration + Play Pill
+                    LinearLayout metaRow = new LinearLayout(MainActivity.this);
+                    metaRow.setOrientation(LinearLayout.HORIZONTAL);
+                    metaRow.setGravity(Gravity.CENTER_VERTICAL);
+
+                    TextView tvDay = new TextView(MainActivity.this);
+                    tvDay.setText(prog.getFormattedDayLabel());
+                    tvDay.setTextSize(11f);
+                    tvDay.setTypeface(Typeface.DEFAULT_BOLD);
+                    tvDay.setTextColor(0xFF38BDF8);
+                    tvDay.setPadding(dpToPx(6), dpToPx(2), dpToPx(6), dpToPx(2));
+                    GradientDrawable dayBg = new GradientDrawable();
+                    dayBg.setColor(0xFF0F2B48);
+                    dayBg.setCornerRadius(dpToPx(6));
+                    tvDay.setBackground(dayBg);
+                    metaRow.addView(tvDay);
+
+                    TextView tvTime = new TextView(MainActivity.this);
+                    tvTime.setText("  " + prog.getFormattedTimeWithDuration());
+                    tvTime.setTextSize(12f);
+                    tvTime.setTextColor(0xFF94A3B8);
+                    tvTime.setTypeface(Typeface.MONOSPACE);
+                    metaRow.addView(tvTime, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+                    TextView tvPlay = new TextView(MainActivity.this);
+                    tvPlay.setText("▶ Voir");
+                    tvPlay.setTextSize(11f);
+                    tvPlay.setTypeface(Typeface.DEFAULT_BOLD);
+                    tvPlay.setTextColor(Color.WHITE);
+                    tvPlay.setPadding(dpToPx(10), dpToPx(4), dpToPx(10), dpToPx(4));
+                    GradientDrawable playBg = new GradientDrawable();
+                    playBg.setColor(0xFF0284C7);
+                    playBg.setCornerRadius(dpToPx(8));
+                    tvPlay.setBackground(playBg);
+                    metaRow.addView(tvPlay);
+
+                    card.addView(metaRow);
+
+                    // Row 2: Title
+                    TextView tvProgTitle = new TextView(MainActivity.this);
+                    tvProgTitle.setText(prog.title != null ? prog.title : "Émission");
+                    tvProgTitle.setTextSize(14f);
+                    tvProgTitle.setTypeface(Typeface.DEFAULT_BOLD);
+                    tvProgTitle.setTextColor(Color.WHITE);
+                    tvProgTitle.setPadding(0, dpToPx(6), 0, 0);
+                    card.addView(tvProgTitle);
+
+                    // Row 3: Description (if available)
+                    if (prog.desc != null && !prog.desc.trim().isEmpty()) {
+                        TextView tvProgDesc = new TextView(MainActivity.this);
+                        tvProgDesc.setText(prog.desc.trim());
+                        tvProgDesc.setTextSize(11f);
+                        tvProgDesc.setTextColor(0xFF64748B);
+                        tvProgDesc.setMaxLines(2);
+                        tvProgDesc.setEllipsize(TextUtils.TruncateAt.END);
+                        tvProgDesc.setPadding(0, dpToPx(2), 0, 0);
+                        card.addView(tvProgDesc);
+                    }
+
+                    // Focus and click handling
+                    card.setOnFocusChangeListener((v, hasFocus) -> {
+                        GradientDrawable d = (GradientDrawable) card.getBackground();
+                        if (hasFocus) {
+                            d.setColor(0xFF0369A1);
+                            d.setStroke(dpToPx(2), Color.WHITE);
+                            card.setScaleX(1.02f);
+                            card.setScaleY(1.02f);
+                        } else {
+                            d.setColor(0xFF1E293B);
+                            d.setStroke(dpToPx(1), 0xFF334155);
+                            card.setScaleX(1.0f);
+                            card.setScaleY(1.0f);
+                        }
+                    });
+
+                    card.setOnClickListener(v -> {
+                        dialog.dismiss();
+                        playCatchupStream(ch, prog, pl);
+                    });
+
+                    card.setOnKeyListener((v, keyCode, event) -> {
+                        if (event.getAction() == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)) {
+                            card.performClick();
+                            return true;
+                        }
+                        return false;
+                    });
+
+                    listContainer.addView(card);
+                }
+
+                sv.addView(listContainer);
+                LinearLayout.LayoutParams svLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+                svLp.height = Math.min(pastPrograms.size() * dpToPx(75) + dpToPx(20), dpToPx(380));
+                root.addView(sv, svLp);
+
+                TextView btnClose = new TextView(MainActivity.this);
+                btnClose.setText("Fermer");
+                btnClose.setTextSize(13f);
+                btnClose.setTypeface(Typeface.DEFAULT_BOLD);
+                btnClose.setTextColor(0xFF94A3B8);
+                btnClose.setGravity(Gravity.CENTER);
+                btnClose.setPadding(dpToPx(16), dpToPx(10), dpToPx(16), dpToPx(10));
+                btnClose.setFocusable(true);
+                GradientDrawable closeBg = new GradientDrawable();
+                closeBg.setColor(0xFF1E293B);
+                closeBg.setCornerRadius(dpToPx(8));
+                btnClose.setBackground(closeBg);
+                btnClose.setOnClickListener(v -> dialog.dismiss());
+                btnClose.setOnFocusChangeListener((v, hasFocus) -> {
+                    GradientDrawable d = (GradientDrawable) btnClose.getBackground();
+                    if (hasFocus) {
+                        d.setColor(0xFF334155);
+                        d.setStroke(dpToPx(2), Color.WHITE);
+                        btnClose.setTextColor(Color.WHITE);
+                    } else {
+                        d.setColor(0xFF1E293B);
+                        d.setStroke(0, Color.TRANSPARENT);
+                        btnClose.setTextColor(0xFF94A3B8);
+                    }
+                });
+                LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                closeLp.topMargin = dpToPx(8);
+                root.addView(btnClose, closeLp);
+
+                dialog.show();
             }
 
             @Override
@@ -2326,7 +2520,7 @@ public class MainActivity extends AppCompatActivity {
             new AlertDialog.Builder(this)
                     .setTitle("☁️ Synchronisation Cloud (Favoris, VOD, Playlists)")
                     .setView(layout)
-                    .setPositiveButton("☁️ Rapatrier du Cloud", (dialog, which) -> {
+                    .setPositiveButton("☁️ Connexion & Synchroniser", (dialog, which) -> {
                         String ident = etUser.getText().toString().trim();
                         String pass = etPass.getText().toString().trim();
 
@@ -2339,13 +2533,19 @@ public class MainActivity extends AppCompatActivity {
                             return;
                         }
 
-                        prefs.edit().putString("cloud_username", ident).apply();
+                        prefs.edit()
+                                .putString("cloud_username", ident)
+                                .putString("cloud_password", pass)
+                                .apply();
                         pullAccountsFromCloud(ident, pass);
                     })
                     .setNeutralButton("⬆️ Sauvegarder vers Cloud", (dialog, which) -> {
                         String ident = etUser.getText().toString().trim();
+                        String pass = etPass.getText().toString().trim();
                         if (!ident.isEmpty()) {
-                            prefs.edit().putString("cloud_username", ident).apply();
+                            SharedPreferences.Editor ed = prefs.edit().putString("cloud_username", ident);
+                            if (!pass.isEmpty()) ed.putString("cloud_password", pass);
+                            ed.apply();
                         }
                         pushAccountsToCloud(true);
                     })
@@ -2513,10 +2713,27 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
 
+                // 3. Restore settings from Cloud
+                if (userObj.has("settings") && userObj.get("settings").isJsonObject()) {
+                    try {
+                        JsonObject setObj = userObj.getAsJsonObject("settings");
+                        SharedPreferences.Editor pe = getSharedPreferences("keotv_player_prefs", MODE_PRIVATE).edit();
+                        if (setObj.has("hw_accel")) pe.putBoolean("hw_accel", setObj.get("hw_accel").getAsBoolean());
+                        if (setObj.has("buffer_sec")) pe.putString("buffer_sec", setObj.get("buffer_sec").getAsString());
+                        if (setObj.has("osd_timeout_sec")) pe.putString("osd_timeout_sec", setObj.get("osd_timeout_sec").getAsString());
+                        if (setObj.has("epg_position")) pe.putString("epg_position", setObj.get("epg_position").getAsString());
+                        pe.apply();
+                    } catch (Exception ignored) {}
+                }
+
                 final int fRestoredFavs = restoredFavCount;
                 final int fRestoredPos = restoredPosCount;
 
                 runOnUiThread(() -> {
+                    if (tvHeaderSyncInfo != null) {
+                        tvHeaderSyncInfo.setText("☁️ " + cleanIdent + " (Synchronisé)");
+                    }
+                    tvStatusBadge.setText("☁️ Connecté");
                     Toast.makeText(MainActivity.this, "☁️ Cloud synchronisé (" + fRestoredFavs + " favoris & " + fRestoredPos + " positions restaurés)", Toast.LENGTH_LONG).show();
                     triggerSync();
                 });
@@ -2556,10 +2773,19 @@ public class MainActivity extends AppCompatActivity {
                 JsonObject watchedObj = JsonParser.parseString(posJson).isJsonObject()
                         ? JsonParser.parseString(posJson).getAsJsonObject() : new JsonObject();
 
-                // 3. Build PATCH payload
+                // 3. Gather settings
+                SharedPreferences playerPrefs = getSharedPreferences("keotv_player_prefs", MODE_PRIVATE);
+                JsonObject settingsObj = new JsonObject();
+                settingsObj.addProperty("hw_accel", playerPrefs.getBoolean("hw_accel", true));
+                settingsObj.addProperty("buffer_sec", playerPrefs.getString("buffer_sec", "15"));
+                settingsObj.addProperty("osd_timeout_sec", playerPrefs.getString("osd_timeout_sec", "5000"));
+                settingsObj.addProperty("epg_position", playerPrefs.getString("epg_position", "bottom"));
+
+                // 4. Build PATCH payload
                 JsonObject payload = new JsonObject();
                 payload.add("favorites", favArr);
                 payload.add("watched_positions", watchedObj);
+                payload.add("settings", settingsObj);
                 String isoNow = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(new Date());
                 payload.addProperty("updated_at", isoNow);
 
@@ -2597,58 +2823,178 @@ public class MainActivity extends AppCompatActivity {
         }).start();
     }
 
+    private void syncCloudSilently() {
+        final SharedPreferences prefs = getSharedPreferences("keotv_prefs", MODE_PRIVATE);
+        final String ident = prefs.getString("cloud_username", "");
+        if (ident.isEmpty()) return;
+
+        new Thread(() -> {
+            try {
+                String cleanIdent = ident.trim().toLowerCase();
+                String enc = URLEncoder.encode(cleanIdent, "UTF-8");
+                String urlStr = "https://qvfmfstwrkcerzlbemzb.supabase.co/rest/v1/keotv_users?or=(username.eq."
+                        + enc + ",id.eq.usr_" + enc + ",id.eq." + enc + ")&select=*";
+
+                URL url = new URL(urlStr);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(8000);
+                conn.setReadTimeout(12000);
+                conn.setRequestProperty("apikey", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs");
+                conn.setRequestProperty("Authorization", "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF2Zm1mc3R3cmtjZXJ6bGJlbXpiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwNjE1NDksImV4cCI6MjEwNzYzNzU0OX0.-VCES2YX_FDjWct12sTgTaDtfqnqUfXfPcMS39UmRBs");
+                conn.setRequestProperty("Accept", "application/json");
+
+                int code = conn.getResponseCode();
+                if (code != 200) return;
+
+                BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8));
+                StringBuilder sb = new StringBuilder();
+                String line;
+                while ((line = reader.readLine()) != null) sb.append(line);
+                reader.close();
+
+                JsonArray arr = JsonParser.parseString(sb.toString()).getAsJsonArray();
+                if (arr.size() == 0) return;
+
+                JsonObject userObj = arr.get(0).getAsJsonObject();
+
+                // 1. Merge Favorites (Union of Cloud & Local so neither device loses favorites)
+                boolean favsChanged = false;
+                List<String> localFavs = db.getFavoriteChannelIds();
+                Set<String> mergedFavs = new HashSet<>(localFavs);
+                if (userObj.has("favorites") && !userObj.get("favorites").isJsonNull()) {
+                    JsonElement favEl = userObj.get("favorites");
+                    if (favEl.isJsonArray()) {
+                        JsonArray fArr = favEl.getAsJsonArray();
+                        for (int i = 0; i < fArr.size(); i++) {
+                            String fid = fArr.get(i).getAsString();
+                            if (mergedFavs.add(fid)) {
+                                favsChanged = true;
+                            }
+                        }
+                    }
+                }
+                if (favsChanged) {
+                    db.restoreFavorites(new ArrayList<>(mergedFavs));
+                }
+
+                // 2. Merge Watched Positions (Take newest updatedAt per URL)
+                boolean positionsChanged = false;
+                SharedPreferences posPrefs = getSharedPreferences(PlayerActivity.PREFS_POSITIONS, Context.MODE_PRIVATE);
+                String localPosJson = posPrefs.getString(PlayerActivity.KEY_POSITIONS_JSON, "{}");
+                org.json.JSONObject localRoot = new org.json.JSONObject(localPosJson);
+
+                if (userObj.has("watched_positions") && !userObj.get("watched_positions").isJsonNull()) {
+                    JsonElement wpEl = userObj.get("watched_positions");
+                    if (wpEl.isJsonObject()) {
+                        org.json.JSONObject cloudObj = new org.json.JSONObject(wpEl.toString());
+                        java.util.Iterator<String> it = cloudObj.keys();
+                        while (it.hasNext()) {
+                            String urlKey = it.next();
+                            org.json.JSONObject cloudEntry = cloudObj.optJSONObject(urlKey);
+                            if (cloudEntry != null) {
+                                org.json.JSONObject localEntry = localRoot.optJSONObject(urlKey);
+                                long cloudTime = cloudEntry.optLong("updatedAt", 0L);
+                                long localTime = localEntry != null ? localEntry.optLong("updatedAt", 0L) : 0L;
+                                if (localEntry == null || cloudTime >= localTime) {
+                                    localRoot.put(urlKey, cloudEntry);
+                                    positionsChanged = true;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (positionsChanged) {
+                    posPrefs.edit().putString(PlayerActivity.KEY_POSITIONS_JSON, localRoot.toString()).apply();
+                }
+
+                // 3. Restore settings from Cloud
+                if (userObj.has("settings") && userObj.get("settings").isJsonObject()) {
+                    JsonObject setObj = userObj.getAsJsonObject("settings");
+                    SharedPreferences.Editor pe = getSharedPreferences("keotv_player_prefs", MODE_PRIVATE).edit();
+                    if (setObj.has("hw_accel")) pe.putBoolean("hw_accel", setObj.get("hw_accel").getAsBoolean());
+                    if (setObj.has("buffer_sec")) pe.putString("buffer_sec", setObj.get("buffer_sec").getAsString());
+                    if (setObj.has("osd_timeout_sec")) pe.putString("osd_timeout_sec", setObj.get("osd_timeout_sec").getAsString());
+                    if (setObj.has("epg_position")) pe.putString("epg_position", setObj.get("epg_position").getAsString());
+                    pe.apply();
+                }
+
+                // 4. Update Header UI
+                runOnUiThread(() -> {
+                    if (tvHeaderSyncInfo != null) {
+                        tvHeaderSyncInfo.setText("☁️ " + cleanIdent + " (Synchronisé)");
+                    }
+                    if (channelsAdapter != null) {
+                        channelsAdapter.notifyDataSetChanged();
+                    }
+                });
+
+                // 5. Push merged union back to Supabase so both device and cloud are in parity
+                pushAccountsToCloud(false);
+
+            } catch (Exception e) {
+                Log.w(TAG, "Silent cloud sync error: " + e.getMessage());
+            }
+        }).start();
+    }
+
     @Override
     protected void onResume() {
         super.onResume();
-        pushAccountsToCloud(false);
+        syncCloudSilently();
     }
 
     private void showSettingsDialog() {
         if (isFinishing() || isDestroyed()) return;
 
         try {
-            final String[] items = {
-                    "🛡️ Contrôle Parental & Code PIN Adulte",
-                    "☁️ Rapatrier depuis le Cloud (Playlists, Favoris, VOD)",
-                    "⬆️ Sauvegarder dans le Cloud (Favoris & Positions VOD)",
-                    "📺 Lecteur Vidéo & Performances (Media3)",
-                    "🧹 Vider le Cache & Resynchroniser",
-                    "🔄 Rechercher des Mises à Jour (OTA)",
-                    "📊 Diagnostic & État du Système",
-                    "⚠️ Réinitialisation Usine Complète"
-            };
+            final SharedPreferences prefs = getSharedPreferences("keotv_prefs", MODE_PRIVATE);
+            final String cloudUser = prefs.getString("cloud_username", "");
+            final boolean isCloudConnected = !cloudUser.isEmpty();
+
+            final List<String> items = new ArrayList<>();
+            items.add("🛡️ Contrôle Parental & Code PIN Adulte");
+            if (isCloudConnected) {
+                items.add("☁️ Compte Cloud : " + cloudUser + " (Connecté)");
+                items.add("🔄 Synchroniser maintenant (Favoris, VOD, Réglages)");
+                items.add("🚪 Déconnexion du compte Cloud");
+            } else {
+                items.add("☁️ Connecter un Compte Cloud (Sync TV & Mobile)");
+            }
+            items.add("📺 Lecteur Vidéo & Performances (Media3)");
+            items.add("🧹 Vider le Cache & Resynchroniser");
+            items.add("🔄 Rechercher des Mises à Jour (OTA)");
+            items.add("📊 Diagnostic & État du Système");
+            items.add("⚠️ Réinitialisation Usine Complète");
 
             new AlertDialog.Builder(this)
                     .setTitle("⚙️ PARAMÈTRES KEOTV")
-                    .setItems(items, (dialog, which) -> {
-                        switch (which) {
-                            case 0:
-                                showParentalControlDialog();
-                                break;
-                            case 1:
-                                showCloudSyncDialog();
-                                break;
-                            case 2:
-                                pushAccountsToCloud(true);
-                                break;
-                            case 3:
-                                showPlayerSettingsDialog();
-                                break;
-                            case 4:
-                                Toast.makeText(this, "Purge du cache...", Toast.LENGTH_SHORT).show();
-                                db.purgeCache(true);
-                                loadLocalData();
-                                triggerSync();
-                                break;
-                            case 5:
-                                UpdateManager.checkForUpdates(this, true);
-                                break;
-                            case 6:
-                                showDiagnosticDialog();
-                                break;
-                            case 7:
-                                performFactoryReset();
-                                break;
+                    .setItems(items.toArray(new String[0]), (dialog, which) -> {
+                        String selected = items.get(which);
+                        if (selected.contains("Contrôle Parental")) {
+                            showParentalControlDialog();
+                        } else if (selected.contains("Compte Cloud") || selected.contains("Connecter un Compte")) {
+                            showCloudSyncDialog();
+                        } else if (selected.contains("Synchroniser maintenant")) {
+                            Toast.makeText(this, "Synchronisation Cloud en cours...", Toast.LENGTH_SHORT).show();
+                            syncCloudSilently();
+                        } else if (selected.contains("Déconnexion du compte")) {
+                            prefs.edit().remove("cloud_username").remove("cloud_password").apply();
+                            if (tvHeaderSyncInfo != null) tvHeaderSyncInfo.setText("");
+                            Toast.makeText(this, "Compte Cloud déconnecté", Toast.LENGTH_SHORT).show();
+                        } else if (selected.contains("Lecteur Vidéo")) {
+                            showPlayerSettingsDialog();
+                        } else if (selected.contains("Vider le Cache")) {
+                            Toast.makeText(this, "Purge du cache...", Toast.LENGTH_SHORT).show();
+                            db.purgeCache(true);
+                            loadLocalData();
+                            triggerSync();
+                        } else if (selected.contains("Mises à Jour")) {
+                            UpdateManager.checkForUpdates(this, true);
+                        } else if (selected.contains("Diagnostic")) {
+                            showDiagnosticDialog();
+                        } else if (selected.contains("Réinitialisation")) {
+                            performFactoryReset();
                         }
                     })
                     .setNegativeButton("Fermer", null)
@@ -3451,13 +3797,19 @@ public class MainActivity extends AppCompatActivity {
                     }
                 });
 
-                // Long click on channel row directly opens Catchup / Replay
+                // Long click on channel row opens details for VOD/Series, or Catchup for Replay/Archive channels
                 holder.itemView.setOnLongClickListener(v -> {
                     int pos = holder.getBindingAdapterPosition();
                     if (pos != RecyclerView.NO_POSITION) {
                         selectedPos = pos;
                         selectChannel(item);
-                        showCatchupDialog(item);
+                        if ("vod".equals(item.streamType)) {
+                            showMovieDetailDialog(item);
+                        } else if ("series".equals(item.streamType)) {
+                            showSeriesDetailDialog(item);
+                        } else if ("replay".equals(currentType) || item.tvArchive == 1) {
+                            showCatchupDialog(item);
+                        }
                         return true;
                     }
                     return false;
