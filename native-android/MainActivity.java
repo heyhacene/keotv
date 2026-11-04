@@ -2760,7 +2760,6 @@ public class MainActivity extends AppCompatActivity {
             }
         });
     }
-    }
 
     private void triggerSync() {
         KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
