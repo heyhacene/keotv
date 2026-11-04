@@ -9,6 +9,7 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -54,6 +55,7 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -1217,6 +1219,12 @@ public class MainActivity extends AppCompatActivity {
         activeChannel = ch;
         if (ch == null) return;
 
+        // Clear stale replay program title when switching channels
+        PlayerActivity.pendingCurrentProgramTitle = null;
+        PlayerActivity.pendingCurrentProgramDesc = null;
+        PlayerActivity.pendingCurrentProgramTime = null;
+        PlayerActivity.pendingNextProgramTitle = null;
+
         if (tvDetailName != null) tvDetailName.setText(ch.name);
         if (tvDetailGroup != null) {
             tvDetailGroup.setText(selectedCategory != null ? selectedCategory.name : "Direct TV");
@@ -1338,6 +1346,10 @@ public class MainActivity extends AppCompatActivity {
         PlayerActivity.pendingIndex = startIndex;
         PlayerActivity.pendingIsLive = !"vod".equals(activeChannel.streamType);
         PlayerActivity.pendingSeriesId = null;
+        PlayerActivity.pendingCurrentProgramTitle = null;
+        PlayerActivity.pendingCurrentProgramDesc = null;
+        PlayerActivity.pendingCurrentProgramTime = null;
+        PlayerActivity.pendingNextProgramTitle = null;
 
         Intent intent = new Intent(this, PlayerActivity.class);
         startActivity(intent);
@@ -2158,12 +2170,16 @@ public class MainActivity extends AppCompatActivity {
         Toast.makeText(this, "Chargement des programmes en Replay...", Toast.LENGTH_SHORT).show();
         xtreamClient.fetchCatchupPrograms(pl.serverUrl, pl.username, pl.password, streamId, 3, new XtreamClient.CatchupCallback() {
             @Override
-            public void onSuccess(List<XtreamClient.EpgProgram> pastPrograms) {
+            public void onSuccess(final List<XtreamClient.EpgProgram> pastPrograms) {
                 if (isFinishing() || isDestroyed()) return;
                 if (pastPrograms.isEmpty()) {
                     Toast.makeText(MainActivity.this, "Aucun programme en Replay disponible pour cette chaîne.", Toast.LENGTH_LONG).show();
                     return;
                 }
+
+                // Default sort: newest programs first (descending by start time)
+                Collections.sort(pastPrograms, (a, b) -> Long.compare(b.startMs, a.startMs));
+                final boolean[] isDesc = new boolean[]{true};
 
                 AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
                 LinearLayout root = new LinearLayout(MainActivity.this);
@@ -2175,14 +2191,14 @@ public class MainActivity extends AppCompatActivity {
                 rootBg.setStroke(dpToPx(1), 0xFF334155);
                 root.setBackground(rootBg);
 
-                // Header Layout (Title + Badge)
+                // Header Layout (Title + Count Badge + Sort Toggle Button)
                 LinearLayout header = new LinearLayout(MainActivity.this);
                 header.setOrientation(LinearLayout.HORIZONTAL);
                 header.setGravity(Gravity.CENTER_VERTICAL);
 
                 TextView tvTitle = new TextView(MainActivity.this);
                 tvTitle.setText("🔄 Replay : " + (ch.name != null ? ch.name : "Chaîne TV"));
-                tvTitle.setTextSize(17f);
+                tvTitle.setTextSize(16.5f);
                 tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
                 tvTitle.setTextColor(Color.WHITE);
                 header.addView(tvTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
@@ -2200,6 +2216,44 @@ public class MainActivity extends AppCompatActivity {
                 tvBadge.setBackground(countBg);
                 header.addView(tvBadge);
 
+                // Sort toggle button (newest first <-> oldest first)
+                final TextView tvSortToggle = new TextView(MainActivity.this);
+                tvSortToggle.setText("⇅ Plus récents");
+                tvSortToggle.setTextSize(11f);
+                tvSortToggle.setTypeface(Typeface.DEFAULT_BOLD);
+                tvSortToggle.setTextColor(0xFF38BDF8);
+                tvSortToggle.setPadding(dpToPx(10), dpToPx(3), dpToPx(10), dpToPx(3));
+                tvSortToggle.setFocusable(true);
+                tvSortToggle.setFocusableInTouchMode(true);
+                GradientDrawable sortBg = new GradientDrawable();
+                sortBg.setColor(0xFF1E293B);
+                sortBg.setCornerRadius(dpToPx(12));
+                sortBg.setStroke(dpToPx(1), 0xFF0284C7);
+                tvSortToggle.setBackground(sortBg);
+
+                LinearLayout.LayoutParams sortLp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                sortLp.setMarginStart(dpToPx(8));
+                tvSortToggle.setLayoutParams(sortLp);
+
+                tvSortToggle.setOnFocusChangeListener((v, hasFocus) -> {
+                    GradientDrawable d = (GradientDrawable) tvSortToggle.getBackground();
+                    if (hasFocus) {
+                        d.setColor(0xFF0284C7);
+                        d.setStroke(dpToPx(2), Color.WHITE);
+                        tvSortToggle.setTextColor(Color.WHITE);
+                        tvSortToggle.setScaleX(1.05f);
+                        tvSortToggle.setScaleY(1.05f);
+                    } else {
+                        d.setColor(0xFF1E293B);
+                        d.setStroke(dpToPx(1), 0xFF0284C7);
+                        tvSortToggle.setTextColor(0xFF38BDF8);
+                        tvSortToggle.setScaleX(1.0f);
+                        tvSortToggle.setScaleY(1.0f);
+                    }
+                });
+
+                header.addView(tvSortToggle);
                 root.addView(header);
 
                 TextView tvSub = new TextView(MainActivity.this);
@@ -2210,124 +2264,30 @@ public class MainActivity extends AppCompatActivity {
                 root.addView(tvSub);
 
                 ScrollView sv = new ScrollView(MainActivity.this);
-                LinearLayout listContainer = new LinearLayout(MainActivity.this);
+                final LinearLayout listContainer = new LinearLayout(MainActivity.this);
                 listContainer.setOrientation(LinearLayout.VERTICAL);
 
-                AlertDialog dialog = builder.setView(root).create();
+                final AlertDialog dialog = builder.setView(root).create();
                 if (dialog.getWindow() != null) {
                     dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
                 }
 
-                for (int i = 0; i < pastPrograms.size(); i++) {
-                    final XtreamClient.EpgProgram prog = pastPrograms.get(i);
+                // Populate programs list
+                populateCatchupCards(listContainer, pastPrograms, dialog, ch, pl);
 
-                    LinearLayout card = new LinearLayout(MainActivity.this);
-                    card.setOrientation(LinearLayout.VERTICAL);
-                    card.setPadding(dpToPx(14), dpToPx(12), dpToPx(14), dpToPx(12));
-                    card.setFocusable(true);
-                    card.setFocusableInTouchMode(true);
-
-                    LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                    cardLp.setMargins(0, dpToPx(4), 0, dpToPx(4));
-                    card.setLayoutParams(cardLp);
-
-                    GradientDrawable cardBg = new GradientDrawable();
-                    cardBg.setColor(0xFF1E293B);
-                    cardBg.setCornerRadius(dpToPx(10));
-                    cardBg.setStroke(dpToPx(1), 0xFF334155);
-                    card.setBackground(cardBg);
-
-                    // Row 1: Day Badge + Time & Duration + Play Pill
-                    LinearLayout metaRow = new LinearLayout(MainActivity.this);
-                    metaRow.setOrientation(LinearLayout.HORIZONTAL);
-                    metaRow.setGravity(Gravity.CENTER_VERTICAL);
-
-                    TextView tvDay = new TextView(MainActivity.this);
-                    tvDay.setText(prog.getFormattedDayLabel());
-                    tvDay.setTextSize(11f);
-                    tvDay.setTypeface(Typeface.DEFAULT_BOLD);
-                    tvDay.setTextColor(0xFF38BDF8);
-                    tvDay.setPadding(dpToPx(6), dpToPx(2), dpToPx(6), dpToPx(2));
-                    GradientDrawable dayBg = new GradientDrawable();
-                    dayBg.setColor(0xFF0F2B48);
-                    dayBg.setCornerRadius(dpToPx(6));
-                    tvDay.setBackground(dayBg);
-                    metaRow.addView(tvDay);
-
-                    TextView tvTime = new TextView(MainActivity.this);
-                    tvTime.setText("  " + prog.getFormattedTimeWithDuration());
-                    tvTime.setTextSize(12f);
-                    tvTime.setTextColor(0xFF94A3B8);
-                    tvTime.setTypeface(Typeface.MONOSPACE);
-                    metaRow.addView(tvTime, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
-
-                    TextView tvPlay = new TextView(MainActivity.this);
-                    tvPlay.setText("▶ Voir");
-                    tvPlay.setTextSize(11f);
-                    tvPlay.setTypeface(Typeface.DEFAULT_BOLD);
-                    tvPlay.setTextColor(Color.WHITE);
-                    tvPlay.setPadding(dpToPx(10), dpToPx(4), dpToPx(10), dpToPx(4));
-                    GradientDrawable playBg = new GradientDrawable();
-                    playBg.setColor(0xFF0284C7);
-                    playBg.setCornerRadius(dpToPx(8));
-                    tvPlay.setBackground(playBg);
-                    metaRow.addView(tvPlay);
-
-                    card.addView(metaRow);
-
-                    // Row 2: Title
-                    TextView tvProgTitle = new TextView(MainActivity.this);
-                    tvProgTitle.setText(prog.title != null ? prog.title : "Émission");
-                    tvProgTitle.setTextSize(14f);
-                    tvProgTitle.setTypeface(Typeface.DEFAULT_BOLD);
-                    tvProgTitle.setTextColor(Color.WHITE);
-                    tvProgTitle.setPadding(0, dpToPx(6), 0, 0);
-                    card.addView(tvProgTitle);
-
-                    // Row 3: Description (if available)
-                    if (prog.desc != null && !prog.desc.trim().isEmpty()) {
-                        TextView tvProgDesc = new TextView(MainActivity.this);
-                        tvProgDesc.setText(prog.desc.trim());
-                        tvProgDesc.setTextSize(11f);
-                        tvProgDesc.setTextColor(0xFF64748B);
-                        tvProgDesc.setMaxLines(2);
-                        tvProgDesc.setEllipsize(TextUtils.TruncateAt.END);
-                        tvProgDesc.setPadding(0, dpToPx(2), 0, 0);
-                        card.addView(tvProgDesc);
+                tvSortToggle.setOnClickListener(v -> {
+                    isDesc[0] = !isDesc[0];
+                    Collections.reverse(pastPrograms);
+                    tvSortToggle.setText(isDesc[0] ? "⇅ Plus récents" : "⇅ Plus anciens");
+                    populateCatchupCards(listContainer, pastPrograms, dialog, ch, pl);
+                });
+                tvSortToggle.setOnKeyListener((v, keyCode, event) -> {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)) {
+                        tvSortToggle.performClick();
+                        return true;
                     }
-
-                    // Focus and click handling
-                    card.setOnFocusChangeListener((v, hasFocus) -> {
-                        GradientDrawable d = (GradientDrawable) card.getBackground();
-                        if (hasFocus) {
-                            d.setColor(0xFF0369A1);
-                            d.setStroke(dpToPx(2), Color.WHITE);
-                            card.setScaleX(1.02f);
-                            card.setScaleY(1.02f);
-                        } else {
-                            d.setColor(0xFF1E293B);
-                            d.setStroke(dpToPx(1), 0xFF334155);
-                            card.setScaleX(1.0f);
-                            card.setScaleY(1.0f);
-                        }
-                    });
-
-                    card.setOnClickListener(v -> {
-                        dialog.dismiss();
-                        playCatchupStream(ch, prog, pl);
-                    });
-
-                    card.setOnKeyListener((v, keyCode, event) -> {
-                        if (event.getAction() == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)) {
-                            card.performClick();
-                            return true;
-                        }
-                        return false;
-                    });
-
-                    listContainer.addView(card);
-                }
+                    return false;
+                });
 
                 sv.addView(listContainer);
                 LinearLayout.LayoutParams svLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
@@ -2374,6 +2334,120 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void populateCatchupCards(LinearLayout listContainer, List<XtreamClient.EpgProgram> pastPrograms, AlertDialog dialog, KeoDatabase.ChannelItem ch, KeoDatabase.PlaylistItem pl) {
+        listContainer.removeAllViews();
+        for (int i = 0; i < pastPrograms.size(); i++) {
+            final XtreamClient.EpgProgram prog = pastPrograms.get(i);
+
+            LinearLayout card = new LinearLayout(MainActivity.this);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setPadding(dpToPx(14), dpToPx(12), dpToPx(14), dpToPx(12));
+            card.setFocusable(true);
+            card.setFocusableInTouchMode(true);
+
+            LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            cardLp.setMargins(0, dpToPx(4), 0, dpToPx(4));
+            card.setLayoutParams(cardLp);
+
+            GradientDrawable cardBg = new GradientDrawable();
+            cardBg.setColor(0xFF1E293B);
+            cardBg.setCornerRadius(dpToPx(10));
+            cardBg.setStroke(dpToPx(1), 0xFF334155);
+            card.setBackground(cardBg);
+
+            // Row 1: Day Badge + Time & Duration + Play Pill
+            LinearLayout metaRow = new LinearLayout(MainActivity.this);
+            metaRow.setOrientation(LinearLayout.HORIZONTAL);
+            metaRow.setGravity(Gravity.CENTER_VERTICAL);
+
+            TextView tvDay = new TextView(MainActivity.this);
+            tvDay.setText(prog.getFormattedDayLabel());
+            tvDay.setTextSize(11f);
+            tvDay.setTypeface(Typeface.DEFAULT_BOLD);
+            tvDay.setTextColor(0xFF38BDF8);
+            tvDay.setPadding(dpToPx(6), dpToPx(2), dpToPx(6), dpToPx(2));
+            GradientDrawable dayBg = new GradientDrawable();
+            dayBg.setColor(0xFF0F2B48);
+            dayBg.setCornerRadius(dpToPx(6));
+            tvDay.setBackground(dayBg);
+            metaRow.addView(tvDay);
+
+            TextView tvTime = new TextView(MainActivity.this);
+            tvTime.setText("  " + prog.getFormattedTimeWithDuration());
+            tvTime.setTextSize(12f);
+            tvTime.setTextColor(0xFF94A3B8);
+            tvTime.setTypeface(Typeface.MONOSPACE);
+            metaRow.addView(tvTime, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+            TextView tvPlay = new TextView(MainActivity.this);
+            tvPlay.setText("▶ Voir");
+            tvPlay.setTextSize(11f);
+            tvPlay.setTypeface(Typeface.DEFAULT_BOLD);
+            tvPlay.setTextColor(Color.WHITE);
+            tvPlay.setPadding(dpToPx(10), dpToPx(4), dpToPx(10), dpToPx(4));
+            GradientDrawable playBg = new GradientDrawable();
+            playBg.setColor(0xFF0284C7);
+            playBg.setCornerRadius(dpToPx(8));
+            tvPlay.setBackground(playBg);
+            metaRow.addView(tvPlay);
+
+            card.addView(metaRow);
+
+            // Row 2: Title
+            TextView tvProgTitle = new TextView(MainActivity.this);
+            tvProgTitle.setText(prog.title != null ? prog.title : "Émission");
+            tvProgTitle.setTextSize(14f);
+            tvProgTitle.setTypeface(Typeface.DEFAULT_BOLD);
+            tvProgTitle.setTextColor(Color.WHITE);
+            tvProgTitle.setPadding(0, dpToPx(6), 0, 0);
+            card.addView(tvProgTitle);
+
+            // Row 3: Description (if available)
+            if (prog.desc != null && !prog.desc.trim().isEmpty()) {
+                TextView tvProgDesc = new TextView(MainActivity.this);
+                tvProgDesc.setText(prog.desc.trim());
+                tvProgDesc.setTextSize(11f);
+                tvProgDesc.setTextColor(0xFF64748B);
+                tvProgDesc.setMaxLines(2);
+                tvProgDesc.setEllipsize(TextUtils.TruncateAt.END);
+                tvProgDesc.setPadding(0, dpToPx(2), 0, 0);
+                card.addView(tvProgDesc);
+            }
+
+            // Focus and click handling
+            card.setOnFocusChangeListener((v, hasFocus) -> {
+                GradientDrawable d = (GradientDrawable) card.getBackground();
+                if (hasFocus) {
+                    d.setColor(0xFF0369A1);
+                    d.setStroke(dpToPx(2), Color.WHITE);
+                    card.setScaleX(1.02f);
+                    card.setScaleY(1.02f);
+                } else {
+                    d.setColor(0xFF1E293B);
+                    d.setStroke(dpToPx(1), 0xFF334155);
+                    card.setScaleX(1.0f);
+                    card.setScaleY(1.0f);
+                }
+            });
+
+            card.setOnClickListener(v -> {
+                dialog.dismiss();
+                playCatchupStream(ch, prog, pl);
+            });
+
+            card.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)) {
+                    card.performClick();
+                    return true;
+                }
+                return false;
+            });
+
+            listContainer.addView(card);
+        }
+    }
+
     private void playCatchupStream(KeoDatabase.ChannelItem ch, XtreamClient.EpgProgram prog, KeoDatabase.PlaylistItem pl) {
         try {
             String server = pl.serverUrl.trim().replaceAll("/+$", "");
@@ -2399,19 +2473,24 @@ public class MainActivity extends AppCompatActivity {
             List<String> urls = new ArrayList<>();
             List<String> titles = new ArrayList<>();
 
-            // 1. Standard Xtream Codes Catchup: /streaming/timeshift.php (local time)
-            urls.add(server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormattedLocal + "&duration=" + durationMins);
+            // 1. Root timeshift.php (standard Xtream Codes and most universal on all panels)
+            urls.add(server + "/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormattedLocal + "&duration=" + durationMins);
             // 2. Direct Xtream MPEG-TS format: /timeshift/{user}/{pass}/{dur}/{local}/{stream}.ts
             urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormattedLocal + "/" + cleanId + ".ts");
-            // 3. Direct Xtream HLS format: /timeshift/{user}/{pass}/{dur}/{local}/{stream}.m3u8
+            // 3. Encoded colon variant (%3A) for strict reverse proxies / web servers
+            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormattedLocal.replace(":", "%3A") + "/" + cleanId + ".ts");
+            // 4. Standard Xtream subfolder: /streaming/timeshift.php (local time)
+            urls.add(server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormattedLocal + "&duration=" + durationMins);
+            // 5. Unix timestamp epoch format (used by XUI.one, ZapX and recent panels)
+            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startSec + "/" + cleanId + ".ts");
+            urls.add(server + "/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startSec + "&duration=" + durationMins);
+            // 6. Direct Xtream HLS format: /timeshift/{user}/{pass}/{dur}/{local}/{stream}.m3u8
             urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormattedLocal + "/" + cleanId + ".m3u8");
-            // 4. Timeshift with UTC time (if server clock is UTC)
+            // 7. Timeshift with UTC time (if server clock operates in UTC)
             if (!startFormattedUtc.equals(startFormattedLocal)) {
-                urls.add(server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormattedUtc + "&duration=" + durationMins);
+                urls.add(server + "/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormattedUtc + "&duration=" + durationMins);
                 urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormattedUtc + "/" + cleanId + ".ts");
             }
-            // 5. Unix timestamp format (XUI.one and newer Xtream panels)
-            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startSec + "/" + cleanId + ".ts");
 
             for (int u = 0; u < urls.size(); u++) {
                 titles.add("[Replay] " + ch.name + " - " + prog.title);
@@ -2431,6 +2510,256 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception e) {
             Toast.makeText(this, "Erreur lecture Replay : " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    // --- FUTURE EPG GUIDE DIALOG ---
+    private void showFutureEpgDialog(final KeoDatabase.ChannelItem ch) {
+        if (ch == null || isFinishing() || isDestroyed()) return;
+        if ("vod".equals(ch.streamType) || "series".equals(ch.streamType)) return;
+
+        final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
+        if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) {
+            Toast.makeText(this, "Compte non configuré", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final String streamId = (ch.streamId != null && !ch.streamId.isEmpty())
+                ? ch.streamId
+                : ch.id.replace("xtream_live_", "").replace("xtream_replay_", "");
+
+        Toast.makeText(this, "Chargement du guide TV...", Toast.LENGTH_SHORT).show();
+        xtreamClient.fetchShortEpg(pl.serverUrl, pl.username, pl.password, streamId, 15, new XtreamClient.EpgCallback() {
+            @Override
+            public void onSuccess(List<XtreamClient.EpgProgram> programs, XtreamClient.EpgProgram current, XtreamClient.EpgProgram next) {
+                if (isFinishing() || isDestroyed()) return;
+
+                long nowMs = System.currentTimeMillis();
+                final List<XtreamClient.EpgProgram> futureList = new ArrayList<>();
+                for (XtreamClient.EpgProgram p : programs) {
+                    if (p.stopMs > nowMs) {
+                        futureList.add(p);
+                    }
+                }
+
+                if (futureList.isEmpty()) {
+                    Toast.makeText(MainActivity.this, "Aucun programme futur disponible pour " + ch.name, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+
+                // Sort chronological
+                Collections.sort(futureList, (a, b) -> Long.compare(a.startMs, b.startMs));
+
+                AlertDialog.Builder builder = new AlertDialog.Builder(MainActivity.this);
+                LinearLayout root = new LinearLayout(MainActivity.this);
+                root.setOrientation(LinearLayout.VERTICAL);
+                root.setPadding(dpToPx(20), dpToPx(16), dpToPx(20), dpToPx(16));
+                GradientDrawable rootBg = new GradientDrawable();
+                rootBg.setColor(0xFF0F172A);
+                rootBg.setCornerRadius(dpToPx(16));
+                rootBg.setStroke(dpToPx(1), 0xFF334155);
+                root.setBackground(rootBg);
+
+                // Header
+                LinearLayout header = new LinearLayout(MainActivity.this);
+                header.setOrientation(LinearLayout.HORIZONTAL);
+                header.setGravity(Gravity.CENTER_VERTICAL);
+
+                TextView tvTitle = new TextView(MainActivity.this);
+                tvTitle.setText("📅 Guide TV : " + (ch.name != null ? ch.name : "Chaîne TV"));
+                tvTitle.setTextSize(16.5f);
+                tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
+                tvTitle.setTextColor(Color.WHITE);
+                header.addView(tvTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+                TextView tvBadge = new TextView(MainActivity.this);
+                tvBadge.setText(futureList.size() + " émissions à venir");
+                tvBadge.setTextSize(11f);
+                tvBadge.setTypeface(Typeface.DEFAULT_BOLD);
+                tvBadge.setTextColor(0xFF38BDF8);
+                tvBadge.setPadding(dpToPx(8), dpToPx(3), dpToPx(8), dpToPx(3));
+                GradientDrawable countBg = new GradientDrawable();
+                countBg.setColor(0xFF0C4A6E);
+                countBg.setCornerRadius(dpToPx(12));
+                countBg.setStroke(dpToPx(1), 0xFF0284C7);
+                tvBadge.setBackground(countBg);
+                header.addView(tvBadge);
+
+                root.addView(header);
+
+                TextView tvSub = new TextView(MainActivity.this);
+                tvSub.setText("Programmes en cours et à suivre sur cette chaîne :");
+                tvSub.setTextSize(12f);
+                tvSub.setTextColor(0xFF94A3B8);
+                tvSub.setPadding(0, dpToPx(4), 0, dpToPx(12));
+                root.addView(tvSub);
+
+                ScrollView sv = new ScrollView(MainActivity.this);
+                LinearLayout listContainer = new LinearLayout(MainActivity.this);
+                listContainer.setOrientation(LinearLayout.VERTICAL);
+
+                final AlertDialog dialog = builder.setView(root).create();
+                if (dialog.getWindow() != null) {
+                    dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+                }
+
+                for (int i = 0; i < futureList.size(); i++) {
+                    final XtreamClient.EpgProgram prog = futureList.get(i);
+                    final boolean isCurrentlyLive = prog.startMs <= nowMs && prog.stopMs > nowMs;
+
+                    LinearLayout card = new LinearLayout(MainActivity.this);
+                    card.setOrientation(LinearLayout.VERTICAL);
+                    card.setPadding(dpToPx(14), dpToPx(12), dpToPx(14), dpToPx(12));
+                    card.setFocusable(true);
+                    card.setFocusableInTouchMode(true);
+
+                    LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    cardLp.setMargins(0, dpToPx(4), 0, dpToPx(4));
+                    card.setLayoutParams(cardLp);
+
+                    GradientDrawable cardBg = new GradientDrawable();
+                    cardBg.setColor(isCurrentlyLive ? 0xFF0F2B48 : 0xFF1E293B);
+                    cardBg.setCornerRadius(dpToPx(10));
+                    cardBg.setStroke(dpToPx(1), isCurrentlyLive ? 0xFF0284C7 : 0xFF334155);
+                    card.setBackground(cardBg);
+
+                    // Row 1: Day badge + Time
+                    LinearLayout metaRow = new LinearLayout(MainActivity.this);
+                    metaRow.setOrientation(LinearLayout.HORIZONTAL);
+                    metaRow.setGravity(Gravity.CENTER_VERTICAL);
+
+                    TextView tvDay = new TextView(MainActivity.this);
+                    tvDay.setText(isCurrentlyLive ? "🔴 EN DIRECT" : prog.getFormattedDayLabel());
+                    tvDay.setTextSize(11f);
+                    tvDay.setTypeface(Typeface.DEFAULT_BOLD);
+                    tvDay.setTextColor(isCurrentlyLive ? 0xFFF43F5E : 0xFF38BDF8);
+                    tvDay.setPadding(dpToPx(6), dpToPx(2), dpToPx(6), dpToPx(2));
+                    GradientDrawable dayBg = new GradientDrawable();
+                    dayBg.setColor(isCurrentlyLive ? 0xFF4C0519 : 0xFF0F2B48);
+                    dayBg.setCornerRadius(dpToPx(6));
+                    tvDay.setBackground(dayBg);
+                    metaRow.addView(tvDay);
+
+                    TextView tvTime = new TextView(MainActivity.this);
+                    tvTime.setText("  " + prog.getFormattedTimeWithDuration());
+                    tvTime.setTextSize(12f);
+                    tvTime.setTextColor(0xFF94A3B8);
+                    tvTime.setTypeface(Typeface.MONOSPACE);
+                    metaRow.addView(tvTime, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+                    if (isCurrentlyLive) {
+                        TextView tvLiveBtn = new TextView(MainActivity.this);
+                        tvLiveBtn.setText("▶ Regarder");
+                        tvLiveBtn.setTextSize(11f);
+                        tvLiveBtn.setTypeface(Typeface.DEFAULT_BOLD);
+                        tvLiveBtn.setTextColor(Color.WHITE);
+                        tvLiveBtn.setPadding(dpToPx(10), dpToPx(4), dpToPx(10), dpToPx(4));
+                        GradientDrawable playBg = new GradientDrawable();
+                        playBg.setColor(0xFF0284C7);
+                        playBg.setCornerRadius(dpToPx(8));
+                        tvLiveBtn.setBackground(playBg);
+                        metaRow.addView(tvLiveBtn);
+                    }
+
+                    card.addView(metaRow);
+
+                    // Row 2: Title
+                    TextView tvProgTitle = new TextView(MainActivity.this);
+                    tvProgTitle.setText(prog.title != null ? prog.title : "Émission");
+                    tvProgTitle.setTextSize(14f);
+                    tvProgTitle.setTypeface(Typeface.DEFAULT_BOLD);
+                    tvProgTitle.setTextColor(Color.WHITE);
+                    tvProgTitle.setPadding(0, dpToPx(6), 0, 0);
+                    card.addView(tvProgTitle);
+
+                    // Row 3: Description
+                    if (prog.desc != null && !prog.desc.trim().isEmpty()) {
+                        TextView tvProgDesc = new TextView(MainActivity.this);
+                        tvProgDesc.setText(prog.desc.trim());
+                        tvProgDesc.setTextSize(11f);
+                        tvProgDesc.setTextColor(0xFF64748B);
+                        tvProgDesc.setMaxLines(2);
+                        tvProgDesc.setEllipsize(TextUtils.TruncateAt.END);
+                        tvProgDesc.setPadding(0, dpToPx(2), 0, 0);
+                        card.addView(tvProgDesc);
+                    }
+
+                    card.setOnFocusChangeListener((v, hasFocus) -> {
+                        GradientDrawable d = (GradientDrawable) card.getBackground();
+                        if (hasFocus) {
+                            d.setColor(0xFF0369A1);
+                            d.setStroke(dpToPx(2), Color.WHITE);
+                            card.setScaleX(1.02f);
+                            card.setScaleY(1.02f);
+                        } else {
+                            d.setColor(isCurrentlyLive ? 0xFF0F2B48 : 0xFF1E293B);
+                            d.setStroke(dpToPx(1), isCurrentlyLive ? 0xFF0284C7 : 0xFF334155);
+                            card.setScaleX(1.0f);
+                            card.setScaleY(1.0f);
+                        }
+                    });
+
+                    if (isCurrentlyLive) {
+                        card.setOnClickListener(v -> {
+                            dialog.dismiss();
+                            launchPlayerFullscreen();
+                        });
+                        card.setOnKeyListener((v, keyCode, event) -> {
+                            if (event.getAction() == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)) {
+                                card.performClick();
+                                return true;
+                            }
+                            return false;
+                        });
+                    }
+
+                    listContainer.addView(card);
+                }
+
+                sv.addView(listContainer);
+                LinearLayout.LayoutParams svLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+                svLp.height = Math.min(futureList.size() * dpToPx(75) + dpToPx(20), dpToPx(380));
+                root.addView(sv, svLp);
+
+                TextView btnClose = new TextView(MainActivity.this);
+                btnClose.setText("Fermer");
+                btnClose.setTextSize(13f);
+                btnClose.setTypeface(Typeface.DEFAULT_BOLD);
+                btnClose.setTextColor(0xFF94A3B8);
+                btnClose.setGravity(Gravity.CENTER);
+                btnClose.setPadding(dpToPx(16), dpToPx(10), dpToPx(16), dpToPx(10));
+                btnClose.setFocusable(true);
+                GradientDrawable closeBg = new GradientDrawable();
+                closeBg.setColor(0xFF1E293B);
+                closeBg.setCornerRadius(dpToPx(8));
+                btnClose.setBackground(closeBg);
+                btnClose.setOnClickListener(v -> dialog.dismiss());
+                btnClose.setOnFocusChangeListener((v, hasFocus) -> {
+                    GradientDrawable d = (GradientDrawable) btnClose.getBackground();
+                    if (hasFocus) {
+                        d.setColor(0xFF334155);
+                        d.setStroke(dpToPx(2), Color.WHITE);
+                        btnClose.setTextColor(Color.WHITE);
+                    } else {
+                        d.setColor(0xFF1E293B);
+                        d.setStroke(0, Color.TRANSPARENT);
+                        btnClose.setTextColor(0xFF94A3B8);
+                    }
+                });
+                LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                closeLp.topMargin = dpToPx(8);
+                root.addView(btnClose, closeLp);
+
+                dialog.show();
+            }
+
+            @Override
+            public void onError(String error) {
+                if (isFinishing() || isDestroyed()) return;
+                Toast.makeText(MainActivity.this, "Erreur Guide TV : " + error, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
     }
 
     private void triggerSync() {
@@ -2945,6 +3274,15 @@ public class MainActivity extends AppCompatActivity {
         syncCloudSilently();
     }
 
+    private void openWebUrl(String urlStr) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(urlStr));
+            startActivity(intent);
+        } catch (Exception e) {
+            Toast.makeText(this, "Impossible d'ouvrir le lien : " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+
     private void showSettingsDialog() {
         if (isFinishing() || isDestroyed()) return;
 
@@ -2953,56 +3291,467 @@ public class MainActivity extends AppCompatActivity {
             final String cloudUser = prefs.getString("cloud_username", "");
             final boolean isCloudConnected = !cloudUser.isEmpty();
 
-            final List<String> items = new ArrayList<>();
-            items.add("🛡️ Contrôle Parental & Code PIN Adulte");
-            if (isCloudConnected) {
-                items.add("☁️ Compte Cloud : " + cloudUser + " (Connecté)");
-                items.add("🔄 Synchroniser maintenant (Favoris, VOD, Réglages)");
-                items.add("🚪 Déconnexion du compte Cloud");
-            } else {
-                items.add("☁️ Connecter un Compte Cloud (Sync TV & Mobile)");
-            }
-            items.add("📺 Lecteur Vidéo & Performances (Media3)");
-            items.add("🧹 Vider le Cache & Resynchroniser");
-            items.add("🔄 Rechercher des Mises à Jour (OTA)");
-            items.add("📊 Diagnostic & État du Système");
-            items.add("⚠️ Réinitialisation Usine Complète");
+            AlertDialog.Builder builder = new AlertDialog.Builder(this);
+            LinearLayout root = new LinearLayout(this);
+            root.setOrientation(LinearLayout.VERTICAL);
+            root.setPadding(dpToPx(22), dpToPx(18), dpToPx(22), dpToPx(18));
+            GradientDrawable rootBg = new GradientDrawable();
+            rootBg.setColor(0xFF0F172A);
+            rootBg.setCornerRadius(dpToPx(16));
+            rootBg.setStroke(dpToPx(1), 0xFF334155);
+            root.setBackground(rootBg);
 
-            new AlertDialog.Builder(this)
-                    .setTitle("⚙️ PARAMÈTRES KEOTV")
-                    .setItems(items.toArray(new String[0]), (dialog, which) -> {
-                        String selected = items.get(which);
-                        if (selected.contains("Contrôle Parental")) {
-                            showParentalControlDialog();
-                        } else if (selected.contains("Compte Cloud") || selected.contains("Connecter un Compte")) {
+            // Header Layout
+            LinearLayout header = new LinearLayout(this);
+            header.setOrientation(LinearLayout.HORIZONTAL);
+            header.setGravity(Gravity.CENTER_VERTICAL);
+
+            TextView tvTitle = new TextView(this);
+            tvTitle.setText("⚙️ PARAMÈTRES KEOTV");
+            tvTitle.setTextSize(17f);
+            tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
+            tvTitle.setTextColor(Color.WHITE);
+            header.addView(tvTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+            TextView tvBuild = new TextView(this);
+            tvBuild.setText("v1.4 • Build " + UpdateManager.getAppVersionCode(this));
+            tvBuild.setTextSize(11f);
+            tvBuild.setTypeface(Typeface.DEFAULT_BOLD);
+            tvBuild.setTextColor(0xFF38BDF8);
+            tvBuild.setPadding(dpToPx(8), dpToPx(3), dpToPx(8), dpToPx(3));
+            GradientDrawable bBg = new GradientDrawable();
+            bBg.setColor(0xFF0C4A6E);
+            bBg.setCornerRadius(dpToPx(12));
+            bBg.setStroke(dpToPx(1), 0xFF0284C7);
+            tvBuild.setBackground(bBg);
+            header.addView(tvBuild);
+
+            root.addView(header);
+
+            TextView tvSub = new TextView(this);
+            tvSub.setText("Configuration du lecteur, synchronisation cloud et réglages système :");
+            tvSub.setTextSize(12f);
+            tvSub.setTextColor(0xFF94A3B8);
+            tvSub.setPadding(0, dpToPx(4), 0, dpToPx(12));
+            root.addView(tvSub);
+
+            ScrollView sv = new ScrollView(this);
+            LinearLayout listContainer = new LinearLayout(this);
+            listContainer.setOrientation(LinearLayout.VERTICAL);
+
+            final AlertDialog dialog = builder.setView(root).create();
+            if (dialog.getWindow() != null) {
+                dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+            }
+
+            // 1. Dons & Feedback (restored pre-build 100)
+            listContainer.addView(createSettingsCard("💖", "Soutenir le projet & Avis / Feedback",
+                    "Faire un don (GitHub Sponsors / PayPal) ou signaler un bug", v -> {
+                        dialog.dismiss();
+                        showDonationsAndFeedbackDialog();
+                    }));
+
+            // 2. Contrôle Parental
+            listContainer.addView(createSettingsCard("🛡️", "Contrôle Parental & Code PIN",
+                    "Verrouiller ou déverrouiller l'accès aux bouquets adultes (PIN)", v -> {
+                        dialog.dismiss();
+                        showParentalControlDialog();
+                    }));
+
+            // 3. Compte Cloud & Synchronisation
+            if (isCloudConnected) {
+                listContainer.addView(createSettingsCard("☁️", "Compte Cloud : " + cloudUser,
+                        "Connecté • Synchronisation automatique TV & Mobile", v -> {
+                            dialog.dismiss();
                             showCloudSyncDialog();
-                        } else if (selected.contains("Synchroniser maintenant")) {
+                        }));
+                listContainer.addView(createSettingsCard("🔄", "Synchroniser maintenant",
+                        "Fusionner immédiatement favoris, positions VOD et réglages avec le Cloud", v -> {
+                            dialog.dismiss();
                             Toast.makeText(this, "Synchronisation Cloud en cours...", Toast.LENGTH_SHORT).show();
                             syncCloudSilently();
-                        } else if (selected.contains("Déconnexion du compte")) {
+                        }));
+                listContainer.addView(createSettingsCard("🚪", "Déconnexion du compte Cloud",
+                        "Déconnecter votre profil Cloud de cet appareil", v -> {
+                            dialog.dismiss();
                             prefs.edit().remove("cloud_username").remove("cloud_password").apply();
                             if (tvHeaderSyncInfo != null) tvHeaderSyncInfo.setText("");
                             Toast.makeText(this, "Compte Cloud déconnecté", Toast.LENGTH_SHORT).show();
-                        } else if (selected.contains("Lecteur Vidéo")) {
-                            showPlayerSettingsDialog();
-                        } else if (selected.contains("Vider le Cache")) {
-                            Toast.makeText(this, "Purge du cache...", Toast.LENGTH_SHORT).show();
-                            db.purgeCache(true);
-                            loadLocalData();
-                            triggerSync();
-                        } else if (selected.contains("Mises à Jour")) {
-                            UpdateManager.checkForUpdates(this, true);
-                        } else if (selected.contains("Diagnostic")) {
-                            showDiagnosticDialog();
-                        } else if (selected.contains("Réinitialisation")) {
-                            performFactoryReset();
-                        }
-                    })
-                    .setNegativeButton("Fermer", null)
-                    .show();
+                        }));
+            } else {
+                listContainer.addView(createSettingsCard("☁️", "Connecter un Compte Cloud",
+                        "Synchronisez vos favoris, timecodes VOD et abonnements entre TV et Mobile", v -> {
+                            dialog.dismiss();
+                            showCloudSyncDialog();
+                        }));
+            }
+
+            // 4. Lecteur Vidéo & Performances
+            listContainer.addView(createSettingsCard("📺", "Lecteur Vidéo & Performances",
+                    "Accélération matérielle GPU, moteur Media3 ExoPlayer, taille du tampon", v -> {
+                        dialog.dismiss();
+                        showPlayerSettingsDialog();
+                    }));
+
+            // 5. Purge Cache
+            listContainer.addView(createSettingsCard("🧹", "Vider le Cache & Resynchroniser",
+                    "Purger le cache local des chaînes et retélécharger la playlist", v -> {
+                        dialog.dismiss();
+                        Toast.makeText(this, "Purge du cache...", Toast.LENGTH_SHORT).show();
+                        db.purgeCache(true);
+                        loadLocalData();
+                        triggerSync();
+                    }));
+
+            // 6. Mise à Jour OTA
+            listContainer.addView(createSettingsCard("🔄", "Rechercher des Mises à Jour (OTA)",
+                    "Vérifier la dernière version de KeoTV et mettre à jour l'APK", v -> {
+                        dialog.dismiss();
+                        UpdateManager.checkForUpdates(this, true);
+                    }));
+
+            // 7. Diagnostic Système
+            listContainer.addView(createSettingsCard("📊", "Diagnostic & État du Système",
+                    "Statistiques du catalogue, mémoire RAM et base SQLite", v -> {
+                        dialog.dismiss();
+                        showDiagnosticDialog();
+                    }));
+
+            // 8. Réinitialisation Usine
+            listContainer.addView(createSettingsCard("⚠️", "Réinitialisation Usine Complète",
+                    "Effacer toutes les playlists locales, comptes et réinitialiser l'app", v -> {
+                        dialog.dismiss();
+                        performFactoryReset();
+                    }));
+
+            sv.addView(listContainer);
+            LinearLayout.LayoutParams svLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+            svLp.height = dpToPx(380);
+            root.addView(sv, svLp);
+
+            // Bottom Close button
+            TextView btnClose = new TextView(this);
+            btnClose.setText("Fermer");
+            btnClose.setTextSize(13f);
+            btnClose.setTypeface(Typeface.DEFAULT_BOLD);
+            btnClose.setTextColor(0xFF94A3B8);
+            btnClose.setGravity(Gravity.CENTER);
+            btnClose.setPadding(dpToPx(16), dpToPx(10), dpToPx(16), dpToPx(10));
+            btnClose.setFocusable(true);
+            GradientDrawable closeBg = new GradientDrawable();
+            closeBg.setColor(0xFF1E293B);
+            closeBg.setCornerRadius(dpToPx(8));
+            btnClose.setBackground(closeBg);
+            btnClose.setOnClickListener(v -> dialog.dismiss());
+            btnClose.setOnFocusChangeListener((v, hasFocus) -> {
+                GradientDrawable d = (GradientDrawable) btnClose.getBackground();
+                if (hasFocus) {
+                    d.setColor(0xFF334155);
+                    d.setStroke(dpToPx(2), Color.WHITE);
+                    btnClose.setTextColor(Color.WHITE);
+                } else {
+                    d.setColor(0xFF1E293B);
+                    d.setStroke(0, Color.TRANSPARENT);
+                    btnClose.setTextColor(0xFF94A3B8);
+                }
+            });
+            LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            closeLp.topMargin = dpToPx(10);
+            root.addView(btnClose, closeLp);
+
+            dialog.show();
         } catch (Throwable t) {
             Log.e(TAG, "Failed to show settings dialog", t);
         }
+    }
+
+    private View createSettingsCard(String icon, String title, String subtitle, View.OnClickListener onClick) {
+        final LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.HORIZONTAL);
+        card.setGravity(Gravity.CENTER_VERTICAL);
+        card.setPadding(dpToPx(14), dpToPx(11), dpToPx(14), dpToPx(11));
+        card.setFocusable(true);
+        card.setFocusableInTouchMode(true);
+
+        LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        cardLp.setMargins(0, dpToPx(4), 0, dpToPx(4));
+        card.setLayoutParams(cardLp);
+
+        GradientDrawable cardBg = new GradientDrawable();
+        cardBg.setColor(0xFF1E293B);
+        cardBg.setCornerRadius(dpToPx(10));
+        cardBg.setStroke(dpToPx(1), 0xFF334155);
+        card.setBackground(cardBg);
+
+        // Icon badge
+        TextView tvIcon = new TextView(this);
+        tvIcon.setText(icon);
+        tvIcon.setTextSize(16f);
+        tvIcon.setGravity(Gravity.CENTER);
+        card.addView(tvIcon, new LinearLayout.LayoutParams(dpToPx(36), dpToPx(36)));
+
+        // Texts
+        LinearLayout textCol = new LinearLayout(this);
+        textCol.setOrientation(LinearLayout.VERTICAL);
+        textCol.setPadding(dpToPx(10), 0, dpToPx(8), 0);
+
+        final TextView tvTitle = new TextView(this);
+        tvTitle.setText(title);
+        tvTitle.setTextSize(13.5f);
+        tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        tvTitle.setTextColor(Color.WHITE);
+        textCol.addView(tvTitle);
+
+        final TextView tvSub = new TextView(this);
+        tvSub.setText(subtitle);
+        tvSub.setTextSize(11f);
+        tvSub.setTextColor(0xFF94A3B8);
+        textCol.addView(tvSub);
+
+        card.addView(textCol, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+        // Chevron
+        final TextView tvChevron = new TextView(this);
+        tvChevron.setText("›");
+        tvChevron.setTextSize(18f);
+        tvChevron.setTextColor(0xFF64748B);
+        card.addView(tvChevron);
+
+        card.setOnFocusChangeListener((v, hasFocus) -> {
+            GradientDrawable d = (GradientDrawable) card.getBackground();
+            if (hasFocus) {
+                d.setColor(0xFF0284C7);
+                d.setStroke(dpToPx(2), Color.WHITE);
+                card.setScaleX(1.02f);
+                card.setScaleY(1.02f);
+                tvTitle.setTextColor(Color.WHITE);
+                tvSub.setTextColor(0xFFE0F2FE);
+                tvChevron.setTextColor(Color.WHITE);
+            } else {
+                d.setColor(0xFF1E293B);
+                d.setStroke(dpToPx(1), 0xFF334155);
+                card.setScaleX(1.0f);
+                card.setScaleY(1.0f);
+                tvTitle.setTextColor(Color.WHITE);
+                tvSub.setTextColor(0xFF94A3B8);
+                tvChevron.setTextColor(0xFF64748B);
+            }
+        });
+
+        card.setOnClickListener(onClick);
+        card.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)) {
+                card.performClick();
+                return true;
+            }
+            return false;
+        });
+
+        return card;
+    }
+
+    private void showDonationsAndFeedbackDialog() {
+        if (isFinishing() || isDestroyed()) return;
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dpToPx(22), dpToPx(18), dpToPx(22), dpToPx(18));
+        GradientDrawable rootBg = new GradientDrawable();
+        rootBg.setColor(0xFF0F172A);
+        rootBg.setCornerRadius(dpToPx(16));
+        rootBg.setStroke(dpToPx(1), 0xFF334155);
+        root.setBackground(rootBg);
+
+        // Header
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("💖 SOUTENIR LE PROJET KEOTV");
+        tvTitle.setTextSize(17f);
+        tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        tvTitle.setTextColor(Color.WHITE);
+        root.addView(tvTitle);
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText("KeoTV est entièrement gratuit, open-source et sans publicité.\nUn don symbolique aide grandement à financer l'infrastructure et encourager le développement !");
+        tvSub.setTextSize(12f);
+        tvSub.setTextColor(0xFF94A3B8);
+        tvSub.setPadding(0, dpToPx(6), 0, dpToPx(16));
+        root.addView(tvSub);
+
+        ScrollView sv = new ScrollView(this);
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+
+        // Card 1: Soutenir / Dons
+        LinearLayout cardDons = new LinearLayout(this);
+        cardDons.setOrientation(LinearLayout.VERTICAL);
+        cardDons.setPadding(dpToPx(16), dpToPx(14), dpToPx(16), dpToPx(14));
+        GradientDrawable cardDonsBg = new GradientDrawable();
+        cardDonsBg.setColor(0xFF1E293B);
+        cardDonsBg.setCornerRadius(dpToPx(12));
+        cardDonsBg.setStroke(dpToPx(1), 0xFFE11D48); // Rose border
+        cardDons.setBackground(cardDonsBg);
+
+        TextView tvDonsHead = new TextView(this);
+        tvDonsHead.setText("💝 Faire un Don / Soutenir");
+        tvDonsHead.setTextSize(14f);
+        tvDonsHead.setTypeface(Typeface.DEFAULT_BOLD);
+        tvDonsHead.setTextColor(0xFFFB7185);
+        cardDons.addView(tvDonsHead);
+
+        TextView tvDonsDesc = new TextView(this);
+        tvDonsDesc.setText("Votre contribution permet de payer l'hébergement du cloud et encourage les nouvelles fonctionnalités.");
+        tvDonsDesc.setTextSize(11.5f);
+        tvDonsDesc.setTextColor(0xFFCBD5E1);
+        tvDonsDesc.setPadding(0, dpToPx(4), 0, dpToPx(12));
+        cardDons.addView(tvDonsDesc);
+
+        LinearLayout donsButtonsRow = new LinearLayout(this);
+        donsButtonsRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        TextView btnSponsors = createDialogActionButton("💖 GitHub Sponsors", 0xFFE11D48, v -> openWebUrl("https://github.com/sponsors/heyhacene"));
+        LinearLayout.LayoutParams spLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+        spLp.setMarginEnd(dpToPx(8));
+        donsButtonsRow.addView(btnSponsors, spLp);
+
+        TextView btnPaypal = createDialogActionButton("☕ PayPal", 0xFF0284C7, v -> openWebUrl("https://paypal.me/hacenebouk"));
+        LinearLayout.LayoutParams ppLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+        donsButtonsRow.addView(btnPaypal, ppLp);
+
+        cardDons.addView(donsButtonsRow);
+        content.addView(cardDons);
+
+        // Spacer
+        View spacer = new View(this);
+        content.addView(spacer, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(14)));
+
+        // Card 2: Feedback & Bugs
+        LinearLayout cardFeedback = new LinearLayout(this);
+        cardFeedback.setOrientation(LinearLayout.VERTICAL);
+        cardFeedback.setPadding(dpToPx(16), dpToPx(14), dpToPx(16), dpToPx(14));
+        GradientDrawable cardFbBg = new GradientDrawable();
+        cardFbBg.setColor(0xFF1E293B);
+        cardFbBg.setCornerRadius(dpToPx(12));
+        cardFbBg.setStroke(dpToPx(1), 0xFF0284C7); // Cyan border
+        cardFeedback.setBackground(cardFbBg);
+
+        TextView tvFbHead = new TextView(this);
+        tvFbHead.setText("💬 Retours & Signalement de Bugs");
+        tvFbHead.setTextSize(14f);
+        tvFbHead.setTypeface(Typeface.DEFAULT_BOLD);
+        tvFbHead.setTextColor(0xFF38BDF8);
+        cardFeedback.addView(tvFbHead);
+
+        TextView tvFbDesc = new TextView(this);
+        tvFbDesc.setText("Vous avez rencontré un bug ou vous souhaitez suggérer une amélioration ? Faites-le nous savoir :");
+        tvFbDesc.setTextSize(11.5f);
+        tvFbDesc.setTextColor(0xFFCBD5E1);
+        tvFbDesc.setPadding(0, dpToPx(4), 0, dpToPx(12));
+        cardFeedback.addView(tvFbDesc);
+
+        LinearLayout fbButtonsRow = new LinearLayout(this);
+        fbButtonsRow.setOrientation(LinearLayout.HORIZONTAL);
+
+        TextView btnGithubIssues = createDialogActionButton("🐞 GitHub Issues", 0xFF334155, v -> openWebUrl("https://github.com/heyhacene/keotv/issues"));
+        LinearLayout.LayoutParams ghLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+        ghLp.setMarginEnd(dpToPx(8));
+        fbButtonsRow.addView(btnGithubIssues, ghLp);
+
+        TextView btnEmail = createDialogActionButton("📧 Par Email", 0xFF047857, v -> {
+            try {
+                Intent emailIntent = new Intent(Intent.ACTION_SENDTO);
+                emailIntent.setData(Uri.parse("mailto:heyhacene@gmail.com"));
+                emailIntent.putExtra(Intent.EXTRA_SUBJECT, "[KeoTV Android] Retour & Suggestions");
+                startActivity(Intent.createChooser(emailIntent, "Envoyer un email"));
+            } catch (Exception e) {
+                openWebUrl("mailto:heyhacene@gmail.com");
+            }
+        });
+        LinearLayout.LayoutParams emLp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+        fbButtonsRow.addView(btnEmail, emLp);
+
+        cardFeedback.addView(fbButtonsRow);
+        content.addView(cardFeedback);
+
+        sv.addView(content);
+        root.addView(sv, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f));
+
+        final AlertDialog dialog = builder.setView(root).create();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
+
+        // Bottom Close button
+        TextView btnClose = new TextView(this);
+        btnClose.setText("Fermer");
+        btnClose.setTextSize(13f);
+        btnClose.setTypeface(Typeface.DEFAULT_BOLD);
+        btnClose.setTextColor(0xFF94A3B8);
+        btnClose.setGravity(Gravity.CENTER);
+        btnClose.setPadding(dpToPx(16), dpToPx(10), dpToPx(16), dpToPx(10));
+        btnClose.setFocusable(true);
+        GradientDrawable closeBg = new GradientDrawable();
+        closeBg.setColor(0xFF1E293B);
+        closeBg.setCornerRadius(dpToPx(8));
+        btnClose.setBackground(closeBg);
+        btnClose.setOnClickListener(v -> dialog.dismiss());
+        btnClose.setOnFocusChangeListener((v, hasFocus) -> {
+            GradientDrawable d = (GradientDrawable) btnClose.getBackground();
+            if (hasFocus) {
+                d.setColor(0xFF334155);
+                d.setStroke(dpToPx(2), Color.WHITE);
+                btnClose.setTextColor(Color.WHITE);
+            } else {
+                d.setColor(0xFF1E293B);
+                d.setStroke(0, Color.TRANSPARENT);
+                btnClose.setTextColor(0xFF94A3B8);
+            }
+        });
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        closeLp.topMargin = dpToPx(12);
+        root.addView(btnClose, closeLp);
+
+        dialog.show();
+    }
+
+    private TextView createDialogActionButton(String label, int bgColor, View.OnClickListener onClick) {
+        final TextView btn = new TextView(this);
+        btn.setText(label);
+        btn.setTextSize(11.5f);
+        btn.setTypeface(Typeface.DEFAULT_BOLD);
+        btn.setTextColor(Color.WHITE);
+        btn.setGravity(Gravity.CENTER);
+        btn.setPadding(dpToPx(12), dpToPx(8), dpToPx(12), dpToPx(8));
+        btn.setFocusable(true);
+        btn.setFocusableInTouchMode(true);
+
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(bgColor);
+        bg.setCornerRadius(dpToPx(8));
+        btn.setBackground(bg);
+        btn.setOnClickListener(onClick);
+
+        btn.setOnFocusChangeListener((v, hasFocus) -> {
+            GradientDrawable d = (GradientDrawable) btn.getBackground();
+            if (hasFocus) {
+                d.setStroke(dpToPx(2), Color.WHITE);
+                btn.setScaleX(1.05f);
+                btn.setScaleY(1.05f);
+            } else {
+                d.setStroke(0, Color.TRANSPARENT);
+                btn.setScaleX(1.0f);
+                btn.setScaleY(1.0f);
+            }
+        });
+        btn.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)) {
+                btn.performClick();
+                return true;
+            }
+            return false;
+        });
+        return btn;
     }
 
     private void showParentalControlDialog() {
@@ -3693,11 +4442,23 @@ public class MainActivity extends AppCompatActivity {
                     holder.tvEpgPast.setOnKeyListener((v, keyCode, event) -> {
                         if (event.getAction() == KeyEvent.ACTION_DOWN) {
                             if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                                holder.itemView.requestFocus();
+                                focusCategoriesList();
                                 return true;
                             } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
                                 if (holder.tvEpgNow != null) {
                                     holder.tvEpgNow.requestFocus();
+                                    return true;
+                                }
+                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                                int p = holder.getBindingAdapterPosition();
+                                if (p > 0) {
+                                    focusRecyclerViewItem(recyclerChannels, p - 1);
+                                    return true;
+                                }
+                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                                int p = holder.getBindingAdapterPosition();
+                                if (p < items.size() - 1) {
+                                    focusRecyclerViewItem(recyclerChannels, p + 1);
                                     return true;
                                 }
                             }
@@ -3709,13 +4470,35 @@ public class MainActivity extends AppCompatActivity {
                     holder.tvEpgNow.setOnKeyListener((v, keyCode, event) -> {
                         if (event.getAction() == KeyEvent.ACTION_DOWN) {
                             if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                                if (event.getRepeatCount() == 1 || (event.getEventTime() - event.getDownTime() >= 350)) {
+                                    showCatchupDialog(item);
+                                    return true;
+                                }
+                                if (event.getRepeatCount() > 1) return true;
                                 if (holder.tvEpgPast != null) {
                                     holder.tvEpgPast.requestFocus();
                                     return true;
                                 }
                             } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                                if (event.getRepeatCount() == 1 || (event.getEventTime() - event.getDownTime() >= 350)) {
+                                    showFutureEpgDialog(item);
+                                    return true;
+                                }
+                                if (event.getRepeatCount() > 1) return true;
                                 if (holder.tvEpgNext != null) {
                                     holder.tvEpgNext.requestFocus();
+                                    return true;
+                                }
+                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                                int p = holder.getBindingAdapterPosition();
+                                if (p > 0) {
+                                    focusRecyclerViewItem(recyclerChannels, p - 1);
+                                    return true;
+                                }
+                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                                int p = holder.getBindingAdapterPosition();
+                                if (p < items.size() - 1) {
+                                    focusRecyclerViewItem(recyclerChannels, p + 1);
                                     return true;
                                 }
                             }
@@ -3723,19 +4506,24 @@ public class MainActivity extends AppCompatActivity {
                         return false;
                     });
 
-                    holder.tvEpgNext.setOnClickListener(v -> {
-                        String next = epgNextTitleCache.get(item.id);
-                        if (next != null && !next.isEmpty()) {
-                            Toast.makeText(MainActivity.this, "À suivre sur " + item.name + " : " + next, Toast.LENGTH_LONG).show();
-                        } else {
-                            Toast.makeText(MainActivity.this, "Prochain programme : " + item.name, Toast.LENGTH_SHORT).show();
-                        }
-                    });
+                    holder.tvEpgNext.setOnClickListener(v -> showFutureEpgDialog(item));
                     holder.tvEpgNext.setOnKeyListener((v, keyCode, event) -> {
                         if (event.getAction() == KeyEvent.ACTION_DOWN) {
                             if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                                 if (holder.tvEpgNow != null) {
                                     holder.tvEpgNow.requestFocus();
+                                    return true;
+                                }
+                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                                int p = holder.getBindingAdapterPosition();
+                                if (p > 0) {
+                                    focusRecyclerViewItem(recyclerChannels, p - 1);
+                                    return true;
+                                }
+                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                                int p = holder.getBindingAdapterPosition();
+                                if (p < items.size() - 1) {
+                                    focusRecyclerViewItem(recyclerChannels, p + 1);
                                     return true;
                                 }
                             }
@@ -3830,6 +4618,11 @@ public class MainActivity extends AppCompatActivity {
                     if (event.getAction() == KeyEvent.ACTION_DOWN) {
                         int pos = holder.getBindingAdapterPosition();
                         if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                            if (event.getRepeatCount() == 1 || (event.getEventTime() - event.getDownTime() >= 350)) {
+                                showCatchupDialog(item);
+                                return true;
+                            }
+                            if (event.getRepeatCount() > 1) return true;
                             focusCategoriesList();
                             return true;
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP && pos == 0) {
@@ -3838,6 +4631,11 @@ public class MainActivity extends AppCompatActivity {
                                 return true;
                             }
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                            if (event.getRepeatCount() == 1 || (event.getEventTime() - event.getDownTime() >= 350)) {
+                                showFutureEpgDialog(item);
+                                return true;
+                            }
+                            if (event.getRepeatCount() > 1) return true;
                             if (holder.layoutEpgTimeline != null && holder.layoutEpgTimeline.getVisibility() == View.VISIBLE) {
                                 if (holder.tvEpgNow != null && holder.tvEpgNow.isShown()) {
                                     holder.tvEpgNow.requestFocus();

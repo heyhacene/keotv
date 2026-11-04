@@ -3,11 +3,13 @@ package fr.keo.tv;
 import android.app.UiModeManager;
 import android.content.Context;
 import android.content.pm.ActivityInfo;
+import android.content.res.ColorStateList;
 import android.content.res.Configuration;
 import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -25,6 +27,7 @@ import android.graphics.drawable.LayerDrawable;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
 import android.widget.TextView;
@@ -204,6 +207,8 @@ public class PlayerActivity extends AppCompatActivity {
     private TextView zapFeedbackTitle;
     private TextView zapFeedbackSub;
     private final Handler zapHandler = new Handler(Looper.getMainLooper());
+
+    private ProgressBar loadingProgressBar;
 
     private GestureDetector gestureDetector;
     private int currentResizeModeIndex = 0;
@@ -1106,6 +1111,16 @@ public class PlayerActivity extends AppCompatActivity {
         errParams.setMargins(dp(24), 0, dp(24), 0);
         root.addView(errorView, errParams);
 
+        // Center Buffering Spinner (Cyan glow)
+        loadingProgressBar = new ProgressBar(this);
+        loadingProgressBar.setIndeterminate(true);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            loadingProgressBar.setIndeterminateTintList(ColorStateList.valueOf(0xFF38BDF8));
+        }
+        FrameLayout.LayoutParams pbParams = new FrameLayout.LayoutParams(
+                dp(56), dp(56), Gravity.CENTER);
+        root.addView(loadingProgressBar, pbParams);
+
         setContentView(root);
 
         // Gesture detector for single tap (toggle OSD) and swipe gestures (zapping channels / seek)
@@ -1127,8 +1142,8 @@ public class PlayerActivity extends AppCompatActivity {
                 float diffY = e2.getY() - e1.getY();
                 float diffX = e2.getX() - e1.getX();
 
-                // Swipe vertical: changement de chaîne (haut = suivante, bas = précédente)
-                if (Math.abs(diffY) > Math.abs(diffX) && Math.abs(diffY) > dp(35)) {
+                // Swipe vertical: changement de chaîne STRICTEMENT en Live TV (jamais en Replay ni VOD)
+                if (isLive && !isReplayCascade && Math.abs(diffY) > Math.abs(diffX) && Math.abs(diffY) > dp(35)) {
                     if (diffY < 0) {
                         zapNextChannel();
                     } else {
@@ -1137,7 +1152,7 @@ public class PlayerActivity extends AppCompatActivity {
                     return true;
                 }
 
-                // Swipe horizontal pour VOD: avance/retour rapide 10s
+                // Swipe horizontal pour VOD et Replay: avance/retour rapide 10s
                 if (!isLive && Math.abs(diffX) > Math.abs(diffY) && Math.abs(diffX) > dp(45)) {
                     if (diffX > 0) {
                         seekRelative(10000);
@@ -1276,9 +1291,13 @@ public class PlayerActivity extends AppCompatActivity {
 
             @Override
             public void onPlaybackStateChanged(int playbackState) {
-                if (playbackState == Player.STATE_READY) {
+                if (playbackState == Player.STATE_BUFFERING) {
+                    if (loadingProgressBar != null) loadingProgressBar.setVisibility(View.VISIBLE);
+                } else if (playbackState == Player.STATE_READY) {
+                    if (loadingProgressBar != null) loadingProgressBar.setVisibility(View.GONE);
                     errorView.setVisibility(View.GONE);
                 } else if (playbackState == Player.STATE_ENDED) {
+                    if (loadingProgressBar != null) loadingProgressBar.setVisibility(View.GONE);
                     // Mark current item as completed (100%)
                     saveCurrentPlaybackPosition(true);
                     // Auto-advance to next episode if available and not dismissed
@@ -1290,12 +1309,14 @@ public class PlayerActivity extends AppCompatActivity {
 
             @Override
             public void onPlayerError(PlaybackException error) {
+                if (loadingProgressBar != null) loadingProgressBar.setVisibility(View.GONE);
                 handlePlayerError(error);
             }
 
             @Override
             public void onTracksChanged(Tracks tracks) {
                 updateTrackButtonLabels(tracks);
+                applyExactTrackOverridesIfSaved(tracks);
             }
         };
         player.addListener(playerListener);
@@ -1412,6 +1433,17 @@ public class PlayerActivity extends AppCompatActivity {
         } catch (Exception ignored) {}
     }
 
+    private String getCurrentPlayingUrl() {
+        if (player == null) return "";
+        try {
+            int idx = player.getCurrentMediaItemIndex();
+            if (idx >= 0 && idx < pendingUrls.size()) {
+                return pendingUrls.get(idx);
+            }
+        } catch (Exception ignored) {}
+        return "";
+    }
+
     private void applyLanguagePreferences() {
         if (player == null) return;
         SharedPreferences prefs = getSharedPreferences("keotv_series_prefs", Context.MODE_PRIVATE);
@@ -1419,17 +1451,32 @@ public class PlayerActivity extends AppCompatActivity {
         String audioPref = pendingPreferredAudio;
         String subPref = pendingPreferredSubtitle;
 
+        // Series persistence: applies across ALL episodes of the series!
         if (pendingSeriesId != null && !pendingSeriesId.isEmpty()) {
             if (audioPref != null && !audioPref.isEmpty()) {
                 prefs.edit().putString("audio_" + pendingSeriesId, audioPref).apply();
             } else {
-                audioPref = prefs.getString("audio_" + pendingSeriesId, null);
+                audioPref = prefs.getString("audio_" + pendingSeriesId, prefs.getString("global_series_audio", null));
             }
 
             if (subPref != null && !subPref.isEmpty()) {
                 prefs.edit().putString("sub_" + pendingSeriesId, subPref).apply();
             } else {
-                subPref = prefs.getString("sub_" + pendingSeriesId, null);
+                subPref = prefs.getString("sub_" + pendingSeriesId, prefs.getString("global_series_sub", null));
+            }
+        } else if (!isLive) {
+            // VOD Movie persistence: saved per movie URL / stream
+            String curUrl = getCurrentPlayingUrl();
+            if (audioPref != null && !audioPref.isEmpty()) {
+                if (!curUrl.isEmpty()) prefs.edit().putString("vod_audio_" + curUrl, audioPref).apply();
+            } else if (!curUrl.isEmpty()) {
+                audioPref = prefs.getString("vod_audio_" + curUrl, prefs.getString("global_vod_audio", null));
+            }
+
+            if (subPref != null && !subPref.isEmpty()) {
+                if (!curUrl.isEmpty()) prefs.edit().putString("vod_sub_" + curUrl, subPref).apply();
+            } else if (!curUrl.isEmpty()) {
+                subPref = prefs.getString("vod_sub_" + curUrl, prefs.getString("global_vod_sub", null));
             }
         }
 
@@ -1439,8 +1486,10 @@ public class PlayerActivity extends AppCompatActivity {
             String lower = audioPref.trim().toLowerCase();
             if (lower.contains("vf") || lower.contains("fr")) {
                 builder.setPreferredAudioLanguages("fra", "fre", "fr");
-            } else if (lower.contains("vo") || lower.contains("en")) {
-                builder.setPreferredAudioLanguages("eng", "en", "original");
+            } else if (lower.contains("vo") || lower.contains("en") || lower.contains("eng")) {
+                builder.setPreferredAudioLanguages("eng", "en", "original", "und");
+            } else {
+                builder.setPreferredAudioLanguages(lower);
             }
         }
 
@@ -1455,10 +1504,99 @@ public class PlayerActivity extends AppCompatActivity {
             } else if (lower.contains("en")) {
                 builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false);
                 builder.setPreferredTextLanguages("eng", "en");
+            } else {
+                builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false);
+                builder.setPreferredTextLanguages(lower);
             }
         }
 
         player.setTrackSelectionParameters(builder.build());
+    }
+
+    private void applyExactTrackOverridesIfSaved(Tracks tracks) {
+        if (player == null || tracks == null || isLive) return;
+        SharedPreferences prefs = getSharedPreferences("keotv_series_prefs", Context.MODE_PRIVATE);
+
+        String audioPref = null;
+        String subPref = null;
+
+        if (pendingSeriesId != null && !pendingSeriesId.isEmpty()) {
+            audioPref = prefs.getString("audio_" + pendingSeriesId, prefs.getString("global_series_audio", null));
+            subPref = prefs.getString("sub_" + pendingSeriesId, prefs.getString("global_series_sub", null));
+        } else {
+            String curUrl = getCurrentPlayingUrl();
+            if (!curUrl.isEmpty()) {
+                audioPref = prefs.getString("vod_audio_" + curUrl, prefs.getString("global_vod_audio", null));
+                subPref = prefs.getString("vod_sub_" + curUrl, prefs.getString("global_vod_sub", null));
+            }
+        }
+
+        TrackSelectionParameters.Builder builder = player.getTrackSelectionParameters().buildUpon();
+        boolean changed = false;
+
+        // Apply audio override if an exact matching track is found and not currently selected
+        if (audioPref != null && !audioPref.isEmpty()) {
+            String lower = audioPref.toLowerCase();
+            for (Tracks.Group group : tracks.getGroups()) {
+                if (group.getType() == C.TRACK_TYPE_AUDIO) {
+                    for (int i = 0; i < group.length; i++) {
+                        Format f = group.getTrackFormat(i);
+                        String lang = f.language != null ? f.language.toLowerCase() : "";
+                        String label = f.label != null ? f.label.toLowerCase() : "";
+                        boolean matches = (!lang.isEmpty() && (lang.contains(lower) || lower.contains(lang))) ||
+                                          (!label.isEmpty() && (label.contains(lower) || lower.contains(label)));
+                        if ((lower.contains("vo") || lower.contains("en")) && (lang.contains("en") || lang.contains("eng") || label.contains("eng") || label.contains("english"))) {
+                            matches = true;
+                        } else if ((lower.contains("vf") || lower.contains("fr")) && (lang.contains("fr") || lang.contains("fre") || lang.contains("fra") || label.contains("french") || label.contains("francais"))) {
+                            matches = true;
+                        }
+                        if (matches && !group.isTrackSelected(i)) {
+                            builder.setOverrideForType(new TrackSelectionOverride(group.getMediaTrackGroup(), Collections.singletonList(i)));
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Apply subtitles override
+        if (subPref != null && !subPref.isEmpty()) {
+            String lower = subPref.toLowerCase();
+            if (lower.equals("off") || lower.equals("none") || lower.equals("sans")) {
+                if (!player.getTrackSelectionParameters().disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) {
+                    builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true);
+                    changed = true;
+                }
+            } else {
+                builder.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false);
+                for (Tracks.Group group : tracks.getGroups()) {
+                    if (group.getType() == C.TRACK_TYPE_TEXT) {
+                        for (int i = 0; i < group.length; i++) {
+                            Format f = group.getTrackFormat(i);
+                            String lang = f.language != null ? f.language.toLowerCase() : "";
+                            String label = f.label != null ? f.label.toLowerCase() : "";
+                            boolean matches = (!lang.isEmpty() && (lang.contains(lower) || lower.contains(lang))) ||
+                                              (!label.isEmpty() && (label.contains(lower) || lower.contains(label)));
+                            if (lower.contains("fr") && (lang.contains("fr") || lang.contains("fra") || lang.contains("fre") || label.contains("french") || label.contains("francais"))) {
+                                matches = true;
+                            } else if (lower.contains("en") && (lang.contains("en") || lang.contains("eng") || label.contains("english"))) {
+                                matches = true;
+                            }
+                            if (matches && !group.isTrackSelected(i)) {
+                                builder.setOverrideForType(new TrackSelectionOverride(group.getMediaTrackGroup(), Collections.singletonList(i)));
+                                changed = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (changed) {
+            player.setTrackSelectionParameters(builder.build());
+        }
     }
 
     private void checkPlaybackProgress() {
@@ -1900,6 +2038,7 @@ public class PlayerActivity extends AppCompatActivity {
                 }
             }
             if (isReplayFallbackList) {
+                showZapFeedback("Replay", "Essai format " + (index + 2) + "/" + player.getMediaItemCount() + "...");
                 player.seekToDefaultPosition(index + 1);
                 player.prepare();
                 player.play();
@@ -2078,8 +2217,8 @@ public class PlayerActivity extends AppCompatActivity {
                 }
             }
 
-            // 5. LIVE TV D-PAD NAVIGATION (Up/Down always zap channels seamlessly)
-            if (isLive) {
+            // 5. LIVE TV D-PAD NAVIGATION (Up/Down always zap channels seamlessly, STRICTLY when live)
+            if (isLive && !isReplayCascade) {
                 if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_CHANNEL_UP || key == KeyEvent.KEYCODE_PAGE_UP) {
                     zapNextChannel();
                     return true;
@@ -2090,8 +2229,12 @@ public class PlayerActivity extends AppCompatActivity {
                 }
             }
 
-            // 6. VOD / SERIES / REPLAY NAVIGATION
-            if (!isLive) {
+            // 6. VOD / SERIES / REPLAY NAVIGATION (Never zap channels!)
+            if (!isLive || isReplayCascade) {
+                if (key == KeyEvent.KEYCODE_CHANNEL_UP || key == KeyEvent.KEYCODE_CHANNEL_DOWN ||
+                        key == KeyEvent.KEYCODE_PAGE_UP || key == KeyEvent.KEYCODE_PAGE_DOWN) {
+                    return true; // Strictly consume & ignore channel zapping keys
+                }
                 if (!isOsdVisible()) {
                     if (key == KeyEvent.KEYCODE_MEDIA_FAST_FORWARD || key == KeyEvent.KEYCODE_DPAD_RIGHT) {
                         seekRelative(10000);
@@ -2162,7 +2305,7 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private void zapChannel(int direction) {
-        if (player == null) return;
+        if (player == null || !isLive || isReplayCascade) return;
         int total = player.getMediaItemCount();
         if (total <= 1) {
             String chName = (titleView != null && !TextUtils.isEmpty(titleView.getText()))
@@ -2625,6 +2768,11 @@ public class PlayerActivity extends AppCompatActivity {
         showStyledTrackSelectionDialog("🔊 Pistes Audio", "Sélectionnez votre langue audio :", trackNames, selectedIndex, which -> {
             Tracks.Group chosenGroup = audioGroups.get(which);
             int trackIdx = trackIndices.get(which);
+            Format format = chosenGroup.getTrackFormat(trackIdx);
+            String lang = format.language != null ? format.language : "";
+            String label = format.label != null ? format.label : "";
+            String saveVal = !lang.isEmpty() ? lang : label;
+
             player.setTrackSelectionParameters(
                     player.getTrackSelectionParameters()
                             .buildUpon()
@@ -2632,6 +2780,21 @@ public class PlayerActivity extends AppCompatActivity {
                                     chosenGroup.getMediaTrackGroup(), Collections.singletonList(trackIdx)))
                             .build()
             );
+
+            // Persist preference for this series or movie
+            SharedPreferences p = getSharedPreferences("keotv_series_prefs", Context.MODE_PRIVATE);
+            if (pendingSeriesId != null && !pendingSeriesId.isEmpty()) {
+                p.edit().putString("audio_" + pendingSeriesId, saveVal)
+                        .putString("global_series_audio", saveVal)
+                        .apply();
+            } else if (!isLive) {
+                String curUrl = getCurrentPlayingUrl();
+                if (!curUrl.isEmpty()) {
+                    p.edit().putString("vod_audio_" + curUrl, saveVal).apply();
+                }
+                p.edit().putString("global_vod_audio", saveVal).apply();
+            }
+
             updateTrackButtonLabels(player.getCurrentTracks());
             showZapFeedback("🔊 Piste audio", trackNames.get(which));
         });
@@ -2670,6 +2833,9 @@ public class PlayerActivity extends AppCompatActivity {
         }
 
         showStyledTrackSelectionDialog("💬 Sous-titres", "Sélectionnez vos sous-titres :", trackNames, selectedIndex, which -> {
+            SharedPreferences p = getSharedPreferences("keotv_series_prefs", Context.MODE_PRIVATE);
+            String curUrl = getCurrentPlayingUrl();
+
             if (which == 0) {
                 player.setTrackSelectionParameters(
                         player.getTrackSelectionParameters()
@@ -2677,11 +2843,26 @@ public class PlayerActivity extends AppCompatActivity {
                                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
                                 .build()
                 );
+                if (pendingSeriesId != null && !pendingSeriesId.isEmpty()) {
+                    p.edit().putString("sub_" + pendingSeriesId, "off")
+                            .putString("global_series_sub", "off")
+                            .apply();
+                } else if (!isLive) {
+                    if (!curUrl.isEmpty()) {
+                        p.edit().putString("vod_sub_" + curUrl, "off").apply();
+                    }
+                    p.edit().putString("global_vod_sub", "off").apply();
+                }
                 updateTrackButtonLabels(player.getCurrentTracks());
                 showZapFeedback("💬 Sous-titres", "Désactivés");
             } else {
                 Tracks.Group chosenGroup = textGroups.get(which);
                 int trackIdx = trackIndices.get(which);
+                Format format = chosenGroup.getTrackFormat(trackIdx);
+                String lang = format.language != null ? format.language : "";
+                String label = format.label != null ? format.label : "";
+                String saveVal = !lang.isEmpty() ? lang : label;
+
                 player.setTrackSelectionParameters(
                         player.getTrackSelectionParameters()
                                 .buildUpon()
@@ -2690,6 +2871,17 @@ public class PlayerActivity extends AppCompatActivity {
                                         chosenGroup.getMediaTrackGroup(), Collections.singletonList(trackIdx)))
                                 .build()
                 );
+                if (pendingSeriesId != null && !pendingSeriesId.isEmpty()) {
+                    p.edit().putString("sub_" + pendingSeriesId, saveVal)
+                            .putString("global_series_sub", saveVal)
+                            .apply();
+                } else if (!isLive) {
+                    if (!curUrl.isEmpty()) {
+                        p.edit().putString("vod_sub_" + curUrl, saveVal).apply();
+                    }
+                    p.edit().putString("global_vod_sub", saveVal).apply();
+                }
+
                 updateTrackButtonLabels(player.getCurrentTracks());
                 showZapFeedback("💬 Sous-titres", trackNames.get(which));
             }
