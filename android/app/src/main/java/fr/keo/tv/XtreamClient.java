@@ -792,7 +792,7 @@ public class XtreamClient {
     }
 
     public static void fetchShortEpg(String serverUrl, String username, String password, String streamId, int limit, EpgCallback callback) {
-        fetchShortEpg(null, serverUrl, username, password, streamId, callback);
+        fetchShortEpg(null, serverUrl, username, password, streamId, limit, callback);
     }
 
     public static void fetchCatchupPrograms(String serverUrl, String username, String password, String streamId, int limit, CatchupCallback callback) {
@@ -800,6 +800,10 @@ public class XtreamClient {
     }
 
     public static void fetchShortEpg(final Context context, final String serverUrl, final String username, final String password, final String streamId, final EpgCallback callback) {
+        fetchShortEpg(context, serverUrl, username, password, streamId, 12, callback);
+    }
+
+    public static void fetchShortEpg(final Context context, final String serverUrl, final String username, final String password, final String streamId, final int limit, final EpgCallback callback) {
         if (streamId == null || streamId.isEmpty() || serverUrl == null) {
             if (callback != null) callback.onError("Paramètres EPG manquants");
             return;
@@ -810,7 +814,8 @@ public class XtreamClient {
                 String encUser = URLEncoder.encode(username != null ? username : "", "UTF-8");
                 String encPass = URLEncoder.encode(password != null ? password : "", "UTF-8");
                 String server = serverUrl.replaceAll("/+$", "");
-                String epgUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_short_epg&stream_id=" + streamId + "&limit=10";
+                int safeLimit = limit > 0 ? limit : 12;
+                String epgUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_short_epg&stream_id=" + streamId + "&limit=" + safeLimit;
 
                 String jsonStr = fetchUrl(epgUrl);
                 JsonObject root = JsonParser.parseString(jsonStr).getAsJsonObject();

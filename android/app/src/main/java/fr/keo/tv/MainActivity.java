@@ -19,6 +19,7 @@ import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.util.DisplayMetrics;
 import android.util.Log;
+import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
@@ -26,8 +27,10 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -132,10 +135,21 @@ public class MainActivity extends AppCompatActivity {
     private final Map<String, String> epgCurrentTitleCache = new ConcurrentHashMap<>();
     private final Map<String, String> epgNextTitleCache = new ConcurrentHashMap<>();
     private final Map<String, String> epgPastTitleCache = new ConcurrentHashMap<>();
+    private final Map<String, List<XtreamClient.EpgProgram>> epgProgramsCache = new ConcurrentHashMap<>();
+    private final Map<String, XtreamClient.EpgProgram> epgCurrentProgramCache = new ConcurrentHashMap<>();
     private Runnable epgDebounceRunnable;
 
     private CategoriesAdapter categoriesAdapter;
     private ChannelsAdapter channelsAdapter;
+
+    // TiviMate Live EPG Hero views
+    private ImageView ivLiveHeroLogo;
+    private TextView tvLiveHeroRes;
+    private TextView tvLiveHeroBadge;
+    private TextView tvLiveHeroTitle;
+    private TextView tvLiveHeroTime;
+    private ProgressBar pbLiveHeroProgress;
+    private TextView tvLiveHeroDesc;
 
     // TiviMate VOD Hero & Grid views
     private View layoutVodHero;
@@ -304,6 +318,15 @@ public class MainActivity extends AppCompatActivity {
         panelBouquets = findViewById(R.id.panel_bouquets);
         sidebar = findViewById(R.id.sidebar);
         headerBar = findViewById(R.id.header_bar);
+
+        // TiviMate Live EPG Hero Header views
+        ivLiveHeroLogo = findViewById(R.id.iv_live_hero_logo);
+        tvLiveHeroRes = findViewById(R.id.tv_live_hero_res);
+        tvLiveHeroBadge = findViewById(R.id.tv_live_hero_badge);
+        tvLiveHeroTitle = findViewById(R.id.tv_live_hero_title);
+        tvLiveHeroTime = findViewById(R.id.tv_live_hero_time);
+        pbLiveHeroProgress = findViewById(R.id.pb_live_hero_progress);
+        tvLiveHeroDesc = findViewById(R.id.tv_live_hero_desc);
 
         ivVodHeroBackdrop = findViewById(R.id.iv_vod_hero_backdrop);
         tvVodHeroTitle = findViewById(R.id.tv_vod_hero_title);
@@ -836,6 +859,13 @@ public class MainActivity extends AppCompatActivity {
 
         rv.post(() -> {
             RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(targetPos);
+            if (vh instanceof ChannelsAdapter.ViewHolder) {
+                ChannelsAdapter.ViewHolder cvh = (ChannelsAdapter.ViewHolder) vh;
+                if (!cvh.isVod && cvh.defaultFocusView != null && cvh.defaultFocusView.isShown()) {
+                    cvh.defaultFocusView.requestFocus();
+                    return;
+                }
+            }
             if (vh != null && vh.itemView != null) {
                 vh.itemView.requestFocus();
             } else {
@@ -1238,6 +1268,11 @@ public class MainActivity extends AppCompatActivity {
             btnReplay.setVisibility(ch.tvArchive == 1 ? View.VISIBLE : View.GONE);
         }
 
+        if ("live".equals(ch.streamType) || "replay".equals(ch.streamType) || "live".equals(currentType) || "replay".equals(currentType)) {
+            XtreamClient.EpgProgram curProg = epgCurrentProgramCache.get(ch.id);
+            updateLiveHeroBanner(ch, curProg, false, true, false);
+        }
+
         // Asynchronously fetch short EPG for live channel with 300ms debounce
         if ("live".equals(ch.streamType) || "replay".equals(ch.streamType)) {
             if (epgDebounceRunnable != null) {
@@ -1253,12 +1288,16 @@ public class MainActivity extends AppCompatActivity {
         KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
         if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) return;
 
-        xtreamClient.fetchShortEpg(pl.serverUrl, pl.username, pl.password, ch.streamId, 3, new XtreamClient.EpgCallback() {
+        xtreamClient.fetchShortEpg(pl.serverUrl, pl.username, pl.password, ch.streamId, 12, new XtreamClient.EpgCallback() {
             @Override
             public void onSuccess(List<XtreamClient.EpgProgram> programs, XtreamClient.EpgProgram current, XtreamClient.EpgProgram next) {
                 if (isFinishing() || isDestroyed()) return;
+                if (programs != null && !programs.isEmpty()) {
+                    epgProgramsCache.put(ch.id, programs);
+                }
                 if (current != null && current.title != null && !current.title.isEmpty()) {
                     epgCurrentTitleCache.put(ch.id, current.title);
+                    epgCurrentProgramCache.put(ch.id, current);
                 }
                 if (next != null && next.title != null && !next.title.isEmpty()) {
                     epgNextTitleCache.put(ch.id, next.title);
@@ -1277,22 +1316,17 @@ public class MainActivity extends AppCompatActivity {
                     if (tvDetailEpg != null && current != null) {
                         tvDetailEpg.setText("🔴 " + current.title + (next != null ? "  |  ⏭️ " + next.title : ""));
                     }
-                    if (recyclerChannels != null && channelsAdapter != null) {
-                        int pos = channelsAdapter.getPositionForId(ch.id);
-                        if (pos != -1) {
-                            RecyclerView.ViewHolder vh = recyclerChannels.findViewHolderForAdapterPosition(pos);
-                            if (vh instanceof ChannelsAdapter.ViewHolder) {
-                                ChannelsAdapter.ViewHolder cvh = (ChannelsAdapter.ViewHolder) vh;
-                                if (cvh.tvEpgNow != null && current != null) {
-                                    cvh.tvEpgNow.setText("🔴 " + current.title);
-                                }
-                                if (cvh.tvEpgNext != null && next != null) {
-                                    cvh.tvEpgNext.setText("⏭️ " + next.title);
-                                }
-                                String past = epgPastTitleCache.get(ch.id);
-                                if (cvh.tvEpgPast != null && past != null) {
-                                    cvh.tvEpgPast.setText("◄ " + past);
-                                }
+                    updateLiveHeroBanner(ch, current, false, true, false);
+                }
+
+                if (recyclerChannels != null && channelsAdapter != null) {
+                    int pos = channelsAdapter.getPositionForId(ch.id);
+                    if (pos != -1) {
+                        RecyclerView.ViewHolder vh = recyclerChannels.findViewHolderForAdapterPosition(pos);
+                        if (vh instanceof ChannelsAdapter.ViewHolder) {
+                            ChannelsAdapter.ViewHolder cvh = (ChannelsAdapter.ViewHolder) vh;
+                            if (!cvh.isVod && programs != null && !programs.isEmpty()) {
+                                populateTimelineRibbon(cvh, ch, programs);
                             }
                         }
                     }
@@ -1303,6 +1337,374 @@ public class MainActivity extends AppCompatActivity {
             public void onError(String error) {
                 // Silently ignore background EPG failures
             }
+        });
+    }
+
+    private void updateLiveHeroBanner(KeoDatabase.ChannelItem ch, XtreamClient.EpgProgram prog, boolean isPast, boolean isCurrent, boolean isFuture) {
+        if (ch == null) return;
+
+        if (tvChannelsHeader != null) {
+            String chNum = "";
+            if (channelsAdapter != null) {
+                int pos = channelsAdapter.getPositionForId(ch.id);
+                if (pos != -1) chNum = (pos + 1) + " • ";
+            }
+            tvChannelsHeader.setText(chNum + ch.name);
+        }
+
+        if (ivLiveHeroLogo != null) {
+            if (ch.logo != null && !ch.logo.trim().isEmpty()) {
+                ivLiveHeroLogo.setVisibility(View.VISIBLE);
+                ImageLoader.load(this, ch.logo, ivLiveHeroLogo);
+            } else {
+                ivLiveHeroLogo.setVisibility(View.GONE);
+            }
+        }
+
+        if (tvLiveHeroRes != null) {
+            String res = ch.resolution != null && !ch.resolution.isEmpty() ? ch.resolution : "HD";
+            tvLiveHeroRes.setText(res);
+            tvLiveHeroRes.setVisibility(View.VISIBLE);
+        }
+
+        if (tvLiveHeroBadge != null) {
+            if (isCurrent) {
+                tvLiveHeroBadge.setText("🔴 EN DIRECT");
+                tvLiveHeroBadge.setTextColor(0xFF34D399);
+                tvLiveHeroBadge.setBackgroundColor(0xFF132E27);
+                tvLiveHeroBadge.setVisibility(View.VISIBLE);
+            } else if (isPast) {
+                if (ch.tvArchive == 1 || "replay".equals(currentType)) {
+                    tvLiveHeroBadge.setText("↺ REPLAY DISPONIBLE");
+                    tvLiveHeroBadge.setTextColor(0xFF38BDF8);
+                    tvLiveHeroBadge.setBackgroundColor(0xFF0F243A);
+                } else {
+                    tvLiveHeroBadge.setText("DIFFUSÉ");
+                    tvLiveHeroBadge.setTextColor(0xFF94A3B8);
+                    tvLiveHeroBadge.setBackgroundColor(0xFF1E293B);
+                }
+                tvLiveHeroBadge.setVisibility(View.VISIBLE);
+            } else if (isFuture) {
+                tvLiveHeroBadge.setText("⏭️ PROCHAINEMENT");
+                tvLiveHeroBadge.setTextColor(0xFF94A3B8);
+                tvLiveHeroBadge.setBackgroundColor(0xFF1E293B);
+                tvLiveHeroBadge.setVisibility(View.VISIBLE);
+            } else {
+                tvLiveHeroBadge.setVisibility(View.GONE);
+            }
+        }
+
+        if (tvLiveHeroTitle != null) {
+            String title = (prog != null && prog.title != null && !prog.title.isEmpty()) ? prog.title : ch.name;
+            tvLiveHeroTitle.setText(title);
+        }
+
+        if (tvLiveHeroTime != null) {
+            if (prog != null && prog.getFormattedTime() != null) {
+                StringBuilder sb = new StringBuilder(prog.getFormattedTime());
+                if (prog.durationMinutes > 0) {
+                    sb.append(" • ").append(prog.durationMinutes).append(" min");
+                }
+                tvLiveHeroTime.setText(sb.toString());
+            } else {
+                tvLiveHeroTime.setText("");
+            }
+        }
+
+        if (pbLiveHeroProgress != null) {
+            if (isCurrent && prog != null && prog.stopMs > prog.startMs) {
+                long now = System.currentTimeMillis();
+                long total = prog.stopMs - prog.startMs;
+                int pct = (int) Math.max(0, Math.min(100, (now - prog.startMs) * 100 / total));
+                pbLiveHeroProgress.setProgress(pct);
+                pbLiveHeroProgress.setVisibility(View.VISIBLE);
+            } else {
+                pbLiveHeroProgress.setVisibility(View.GONE);
+            }
+        }
+
+        if (tvLiveHeroDesc != null) {
+            if (prog != null && prog.desc != null && !prog.desc.trim().isEmpty()) {
+                tvLiveHeroDesc.setText(prog.desc);
+            } else {
+                tvLiveHeroDesc.setText("Naviguez sur la timeline pour explorer les programmes en direct, passés (Replay) et futurs.");
+            }
+        }
+    }
+
+    private void showProgramDetailDialog(KeoDatabase.ChannelItem ch, XtreamClient.EpgProgram prog) {
+        if (isFinishing() || isDestroyed() || prog == null) return;
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setBackgroundColor(0xFF0F172A);
+        int pad = dpToPx(20);
+        root.setPadding(pad, pad, pad, pad);
+
+        TextView tvCh = new TextView(this);
+        tvCh.setText(ch != null ? "📺 " + ch.name : "Guide TV");
+        tvCh.setTextColor(0xFF38BDF8);
+        tvCh.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        tvCh.setTypeface(null, Typeface.BOLD);
+        root.addView(tvCh);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText(prog.title != null ? prog.title : "");
+        tvTitle.setTextColor(0xFFFFFFFF);
+        tvTitle.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
+        tvTitle.setTypeface(null, Typeface.BOLD);
+        tvTitle.setPadding(0, dpToPx(6), 0, 0);
+        root.addView(tvTitle);
+
+        TextView tvTime = new TextView(this);
+        String timeStr = prog.getFormattedTime();
+        if (prog.durationMinutes > 0) timeStr += " • " + prog.durationMinutes + " min";
+        tvTime.setText("🕒 " + timeStr);
+        tvTime.setTextColor(0xFF94A3B8);
+        tvTime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        tvTime.setPadding(0, dpToPx(4), 0, dpToPx(12));
+        root.addView(tvTime);
+
+        ScrollView sv = new ScrollView(this);
+        TextView tvDesc = new TextView(this);
+        tvDesc.setText(prog.desc != null && !prog.desc.isEmpty() ? prog.desc : "Aucune description détaillée disponible pour ce programme.");
+        tvDesc.setTextColor(0xFFCBD5E1);
+        tvDesc.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        tvDesc.setLineSpacing(dpToPx(2), 1.1f);
+        sv.addView(tvDesc);
+        LinearLayout.LayoutParams svLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1.0f);
+        root.addView(sv, svLp);
+
+        LinearLayout actions = new LinearLayout(this);
+        actions.setOrientation(LinearLayout.HORIZONTAL);
+        actions.setGravity(Gravity.END);
+        actions.setPadding(0, dpToPx(14), 0, 0);
+
+        Button btnClose = new Button(this);
+        btnClose.setText("Fermer");
+        btnClose.setTextColor(0xFFFFFFFF);
+        btnClose.setBackgroundResource(R.drawable.bg_button_selector);
+        btnClose.setFocusable(true);
+        actions.addView(btnClose);
+
+        root.addView(actions);
+
+        builder.setView(root);
+        AlertDialog dialog = builder.create();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
+        btnClose.setOnClickListener(v -> dialog.dismiss());
+        dialog.show();
+        btnClose.requestFocus();
+    }
+
+    private void populateTimelineRibbon(ChannelsAdapter.ViewHolder holder, KeoDatabase.ChannelItem item, List<XtreamClient.EpgProgram> progs) {
+        if (holder.layoutEpgSlots == null) return;
+        holder.layoutEpgSlots.removeAllViews();
+        holder.defaultFocusView = null;
+
+        long nowMs = System.currentTimeMillis();
+        LayoutInflater inflater = LayoutInflater.from(holder.itemView.getContext());
+
+        if (progs == null || progs.isEmpty()) {
+            fetchEpgForChannel(item);
+
+            // 1. Placeholder Past (if archive)
+            if (item.tvArchive == 1 || "replay".equals(currentType)) {
+                View pastCard = inflater.inflate(R.layout.item_epg_slot, holder.layoutEpgSlots, false);
+                TextView tvTime = pastCard.findViewById(R.id.tv_slot_time);
+                TextView tvTitle = pastCard.findViewById(R.id.tv_slot_title);
+                TextView tvBadge = pastCard.findViewById(R.id.tv_slot_badge);
+                tvTime.setText("Précédent");
+                tvTitle.setText("◄ Replay disponible");
+                tvBadge.setText("↺ REPLAY");
+                tvBadge.setTextColor(0xFF38BDF8);
+                tvBadge.setVisibility(View.VISIBLE);
+                pastCard.setOnClickListener(v -> showCatchupDialog(item));
+                wireSlotCard(holder, pastCard, item, null, true, false, false, 0, 2);
+                holder.layoutEpgSlots.addView(pastCard);
+            }
+
+            // 2. Placeholder Current
+            View nowCard = inflater.inflate(R.layout.item_epg_slot, holder.layoutEpgSlots, false);
+            nowCard.setBackgroundResource(R.drawable.bg_epg_now_selector);
+            TextView tvTime = nowCard.findViewById(R.id.tv_slot_time);
+            TextView tvTitle = nowCard.findViewById(R.id.tv_slot_title);
+            TextView tvBadge = nowCard.findViewById(R.id.tv_slot_badge);
+            ProgressBar pb = nowCard.findViewById(R.id.pb_slot_progress);
+            tvTime.setText("Actuellement");
+            String cachedTitle = epgCurrentTitleCache.get(item.id);
+            tvTitle.setText(cachedTitle != null ? cachedTitle : item.name);
+            tvTitle.setTextColor(0xFFFFFFFF);
+            tvBadge.setText("🔴 EN DIRECT");
+            tvBadge.setVisibility(View.VISIBLE);
+            pb.setVisibility(View.VISIBLE);
+            pb.setProgress(50);
+            nowCard.setOnClickListener(v -> {
+                selectChannel(item);
+                launchPlayerFullscreen();
+            });
+            wireSlotCard(holder, nowCard, item, null, false, true, false, 1, 2);
+            holder.layoutEpgSlots.addView(nowCard);
+            holder.defaultFocusView = nowCard;
+            return;
+        }
+
+        // Determine current program index
+        int currentIndex = -1;
+        long closestDiff = Long.MAX_VALUE;
+        for (int i = 0; i < progs.size(); i++) {
+            XtreamClient.EpgProgram p = progs.get(i);
+            if (nowMs >= p.startMs && nowMs <= p.stopMs) {
+                currentIndex = i;
+                break;
+            }
+            long diff = Math.abs(nowMs - p.startMs);
+            if (diff < closestDiff) {
+                closestDiff = diff;
+                currentIndex = i;
+            }
+        }
+
+        final int totalCards = progs.size();
+        for (int i = 0; i < progs.size(); i++) {
+            final XtreamClient.EpgProgram prog = progs.get(i);
+            final boolean isCurrent = (i == currentIndex);
+            final boolean isPast = (i < currentIndex || (!isCurrent && prog.stopMs <= nowMs));
+            final boolean isFuture = (i > currentIndex && !isCurrent);
+
+            View card = inflater.inflate(R.layout.item_epg_slot, holder.layoutEpgSlots, false);
+            TextView tvTime = card.findViewById(R.id.tv_slot_time);
+            TextView tvTitle = card.findViewById(R.id.tv_slot_title);
+            TextView tvBadge = card.findViewById(R.id.tv_slot_badge);
+            ProgressBar pb = card.findViewById(R.id.pb_slot_progress);
+
+            tvTime.setText(prog.getFormattedTime() != null ? prog.getFormattedTime() : "");
+            tvTitle.setText(prog.title != null ? prog.title : item.name);
+
+            if (isCurrent) {
+                card.setBackgroundResource(R.drawable.bg_epg_now_selector);
+                tvTitle.setTextColor(0xFFFFFFFF);
+                tvBadge.setText("🔴 EN DIRECT");
+                tvBadge.setTextColor(0xFF38BDF8);
+                tvBadge.setVisibility(View.VISIBLE);
+                if (prog.stopMs > prog.startMs) {
+                    int pct = (int) Math.max(0, Math.min(100, (nowMs - prog.startMs) * 100 / (prog.stopMs - prog.startMs)));
+                    pb.setProgress(pct);
+                    pb.setVisibility(View.VISIBLE);
+                } else {
+                    pb.setVisibility(View.GONE);
+                }
+                holder.defaultFocusView = card;
+            } else if (isPast) {
+                card.setBackgroundResource(R.drawable.bg_epg_slot_selector);
+                tvTitle.setTextColor(0xFFCBD5E1);
+                if (item.tvArchive == 1 || "replay".equals(currentType)) {
+                    tvBadge.setText("↺ REPLAY");
+                    tvBadge.setTextColor(0xFF38BDF8);
+                    tvBadge.setVisibility(View.VISIBLE);
+                } else {
+                    tvBadge.setVisibility(View.GONE);
+                }
+                pb.setVisibility(View.GONE);
+            } else {
+                card.setBackgroundResource(R.drawable.bg_epg_slot_selector);
+                tvTitle.setTextColor(0xFF94A3B8);
+                tvBadge.setVisibility(View.GONE);
+                pb.setVisibility(View.GONE);
+            }
+
+            final int cardIdx = i;
+            card.setOnClickListener(v -> {
+                selectChannel(item);
+                if (isCurrent) {
+                    launchPlayerFullscreen();
+                } else if (isPast) {
+                    if (item.tvArchive == 1 || "replay".equals(currentType)) {
+                        KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
+                        if (pl != null) {
+                            playCatchupStream(item, prog, pl);
+                        }
+                    } else {
+                        Toast.makeText(MainActivity.this, "Le Replay n'est pas disponible pour cette chaîne", Toast.LENGTH_SHORT).show();
+                    }
+                } else {
+                    showProgramDetailDialog(item, prog);
+                }
+            });
+
+            wireSlotCard(holder, card, item, prog, isPast, isCurrent, isFuture, cardIdx, totalCards);
+            holder.layoutEpgSlots.addView(card);
+        }
+
+        // Auto scroll to current card if it exists
+        if (holder.defaultFocusView != null && holder.layoutEpgTimeline != null) {
+            holder.layoutEpgTimeline.post(() -> {
+                if (holder.defaultFocusView != null && holder.layoutEpgTimeline != null) {
+                    int left = holder.defaultFocusView.getLeft();
+                    holder.layoutEpgTimeline.scrollTo(Math.max(0, left - dpToPx(50)), 0);
+                }
+            });
+        }
+    }
+
+    private void wireSlotCard(ChannelsAdapter.ViewHolder holder, View card, KeoDatabase.ChannelItem item, XtreamClient.EpgProgram prog,
+                              boolean isPast, boolean isCurrent, boolean isFuture, int cardIndex, int totalCards) {
+        card.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) {
+                card.setScaleX(1.03f);
+                card.setScaleY(1.03f);
+                card.setElevation(dpToPx(4));
+                int pos = holder.getBindingAdapterPosition();
+                if (pos != RecyclerView.NO_POSITION) {
+                    channelsAdapter.setSelectedPos(pos);
+                }
+                selectChannel(item);
+                updateLiveHeroBanner(item, prog, isPast, isCurrent, isFuture);
+            } else {
+                card.setScaleX(1.0f);
+                card.setScaleY(1.0f);
+                card.setElevation(0);
+            }
+        });
+
+        card.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    int p = holder.getBindingAdapterPosition();
+                    if (p > 0) {
+                        focusRecyclerViewItem(recyclerChannels, p - 1);
+                        return true;
+                    }
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    int p = holder.getBindingAdapterPosition();
+                    if (p < channelsAdapter.getItemCount() - 1) {
+                        focusRecyclerViewItem(recyclerChannels, p + 1);
+                        return true;
+                    } else {
+                        long now = System.currentTimeMillis();
+                        if (now - lastBottomDpadDownTime < 1000) {
+                            lastBottomDpadDownTime = 0;
+                            focusRecyclerViewItem(recyclerChannels, 0);
+                        } else {
+                            lastBottomDpadDownTime = now;
+                        }
+                        return true;
+                    }
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    if (cardIndex == 0) {
+                        focusCategoriesList();
+                        return true;
+                    }
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    if (cardIndex == totalCards - 1) {
+                        return true;
+                    }
+                }
+            }
+            return false;
         });
     }
 
@@ -4403,132 +4805,12 @@ public class MainActivity extends AppCompatActivity {
                 // Layout based on content type: TiviMate horizontal timeline for TV / Replay, or description for VOD / Series
                 boolean isLiveOrReplay = "live".equals(item.streamType) || "replay".equals(currentType);
 
-                if (isLiveOrReplay && holder.layoutEpgTimeline != null) {
+                if (isLiveOrReplay && holder.layoutEpgTimeline != null && holder.layoutEpgSlots != null) {
                     holder.layoutEpgTimeline.setVisibility(View.VISIBLE);
                     if (holder.tvEpg != null) holder.tvEpg.setVisibility(View.GONE);
 
-                    // NOW Slot
-                    String cached = epgCurrentTitleCache.get(item.id);
-                    if (cached != null && !cached.isEmpty()) {
-                        holder.tvEpgNow.setText("🔴 " + cached);
-                    } else {
-                        holder.tvEpgNow.setText("🔴 En direct : " + item.name);
-                    }
-
-                    // PAST Slot (Replay)
-                    String pastCached = epgPastTitleCache.get(item.id);
-                    if (pastCached != null && !pastCached.isEmpty()) {
-                        holder.tvEpgPast.setText("◄ " + pastCached);
-                        holder.tvEpgPast.setTextColor(0xFF38BDF8);
-                    } else if (item.tvArchive == 1 || "replay".equals(currentType)) {
-                        holder.tvEpgPast.setText("◄ Replay disponible");
-                        holder.tvEpgPast.setTextColor(0xFF38BDF8);
-                    } else {
-                        holder.tvEpgPast.setText("◄ Replay");
-                        holder.tvEpgPast.setTextColor(0xFF64748B);
-                    }
-
-                    // NEXT Slot
-                    String nextCached = epgNextTitleCache.get(item.id);
-                    if (nextCached != null && !nextCached.isEmpty()) {
-                        holder.tvEpgNext.setText("⏭️ " + nextCached);
-                    } else {
-                        holder.tvEpgNext.setText("⏭️ À suivre");
-                    }
-
-                    // EPG Timeline navigation & clicks
-                    holder.tvEpgPast.setOnClickListener(v -> showCatchupDialog(item));
-                    holder.tvEpgPast.setOnKeyListener((v, keyCode, event) -> {
-                        if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                                focusCategoriesList();
-                                return true;
-                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                                if (holder.tvEpgNow != null) {
-                                    holder.tvEpgNow.requestFocus();
-                                    return true;
-                                }
-                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                                int p = holder.getBindingAdapterPosition();
-                                if (p > 0) {
-                                    focusRecyclerViewItem(recyclerChannels, p - 1);
-                                    return true;
-                                }
-                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                                int p = holder.getBindingAdapterPosition();
-                                if (p < items.size() - 1) {
-                                    focusRecyclerViewItem(recyclerChannels, p + 1);
-                                    return true;
-                                }
-                            }
-                        }
-                        return false;
-                    });
-
-                    holder.tvEpgNow.setOnClickListener(v -> launchPlayerFullscreen());
-                    holder.tvEpgNow.setOnKeyListener((v, keyCode, event) -> {
-                        if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                                if (event.getRepeatCount() == 1 || (event.getEventTime() - event.getDownTime() >= 350)) {
-                                    showCatchupDialog(item);
-                                    return true;
-                                }
-                                if (event.getRepeatCount() > 1) return true;
-                                if (holder.tvEpgPast != null) {
-                                    holder.tvEpgPast.requestFocus();
-                                    return true;
-                                }
-                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                                if (event.getRepeatCount() == 1 || (event.getEventTime() - event.getDownTime() >= 350)) {
-                                    showFutureEpgDialog(item);
-                                    return true;
-                                }
-                                if (event.getRepeatCount() > 1) return true;
-                                if (holder.tvEpgNext != null) {
-                                    holder.tvEpgNext.requestFocus();
-                                    return true;
-                                }
-                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                                int p = holder.getBindingAdapterPosition();
-                                if (p > 0) {
-                                    focusRecyclerViewItem(recyclerChannels, p - 1);
-                                    return true;
-                                }
-                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                                int p = holder.getBindingAdapterPosition();
-                                if (p < items.size() - 1) {
-                                    focusRecyclerViewItem(recyclerChannels, p + 1);
-                                    return true;
-                                }
-                            }
-                        }
-                        return false;
-                    });
-
-                    holder.tvEpgNext.setOnClickListener(v -> showFutureEpgDialog(item));
-                    holder.tvEpgNext.setOnKeyListener((v, keyCode, event) -> {
-                        if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                            if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                                if (holder.tvEpgNow != null) {
-                                    holder.tvEpgNow.requestFocus();
-                                    return true;
-                                }
-                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                                int p = holder.getBindingAdapterPosition();
-                                if (p > 0) {
-                                    focusRecyclerViewItem(recyclerChannels, p - 1);
-                                    return true;
-                                }
-                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                                int p = holder.getBindingAdapterPosition();
-                                if (p < items.size() - 1) {
-                                    focusRecyclerViewItem(recyclerChannels, p + 1);
-                                    return true;
-                                }
-                            }
-                        }
-                        return false;
-                    });
+                    List<XtreamClient.EpgProgram> progs = epgProgramsCache.get(item.id);
+                    populateTimelineRibbon(holder, item, progs);
 
                 } else {
                     if (holder.layoutEpgTimeline != null) holder.layoutEpgTimeline.setVisibility(View.GONE);
@@ -4609,6 +4891,9 @@ public class MainActivity extends AppCompatActivity {
                         if (pos != RecyclerView.NO_POSITION) {
                             selectedPos = pos;
                             selectChannel(item);
+                            if (holder.defaultFocusView != null && holder.defaultFocusView.isShown()) {
+                                holder.defaultFocusView.requestFocus();
+                            }
                         }
                     }
                 });
@@ -4635,11 +4920,9 @@ public class MainActivity extends AppCompatActivity {
                                 return true;
                             }
                             if (event.getRepeatCount() > 1) return true;
-                            if (holder.layoutEpgTimeline != null && holder.layoutEpgTimeline.getVisibility() == View.VISIBLE) {
-                                if (holder.tvEpgNow != null && holder.tvEpgNow.isShown()) {
-                                    holder.tvEpgNow.requestFocus();
-                                    return true;
-                                }
+                            if (holder.defaultFocusView != null && holder.defaultFocusView.isShown()) {
+                                holder.defaultFocusView.requestFocus();
+                                return true;
                             }
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN && pos == items.size() - 1) {
                             // Bottom row reached in single-column live list
@@ -4674,8 +4957,9 @@ public class MainActivity extends AppCompatActivity {
             // Live fields
             TextView tvNum, tvName, tvRes, tvFavStar, tvReplayBadge, tvEpg;
             ImageView ivLogo;
-            View layoutEpgTimeline;
-            TextView tvEpgPast, tvEpgNow, tvEpgNext;
+            HorizontalScrollView layoutEpgTimeline;
+            LinearLayout layoutEpgSlots;
+            View defaultFocusView;
 
             // VOD fields
             ImageView ivPoster;
@@ -4700,9 +4984,7 @@ public class MainActivity extends AppCompatActivity {
                     tvReplayBadge = v.findViewById(R.id.tv_channel_replay_badge);
                     tvEpg = v.findViewById(R.id.tv_channel_epg);
                     layoutEpgTimeline = v.findViewById(R.id.layout_epg_timeline);
-                    tvEpgPast = v.findViewById(R.id.tv_epg_past);
-                    tvEpgNow = v.findViewById(R.id.tv_epg_now);
-                    tvEpgNext = v.findViewById(R.id.tv_epg_next);
+                    layoutEpgSlots = v.findViewById(R.id.layout_epg_slots);
                 }
             }
         }

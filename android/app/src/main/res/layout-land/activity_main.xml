@@ -347,44 +347,155 @@
                     android:layout_weight="1"
                     android:orientation="vertical">
 
-                    <!-- Header for LIVE / REPLAY mode -->
+                    <!-- Header for LIVE / REPLAY mode (TiviMate Live EPG Hero Header) -->
                     <LinearLayout
                         android:id="@+id/layout_live_header"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:paddingStart="12dp"
-                        android:paddingEnd="12dp"
-                        android:paddingTop="10dp"
-                        android:paddingBottom="6dp">
+                        android:orientation="vertical"
+                        android:background="#0A0F1D"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="14dp"
+                        android:paddingTop="8dp"
+                        android:paddingBottom="8dp">
 
-                        <TextView
-                            android:id="@+id/tv_channels_header"
-                            android:layout_width="0dp"
+                        <!-- Row 1: Channel logo, name, badges, and search input -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:text="CHAÎNES &amp; PROGRAMMES"
-                            android:textColor="#64748B"
-                            android:textSize="11sp"
-                            android:textStyle="bold" />
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
 
-                        <!-- Quick filter edittext -->
-                        <EditText
-                            android:id="@+id/et_search"
-                            android:layout_width="180dp"
-                            android:layout_height="32dp"
-                            android:hint="🔍 Filtrer..."
-                            android:textColor="#F8FAFC"
-                            android:textColorHint="#64748B"
-                            android:textSize="11sp"
-                            android:paddingStart="8dp"
-                            android:paddingEnd="8dp"
-                            android:background="@drawable/bg_item_selector"
-                            android:singleLine="true"
-                            android:imeOptions="actionSearch"
-                            android:focusable="true"
-                            android:focusableInTouchMode="true" />
+                            <ImageView
+                                android:id="@+id/iv_live_hero_logo"
+                                android:layout_width="36dp"
+                                android:layout_height="24dp"
+                                android:scaleType="fitCenter"
+                                android:layout_marginEnd="8dp"
+                                android:visibility="gone" />
+
+                            <TextView
+                                android:id="@+id/tv_channels_header"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="CHAÎNES &amp; PROGRAMMES"
+                                android:textColor="#38BDF8"
+                                android:textSize="12sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:id="@+id/tv_live_hero_res"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="HD"
+                                android:textColor="#94A3B8"
+                                android:textSize="10sp"
+                                android:textStyle="bold"
+                                android:paddingStart="5dp"
+                                android:paddingEnd="5dp"
+                                android:paddingTop="1dp"
+                                android:paddingBottom="1dp"
+                                android:background="#1E293B"
+                                android:layout_marginStart="8dp"
+                                android:visibility="gone" />
+
+                            <TextView
+                                android:id="@+id/tv_live_hero_badge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="🔴 EN DIRECT"
+                                android:textColor="#34D399"
+                                android:textSize="10sp"
+                                android:textStyle="bold"
+                                android:paddingStart="6dp"
+                                android:paddingEnd="6dp"
+                                android:paddingTop="1dp"
+                                android:paddingBottom="1dp"
+                                android:background="#132E27"
+                                android:layout_marginStart="8dp"
+                                android:visibility="gone" />
+
+                            <View
+                                android:layout_width="0dp"
+                                android:layout_height="1dp"
+                                android:layout_weight="1" />
+
+                            <!-- Quick filter edittext -->
+                            <EditText
+                                android:id="@+id/et_search"
+                                android:layout_width="160dp"
+                                android:layout_height="30dp"
+                                android:hint="🔍 Filtrer..."
+                                android:textColor="#F8FAFC"
+                                android:textColorHint="#64748B"
+                                android:textSize="11sp"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
+                                android:background="@drawable/bg_item_selector"
+                                android:singleLine="true"
+                                android:imeOptions="actionSearch"
+                                android:focusable="true"
+                                android:focusableInTouchMode="true" />
+
+                        </LinearLayout>
+
+                        <!-- Row 2: Selected Program Title & Broadcast Hours -->
+                        <LinearLayout
+                            android:id="@+id/layout_live_hero_program_row"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginTop="4dp">
+
+                            <TextView
+                                android:id="@+id/tv_live_hero_title"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="Guide des programmes TV"
+                                android:textColor="#FFFFFF"
+                                android:textSize="15sp"
+                                android:textStyle="bold"
+                                android:maxLines="1"
+                                android:ellipsize="end" />
+
+                            <TextView
+                                android:id="@+id/tv_live_hero_time"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text=""
+                                android:textColor="#94A3B8"
+                                android:textSize="11sp"
+                                android:textStyle="bold"
+                                android:layout_marginStart="8dp" />
+
+                        </LinearLayout>
+
+                        <!-- Progress Bar (for live running program) -->
+                        <ProgressBar
+                            android:id="@+id/pb_live_hero_progress"
+                            style="?android:attr/progressBarStyleHorizontal"
+                            android:layout_width="match_parent"
+                            android:layout_height="2.5dp"
+                            android:layout_marginTop="3dp"
+                            android:max="100"
+                            android:progress="0"
+                            android:progressTint="#38BDF8"
+                            android:progressBackgroundTint="#1E293B"
+                            android:visibility="gone" />
+
+                        <!-- Row 3: Program Synopsis / Description -->
+                        <TextView
+                            android:id="@+id/tv_live_hero_desc"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="3dp"
+                            android:text="Naviguez sur la timeline pour explorer les programmes en direct, passés (Replay) et futurs."
+                            android:textColor="#94A3B8"
+                            android:textSize="10.5sp"
+                            android:maxLines="2"
+                            android:ellipsize="end" />
 
                     </LinearLayout>
 
