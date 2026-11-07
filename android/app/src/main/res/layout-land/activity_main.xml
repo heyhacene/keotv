@@ -434,8 +434,8 @@
                                 android:background="@drawable/bg_item_selector"
                                 android:singleLine="true"
                                 android:imeOptions="actionSearch"
-                                android:focusable="true"
-                                android:focusableInTouchMode="true" />
+                                android:focusable="false"
+                                android:focusableInTouchMode="false" />
 
                         </LinearLayout>
 
@@ -728,6 +728,9 @@
                         android:layout_weight="1"
                         android:focusable="false"
                         android:descendantFocusability="afterDescendants"
+                        android:nextFocusUp="@+id/recycler_channels"
+                        android:nextFocusDown="@+id/recycler_channels"
+                        android:nextFocusRight="@+id/recycler_channels"
                         android:scrollbars="vertical"
                         android:overScrollMode="always"
                         android:nestedScrollingEnabled="true"

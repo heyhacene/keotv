@@ -107,25 +107,74 @@
             android:ellipsize="end"
             android:text="Direct TV" />
 
-        <!-- TiviMate EPG Timeline Row (Continuous Horizontal Ribbon) -->
-        <HorizontalScrollView
+        <!-- TiviMate EPG Timeline Row (Past, Current, Next) -->
+        <LinearLayout
             android:id="@+id/layout_epg_timeline"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:scrollbars="none"
-            android:overScrollMode="never"
-            android:fillViewport="false"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
             android:layout_marginTop="4dp"
             android:visibility="gone">
 
-            <LinearLayout
-                android:id="@+id/layout_epg_slots"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:gravity="center_vertical" />
+            <!-- Past Program (Replay) -->
+            <TextView
+                android:id="@+id/tv_epg_past"
+                android:layout_width="0dp"
+                android:layout_height="25dp"
+                android:layout_weight="1"
+                android:textColor="#94A3B8"
+                android:textSize="10.5sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:gravity="center_vertical"
+                android:paddingStart="7dp"
+                android:paddingEnd="7dp"
+                android:background="@drawable/bg_epg_slot_selector"
+                android:layout_marginEnd="5dp"
+                android:focusable="true"
+                android:clickable="true"
+                android:text="◄ Replay" />
 
-        </HorizontalScrollView>
+            <!-- Current Program (Live) -->
+            <TextView
+                android:id="@+id/tv_epg_now"
+                android:layout_width="0dp"
+                android:layout_height="25dp"
+                android:layout_weight="1.5"
+                android:textColor="#38BDF8"
+                android:textSize="10.5sp"
+                android:textStyle="bold"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:gravity="center_vertical"
+                android:paddingStart="7dp"
+                android:paddingEnd="7dp"
+                android:background="@drawable/bg_epg_now_selector"
+                android:layout_marginEnd="5dp"
+                android:focusable="true"
+                android:clickable="true"
+                android:text="🔴 En direct" />
+
+            <!-- Next Program (Future) -->
+            <TextView
+                android:id="@+id/tv_epg_next"
+                android:layout_width="0dp"
+                android:layout_height="25dp"
+                android:layout_weight="1"
+                android:textColor="#64748B"
+                android:textSize="10.5sp"
+                android:singleLine="true"
+                android:ellipsize="end"
+                android:gravity="center_vertical"
+                android:paddingStart="7dp"
+                android:paddingEnd="7dp"
+                android:background="@drawable/bg_epg_slot_selector"
+                android:focusable="true"
+                android:clickable="true"
+                android:text="⏭️ Suivant" />
+
+        </LinearLayout>
 
     </LinearLayout>
 

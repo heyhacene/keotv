@@ -308,6 +308,9 @@
                     android:id="@+id/recycler_channels"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
+                    android:nextFocusUp="@+id/recycler_channels"
+                    android:nextFocusDown="@+id/recycler_channels"
+                    android:nextFocusRight="@+id/recycler_channels"
                     android:scrollbars="vertical"
                     android:overScrollMode="always"
                     android:nestedScrollingEnabled="true" />
