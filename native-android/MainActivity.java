@@ -4456,7 +4456,7 @@ public class MainActivity extends AppCompatActivity {
 
                             // Action: Favorite Star
                             TextView btnStar = createManagerMiniBtn(ch.isFav ? "⭐" : "☆", v -> {
-                                db.toggleFavorite(ch.id, !ch.isFav);
+                                db.toggleFavorite(ch.id);
                                 run();
                             });
                             row.addView(btnStar);

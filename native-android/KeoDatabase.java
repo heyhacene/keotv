@@ -441,11 +441,11 @@ public class KeoDatabase extends SQLiteOpenHelper {
     }
 
     public int getForYouVodCount() {
-        return Math.min(50, getChannelCountByType("vod"));
+        return Math.min(50, getChannelCount("vod"));
     }
 
     public int getForYouSeriesCount() {
-        return Math.min(50, getChannelCountByType("series"));
+        return Math.min(50, getChannelCount("series"));
     }
 
     public List<ChannelItem> getForYouVod(Context context, int limit) {
@@ -943,6 +943,13 @@ public class KeoDatabase extends SQLiteOpenHelper {
     public void toggleFavorite(String channelId) {
         SQLiteDatabase db = getWritableDatabase();
         db.execSQL("UPDATE channels SET is_fav = CASE WHEN is_fav = 1 THEN 0 ELSE 1 END WHERE id = ?", new String[]{channelId});
+    }
+
+    public void toggleFavorite(String channelId, boolean isFav) {
+        SQLiteDatabase db = getWritableDatabase();
+        ContentValues cv = new ContentValues();
+        cv.put("is_fav", isFav ? 1 : 0);
+        db.update("channels", cv, "id = ?", new String[]{channelId});
     }
 
     // High performance bulk inserts in atomic transaction with auto-schema repair

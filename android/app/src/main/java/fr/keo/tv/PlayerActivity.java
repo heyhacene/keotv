@@ -2920,7 +2920,6 @@ public class PlayerActivity extends AppCompatActivity {
         }
 
         showStyledTrackSelectionDialog("💬 Sous-titres", "Sélectionnez vos sous-titres :", trackNames, selectedIndex, which -> {
-            SharedPreferences p = getSharedPreferences("keotv_series_prefs", Context.MODE_PRIVATE);
             String curUrl = getCurrentPlayingUrl();
 
             if (which == 0) {
