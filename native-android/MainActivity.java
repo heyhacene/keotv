@@ -175,6 +175,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean isVodGridMode = false;
     private long lastBottomReachedTime = 0;
     private long lastTopReachedTime = 0;
+    private long lastCategoryBottomTime = 0;
+    private long lastCategoryTopTime = 0;
     private static final long CAROUSEL_PAUSE_MS = 500;
     private final Handler vodHeroHandler = new Handler(Looper.getMainLooper());
     private Runnable pendingVodHeroRunnable = null;
@@ -861,53 +863,20 @@ public class MainActivity extends AppCompatActivity {
 
         rv.post(() -> {
             RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(targetPos);
-            if (vh instanceof ChannelsAdapter.ViewHolder) {
-                ChannelsAdapter.ViewHolder cvh = (ChannelsAdapter.ViewHolder) vh;
-                if (!cvh.isVod) {
-                    if (cvh.tvEpgNow != null && cvh.tvEpgNow.isShown()) {
-                        cvh.tvEpgNow.requestFocus();
-                        return;
-                    }
-                } else {
-                    if (cvh.itemView != null) {
-                        cvh.itemView.requestFocus();
-                        return;
-                    }
-                }
-            }
             if (vh != null && vh.itemView != null) {
                 vh.itemView.requestFocus();
             } else {
                 View view = lm.findViewByPosition(targetPos);
                 if (view != null) {
-                    View epgNow = view.findViewById(R.id.tv_epg_now);
-                    if (epgNow != null && epgNow.isShown()) {
-                        epgNow.requestFocus();
-                    } else {
-                        view.requestFocus();
-                    }
+                    view.requestFocus();
                 } else {
                     rv.postDelayed(() -> {
                         RecyclerView.ViewHolder vh2 = rv.findViewHolderForAdapterPosition(targetPos);
-                        if (vh2 instanceof ChannelsAdapter.ViewHolder) {
-                            ChannelsAdapter.ViewHolder cvh2 = (ChannelsAdapter.ViewHolder) vh2;
-                            if (!cvh2.isVod && cvh2.tvEpgNow != null && cvh2.tvEpgNow.isShown()) {
-                                cvh2.tvEpgNow.requestFocus();
-                                return;
-                            }
-                        }
                         if (vh2 != null && vh2.itemView != null) {
                             vh2.itemView.requestFocus();
                         } else {
                             View view2 = lm.findViewByPosition(targetPos);
-                            if (view2 != null) {
-                                View epgNow2 = view2.findViewById(R.id.tv_epg_now);
-                                if (epgNow2 != null && epgNow2.isShown()) {
-                                    epgNow2.requestFocus();
-                                } else {
-                                    view2.requestFocus();
-                                }
-                            }
+                            if (view2 != null) view2.requestFocus();
                         }
                     }, 50);
                 }
@@ -1334,7 +1303,7 @@ public class MainActivity extends AppCompatActivity {
         KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
         if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) return;
 
-        xtreamClient.fetchShortEpg(pl.serverUrl, pl.username, pl.password, ch.streamId, 12, new XtreamClient.EpgCallback() {
+        XtreamClient.fetchFullChannelTimeline(pl.serverUrl, pl.username, pl.password, ch.streamId, ch.tvArchive == 1, new XtreamClient.EpgCallback() {
             @Override
             public void onSuccess(List<XtreamClient.EpgProgram> programs, XtreamClient.EpgProgram current, XtreamClient.EpgProgram next) {
                 if (isFinishing() || isDestroyed()) return;
@@ -1372,7 +1341,7 @@ public class MainActivity extends AppCompatActivity {
                         if (vh instanceof ChannelsAdapter.ViewHolder) {
                             ChannelsAdapter.ViewHolder cvh = (ChannelsAdapter.ViewHolder) vh;
                             if (!cvh.isVod) {
-                                bindEpgTimeline(cvh, ch);
+                                cvh.bindTimeline(ch, programs, current != null ? current.title : ch.name);
                             }
                         }
                     }
@@ -1662,65 +1631,45 @@ public class MainActivity extends AppCompatActivity {
         return null;
     }
 
-    private void bindEpgTimeline(ChannelsAdapter.ViewHolder holder, KeoDatabase.ChannelItem ch) {
-        if (holder == null || holder.layoutEpgTimeline == null || ch == null) return;
-        holder.layoutEpgTimeline.setVisibility(View.VISIBLE);
-        if (holder.tvEpg != null) holder.tvEpg.setVisibility(View.GONE);
-
-        XtreamClient.EpgProgram cur = getCurrentProgram(ch);
-        XtreamClient.EpgProgram past = getPastProgram(ch);
-        XtreamClient.EpgProgram next = getNextProgram(ch);
-
-        // Past program / Replay slot
-        if (holder.tvEpgPast != null) {
-            if (ch.tvArchive == 1 || "replay".equals(currentType)) {
-                holder.tvEpgPast.setVisibility(View.VISIBLE);
-                holder.tvEpgPast.setEnabled(true);
-                holder.tvEpgPast.setAlpha(1.0f);
-                if (past != null && past.title != null && !past.title.isEmpty()) {
-                    String t = past.getFormattedTime();
-                    holder.tvEpgPast.setText("◄ " + (t != null && !t.isEmpty() ? t + " " : "") + past.title);
-                } else {
-                    holder.tvEpgPast.setText("◄ Replay");
-                }
-            } else if (past != null && past.title != null && !past.title.isEmpty()) {
-                holder.tvEpgPast.setVisibility(View.VISIBLE);
-                holder.tvEpgPast.setEnabled(false);
-                holder.tvEpgPast.setAlpha(0.6f);
-                String t = past.getFormattedTime();
-                holder.tvEpgPast.setText("◄ " + (t != null && !t.isEmpty() ? t + " " : "") + past.title);
-            } else {
-                holder.tvEpgPast.setVisibility(View.GONE);
+    private boolean handleCategoryCarouselDown(int currentPos, int totalCount) {
+        if (totalCount <= 0) return true;
+        lastCategoryTopTime = 0;
+        if (currentPos >= totalCount - 1) {
+            long now = System.currentTimeMillis();
+            if (lastCategoryBottomTime == 0 || (now - lastCategoryBottomTime > 1500)) {
+                lastCategoryBottomTime = now;
+                return true; // Pause at bottom boundary
             }
-        }
-
-        // Current program / Live slot
-        if (holder.tvEpgNow != null) {
-            holder.tvEpgNow.setVisibility(View.VISIBLE);
-            if (cur != null && cur.title != null && !cur.title.isEmpty()) {
-                String t = cur.getFormattedTime();
-                holder.tvEpgNow.setText("🔴 " + (t != null && !t.isEmpty() ? t + " " : "") + cur.title);
-            } else {
-                String cached = epgCurrentTitleCache.get(ch.id);
-                holder.tvEpgNow.setText("🔴 " + (cached != null ? cached : ch.name));
+            if (now - lastCategoryBottomTime >= CAROUSEL_PAUSE_MS) {
+                lastCategoryBottomTime = 0;
+                focusRecyclerViewItem(recyclerCategories, 0);
             }
+            return true;
+        } else {
+            lastCategoryBottomTime = 0;
+            focusRecyclerViewItem(recyclerCategories, currentPos + 1);
+            return true;
         }
+    }
 
-        // Next program / Future slot
-        if (holder.tvEpgNext != null) {
-            holder.tvEpgNext.setVisibility(View.VISIBLE);
-            if (next != null && next.title != null && !next.title.isEmpty()) {
-                String t = next.getFormattedTime();
-                holder.tvEpgNext.setText("⏭️ " + (t != null && !t.isEmpty() ? t + " " : "") + next.title);
-            } else {
-                String cached = epgNextTitleCache.get(ch.id);
-                holder.tvEpgNext.setText("⏭️ " + (cached != null ? cached : "Suivant"));
+    private boolean handleCategoryCarouselUp(int currentPos, int totalCount) {
+        if (totalCount <= 0) return true;
+        lastCategoryBottomTime = 0;
+        if (currentPos <= 0) {
+            long now = System.currentTimeMillis();
+            if (lastCategoryTopTime == 0 || (now - lastCategoryTopTime > 1500)) {
+                lastCategoryTopTime = now;
+                return true; // Pause at top boundary
             }
-        }
-
-        // If not in cache, request EPG
-        if (!epgProgramsCache.containsKey(ch.id)) {
-            fetchEpgForChannel(ch);
+            if (now - lastCategoryTopTime >= CAROUSEL_PAUSE_MS) {
+                lastCategoryTopTime = 0;
+                focusRecyclerViewItem(recyclerCategories, totalCount - 1);
+            }
+            return true;
+        } else {
+            lastCategoryTopTime = 0;
+            focusRecyclerViewItem(recyclerCategories, currentPos - 1);
+            return true;
         }
     }
 
@@ -2874,16 +2823,20 @@ public class MainActivity extends AppCompatActivity {
             String pass = pl.password.trim();
             String cleanId = ch.streamId != null && !ch.streamId.isEmpty() ? ch.streamId : ch.id.replace("xtream_live_", "").replace("xtream_replay_", "");
 
-            SimpleDateFormat sdfLocal = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
-            String startFormattedLocal = sdfLocal.format(new Date(prog.startMs));
-
-            SimpleDateFormat sdfUtc = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
-            sdfUtc.setTimeZone(TimeZone.getTimeZone("UTC"));
-            String startFormattedUtc = sdfUtc.format(new Date(prog.startMs));
-
+            // Duration in minutes
             long durationMins = (prog.stopMs - prog.startMs) / (60 * 1000);
             if (durationMins <= 0) durationMins = 60;
             long startSec = prog.startMs / 1000L;
+
+            // Direct extraction from prog.start (YYYY-MM-DD HH:mm:ss) to preserve exact server clock!
+            String startFormatted = "";
+            if (prog.start != null && prog.start.length() >= 16) {
+                // e.g. "2025-11-07 14:00:00" -> "2025-11-07:14-00"
+                startFormatted = prog.start.substring(0, 10) + ":" + prog.start.substring(11, 13) + "-" + prog.start.substring(14, 16);
+            } else {
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
+                startFormatted = sdf.format(new Date(prog.startMs));
+            }
 
             String encUser = URLEncoder.encode(user, "UTF-8");
             String encPass = URLEncoder.encode(pass, "UTF-8");
@@ -2891,24 +2844,23 @@ public class MainActivity extends AppCompatActivity {
             List<String> urls = new ArrayList<>();
             List<String> titles = new ArrayList<>();
 
-            // 1. Root timeshift.php (standard Xtream Codes and most universal on all panels)
-            urls.add(server + "/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormattedLocal + "&duration=" + durationMins);
-            // 2. Direct Xtream MPEG-TS format: /timeshift/{user}/{pass}/{dur}/{local}/{stream}.ts
-            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormattedLocal + "/" + cleanId + ".ts");
-            // 3. Encoded colon variant (%3A) for strict reverse proxies / web servers
-            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormattedLocal.replace(":", "%3A") + "/" + cleanId + ".ts");
-            // 4. Standard Xtream subfolder: /streaming/timeshift.php (local time)
-            urls.add(server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormattedLocal + "&duration=" + durationMins);
-            // 5. Unix timestamp epoch format (used by XUI.one, ZapX and recent panels)
+            // 1. Direct Xtream MPEG-TS format (Universal standard for Xtream Codes & XUI)
+            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormatted + "/" + cleanId + ".ts");
+            // 2. Xtream streaming PHP endpoint
+            urls.add(server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormatted + "&duration=" + durationMins);
+            // 3. Direct Xtream MPEG-TS with raw credentials (in case panel rejects URL-encoded chars)
+            urls.add(server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + startFormatted + "/" + cleanId + ".ts");
+            // 4. Xtream streaming PHP endpoint with raw credentials
+            urls.add(server + "/streaming/timeshift.php?username=" + user + "&password=" + pass + "&stream=" + cleanId + "&start=" + startFormatted + "&duration=" + durationMins);
+            // 5. Encoded colon variant (%3A) for strict reverse proxies / Cloudflare / nginx
+            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormatted.replace(":", "%3A") + "/" + cleanId + ".ts");
+            // 6. Direct Xtream HLS format (.m3u8)
+            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormatted + "/" + cleanId + ".m3u8");
+            // 7. Unix timestamp epoch format (used by XUI.one, ZapX and newer panels)
             urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startSec + "/" + cleanId + ".ts");
-            urls.add(server + "/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startSec + "&duration=" + durationMins);
-            // 6. Direct Xtream HLS format: /timeshift/{user}/{pass}/{dur}/{local}/{stream}.m3u8
-            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormattedLocal + "/" + cleanId + ".m3u8");
-            // 7. Timeshift with UTC time (if server clock operates in UTC)
-            if (!startFormattedUtc.equals(startFormattedLocal)) {
-                urls.add(server + "/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormattedUtc + "&duration=" + durationMins);
-                urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormattedUtc + "/" + cleanId + ".ts");
-            }
+            urls.add(server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startSec + "&duration=" + durationMins);
+            // 8. Root timeshift.php fallback
+            urls.add(server + "/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormatted + "&duration=" + durationMins);
 
             for (int u = 0; u < urls.size(); u++) {
                 titles.add("[Replay] " + ch.name + " - " + prog.title);
@@ -3877,6 +3829,9 @@ public class MainActivity extends AppCompatActivity {
             root.addView(btnClose, closeLp);
 
             dialog.show();
+            if (listContainer.getChildCount() > 0) {
+                listContainer.getChildAt(0).requestFocus();
+            }
         } catch (Throwable t) {
             Log.e(TAG, "Failed to show settings dialog", t);
         }
@@ -3888,7 +3843,6 @@ public class MainActivity extends AppCompatActivity {
         card.setGravity(Gravity.CENTER_VERTICAL);
         card.setPadding(dpToPx(14), dpToPx(11), dpToPx(14), dpToPx(11));
         card.setFocusable(true);
-        card.setFocusableInTouchMode(true);
 
         LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -4554,7 +4508,15 @@ public class MainActivity extends AppCompatActivity {
 
             holder.itemView.setOnKeyListener((v, keyCode, event) -> {
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                    if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    int pos = holder.getBindingAdapterPosition();
+                    if (pos == RecyclerView.NO_POSITION) pos = position;
+                    int total = items.size();
+
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        return handleCategoryCarouselDown(pos, total);
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                        return handleCategoryCarouselUp(pos, total);
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                         focusActiveSidebarButton();
                         return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
@@ -4780,7 +4742,7 @@ public class MainActivity extends AppCompatActivity {
                 });
 
             } else {
-                // --- LIVE CHANNEL ROW (TiviMate Live TV layout with 3-slot horizontal timeline) ---
+                // --- LIVE CHANNEL ROW (TiviMate Horizontal Timeline Row) ---
                 holder.tvNum.setText(String.valueOf(position + 1));
                 holder.tvName.setText(item.name);
                 holder.tvRes.setText(item.resolution != null ? item.resolution : "HD");
@@ -4823,191 +4785,119 @@ public class MainActivity extends AppCompatActivity {
                     holder.layoutEpgTimeline.setVisibility(View.VISIBLE);
                     if (holder.tvEpg != null) holder.tvEpg.setVisibility(View.GONE);
 
-                    bindEpgTimeline(holder, item);
+                    holder.itemView.setFocusable(true);
+                    holder.itemView.setClickable(true);
+                    holder.itemView.setSelected(selectedPos == position);
+
+                    // Fetch and bind timeline
+                    List<XtreamClient.EpgProgram> progs = epgProgramsCache.get(item.id);
+                    if (progs != null && !progs.isEmpty()) {
+                        XtreamClient.EpgProgram cur = getCurrentProgram(item);
+                        holder.bindTimeline(item, progs, cur != null ? cur.title : item.name);
+                    } else {
+                        holder.bindTimeline(item, null, item.name);
+                        fetchEpgForChannel(item);
+                    }
 
                     final int pos = position;
                     final int total = items.size();
 
-                    // --- 1. CURRENT PROGRAM (Live TV) ---
-                    if (holder.tvEpgNow != null) {
-                        holder.tvEpgNow.setOnFocusChangeListener((v, hasFocus) -> {
-                            if (hasFocus) {
-                                holder.itemView.setSelected(true);
-                                selectedPos = holder.getBindingAdapterPosition();
-                                selectChannel(item);
-                                updateLiveHeroBanner(item, getCurrentProgram(item), false, true, false);
-                                holder.tvEpgNow.setScaleX(1.04f);
-                                holder.tvEpgNow.setScaleY(1.04f);
-                            } else {
-                                holder.tvEpgNow.setScaleX(1.0f);
-                                holder.tvEpgNow.setScaleY(1.0f);
+                    holder.itemView.setOnFocusChangeListener((v, hasFocus) -> {
+                        if (hasFocus) {
+                            holder.itemView.setSelected(true);
+                            selectedPos = holder.getBindingAdapterPosition();
+                            selectChannel(item);
+                            if (!holder.isTimelineMode) {
+                                XtreamClient.EpgProgram cur = getCurrentProgram(item);
+                                updateLiveHeroBanner(item, cur, false, true, false);
+                                holder.scrollToProgram(holder.currentProgramIndex, false);
                             }
-                        });
+                        } else {
+                            if (holder.isTimelineMode) {
+                                holder.deactivateTimeline();
+                            }
+                        }
+                    });
 
-                        holder.tvEpgNow.setOnClickListener(v -> {
+                    holder.itemView.setOnClickListener(v -> {
+                        if (holder.isTimelineMode) {
+                            XtreamClient.EpgProgram p = holder.getSelectedProgram();
+                            long nowSec = System.currentTimeMillis() / 1000L;
+                            if (p != null && p.stopTimestamp > 0 && p.stopTimestamp < nowSec) {
+                                // Past program -> Launch Replay!
+                                if (item.tvArchive == 1 || "replay".equals(currentType)) {
+                                    KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
+                                    if (pl != null) {
+                                        playCatchupStream(item, p, pl);
+                                    }
+                                } else {
+                                    Toast.makeText(MainActivity.this, "Le Replay n'est pas disponible pour cette chaîne", Toast.LENGTH_SHORT).show();
+                                }
+                            } else if (p != null && p.startTimestamp > nowSec) {
+                                // Future program
+                                Toast.makeText(MainActivity.this, "Programme à venir : " + p.title + " (" + p.getFormattedTime() + ")", Toast.LENGTH_SHORT).show();
+                            } else {
+                                // Current program
+                                selectChannel(item);
+                                launchPlayerFullscreen();
+                            }
+                        } else {
                             selectChannel(item);
                             launchPlayerFullscreen();
-                        });
+                        }
+                    });
 
-                        holder.tvEpgNow.setOnKeyListener((v, keyCode, event) -> {
-                            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                                int curPos = holder.getBindingAdapterPosition();
-                                if (curPos == RecyclerView.NO_POSITION) curPos = pos;
+                    holder.itemView.setOnKeyListener((v, keyCode, event) -> {
+                        int curPos = holder.getBindingAdapterPosition();
+                        if (curPos == RecyclerView.NO_POSITION) curPos = pos;
 
+                        if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                            if (!holder.isTimelineMode) {
+                                // NORMAL CHANNEL BROWSING MODE
                                 if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
                                     return handleCarouselUp(curPos, total, false);
                                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                                     return handleCarouselDown(curPos, total, false);
                                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                                    if (event.getRepeatCount() >= 1 || (event.getEventTime() - event.getDownTime() >= 350)) {
-                                        showFutureEpgDialog(item);
-                                        return true;
-                                    }
-                                    if (holder.tvEpgNext != null && holder.tvEpgNext.isShown()) {
-                                        holder.tvEpgNext.requestFocus();
-                                        return true;
-                                    }
+                                    // DPAD_RIGHT activates Timeline Exploration to Future!
+                                    holder.activateTimelineFuture();
+                                    return true;
                                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                                     if (event.getRepeatCount() >= 1 || (event.getEventTime() - event.getDownTime() >= 350)) {
-                                        showCatchupDialog(item);
+                                        // Long-press DPAD_LEFT activates Timeline Exploration to Past (Replay)!
+                                        holder.activateTimelinePast();
                                         return true;
                                     }
-                                    if (holder.tvEpgPast != null && holder.tvEpgPast.isShown()) {
-                                        holder.tvEpgPast.requestFocus();
-                                        return true;
-                                    } else {
-                                        focusCategoriesList();
-                                        return true;
-                                    }
-                                } else if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
-                                    holder.tvEpgNow.performClick();
-                                    return true;
-                                }
-                            }
-                            return false;
-                        });
-                    }
-
-                    // --- 2. PAST PROGRAM (Replay) ---
-                    if (holder.tvEpgPast != null) {
-                        holder.tvEpgPast.setOnFocusChangeListener((v, hasFocus) -> {
-                            if (hasFocus) {
-                                holder.itemView.setSelected(true);
-                                selectedPos = holder.getBindingAdapterPosition();
-                                selectChannel(item);
-                                updateLiveHeroBanner(item, getPastProgram(item), true, false, false);
-                                holder.tvEpgPast.setScaleX(1.04f);
-                                holder.tvEpgPast.setScaleY(1.04f);
-                            } else {
-                                holder.tvEpgPast.setScaleX(1.0f);
-                                holder.tvEpgPast.setScaleY(1.0f);
-                            }
-                        });
-
-                        holder.tvEpgPast.setOnClickListener(v -> {
-                            selectChannel(item);
-                            XtreamClient.EpgProgram pastProg = getPastProgram(item);
-                            if (item.tvArchive == 1 || "replay".equals(currentType)) {
-                                KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
-                                if (pastProg != null && pl != null) {
-                                    playCatchupStream(item, pastProg, pl);
-                                } else {
-                                    showCatchupDialog(item);
+                                    return false;
                                 }
                             } else {
-                                Toast.makeText(MainActivity.this, "Le Replay n'est pas disponible pour cette chaîne", Toast.LENGTH_SHORT).show();
-                            }
-                        });
-
-                        holder.tvEpgPast.setOnKeyListener((v, keyCode, event) -> {
-                            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                                int curPos = holder.getBindingAdapterPosition();
-                                if (curPos == RecyclerView.NO_POSITION) curPos = pos;
-
-                                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                                // TIMELINE EXPLORATION MODE
+                                if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                                    return holder.timelineStepRight();
+                                } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                                    return holder.timelineStepLeft();
+                                } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                                    holder.deactivateTimeline();
                                     return handleCarouselUp(curPos, total, false);
                                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                                    holder.deactivateTimeline();
                                     return handleCarouselDown(curPos, total, false);
-                                } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                                    if (holder.tvEpgNow != null && holder.tvEpgNow.isShown()) {
-                                        holder.tvEpgNow.requestFocus();
-                                        return true;
-                                    }
-                                } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                                    if (event.getRepeatCount() >= 1 || (event.getEventTime() - event.getDownTime() >= 350)) {
-                                        showCatchupDialog(item);
-                                        return true;
-                                    }
-                                    focusCategoriesList();
-                                    return true;
-                                } else if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
-                                    holder.tvEpgPast.performClick();
+                                } else if (keyCode == KeyEvent.KEYCODE_BACK) {
+                                    holder.deactivateTimeline();
                                     return true;
                                 }
                             }
-                            return false;
-                        });
-                    }
-
-                    // --- 3. NEXT PROGRAM (Future) ---
-                    if (holder.tvEpgNext != null) {
-                        holder.tvEpgNext.setOnFocusChangeListener((v, hasFocus) -> {
-                            if (hasFocus) {
-                                holder.itemView.setSelected(true);
-                                selectedPos = holder.getBindingAdapterPosition();
-                                selectChannel(item);
-                                updateLiveHeroBanner(item, getNextProgram(item), false, false, true);
-                                holder.tvEpgNext.setScaleX(1.04f);
-                                holder.tvEpgNext.setScaleY(1.04f);
-                            } else {
-                                holder.tvEpgNext.setScaleX(1.0f);
-                                holder.tvEpgNext.setScaleY(1.0f);
+                        } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                            if (!holder.isTimelineMode && keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                                // Short press DPAD_LEFT: Return to categories list
+                                focusCategoriesList();
+                                return true;
+                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+                                holder.itemView.performClick();
+                                return true;
                             }
-                        });
-
-                        holder.tvEpgNext.setOnClickListener(v -> {
-                            XtreamClient.EpgProgram nextProg = getNextProgram(item);
-                            if (nextProg != null) {
-                                showProgramDetailDialog(item, nextProg);
-                            } else {
-                                showFutureEpgDialog(item);
-                            }
-                        });
-
-                        holder.tvEpgNext.setOnKeyListener((v, keyCode, event) -> {
-                            if (event.getAction() == KeyEvent.ACTION_DOWN) {
-                                int curPos = holder.getBindingAdapterPosition();
-                                if (curPos == RecyclerView.NO_POSITION) curPos = pos;
-
-                                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                                    return handleCarouselUp(curPos, total, false);
-                                } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                                    return handleCarouselDown(curPos, total, false);
-                                } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                                    if (holder.tvEpgNow != null && holder.tvEpgNow.isShown()) {
-                                        holder.tvEpgNow.requestFocus();
-                                        return true;
-                                    }
-                                } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                                    if (event.getRepeatCount() >= 1 || (event.getEventTime() - event.getDownTime() >= 350)) {
-                                        showFutureEpgDialog(item);
-                                        return true;
-                                    }
-                                    return true; // Block escaping to the right!
-                                } else if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
-                                    holder.tvEpgNext.performClick();
-                                    return true;
-                                }
-                            }
-                            return false;
-                        });
-                    }
-
-                    // ItemView container
-                    holder.itemView.setFocusable(false);
-                    holder.itemView.setOnClickListener(v -> {
-                        selectChannel(item);
-                        launchPlayerFullscreen();
+                        }
+                        return false;
                     });
 
                 } else {
@@ -5051,8 +4941,16 @@ public class MainActivity extends AppCompatActivity {
             // Live fields
             TextView tvNum, tvName, tvRes, tvFavStar, tvReplayBadge, tvEpg;
             ImageView ivLogo;
-            View layoutEpgTimeline;
-            TextView tvEpgPast, tvEpgNow, tvEpgNext;
+            HorizontalScrollView layoutEpgTimeline;
+            LinearLayout layoutEpgSlots;
+
+            // Timeline navigation state
+            boolean isTimelineMode = false;
+            int selectedTimelineIndex = -1;
+            int currentProgramIndex = -1;
+            final List<XtreamClient.EpgProgram> cachedPrograms = new ArrayList<>();
+            final List<View> slotViews = new ArrayList<>();
+            KeoDatabase.ChannelItem boundChannel = null;
 
             // VOD fields
             ImageView ivPoster;
@@ -5077,9 +4975,251 @@ public class MainActivity extends AppCompatActivity {
                     tvReplayBadge = v.findViewById(R.id.tv_channel_replay_badge);
                     tvEpg = v.findViewById(R.id.tv_channel_epg);
                     layoutEpgTimeline = v.findViewById(R.id.layout_epg_timeline);
-                    tvEpgPast = v.findViewById(R.id.tv_epg_past);
-                    tvEpgNow = v.findViewById(R.id.tv_epg_now);
-                    tvEpgNext = v.findViewById(R.id.tv_epg_next);
+                    layoutEpgSlots = v.findViewById(R.id.layout_epg_slots);
+                }
+            }
+
+            public void bindTimeline(KeoDatabase.ChannelItem ch, List<XtreamClient.EpgProgram> progs, String fallbackTitle) {
+                this.boundChannel = ch;
+                if (layoutEpgTimeline == null || layoutEpgSlots == null) return;
+                layoutEpgSlots.removeAllViews();
+                slotViews.clear();
+                cachedPrograms.clear();
+
+                if (progs != null && !progs.isEmpty()) {
+                    cachedPrograms.addAll(progs);
+                }
+
+                long nowSec = System.currentTimeMillis() / 1000L;
+                currentProgramIndex = -1;
+
+                if (!cachedPrograms.isEmpty()) {
+                    long closestDiff = Long.MAX_VALUE;
+                    for (int i = 0; i < cachedPrograms.size(); i++) {
+                        XtreamClient.EpgProgram p = cachedPrograms.get(i);
+                        if (nowSec >= p.startTimestamp && nowSec <= p.stopTimestamp) {
+                            currentProgramIndex = i;
+                            break;
+                        }
+                        long diff = Math.abs(nowSec - p.startTimestamp);
+                        if (diff < closestDiff) {
+                            closestDiff = diff;
+                            currentProgramIndex = i;
+                        }
+                    }
+                    if (currentProgramIndex == -1) currentProgramIndex = 0;
+
+                    LayoutInflater inflater = LayoutInflater.from(itemView.getContext());
+                    for (int i = 0; i < cachedPrograms.size(); i++) {
+                        XtreamClient.EpgProgram p = cachedPrograms.get(i);
+                        View slot = inflater.inflate(R.layout.item_epg_slot, layoutEpgSlots, false);
+                        slot.setFocusable(false);
+                        slot.setClickable(false);
+
+                        TextView tvTime = slot.findViewById(R.id.tv_slot_time);
+                        TextView tvTitle = slot.findViewById(R.id.tv_slot_title);
+                        TextView tvBadge = slot.findViewById(R.id.tv_slot_badge);
+                        ProgressBar pb = slot.findViewById(R.id.pb_slot_progress);
+
+                        String t = p.getFormattedTime();
+                        if (t != null && !t.isEmpty()) {
+                            tvTime.setText(t);
+                        } else if (p.start != null && p.start.length() >= 16) {
+                            tvTime.setText(p.start.substring(11, 16));
+                        } else {
+                            tvTime.setText("");
+                        }
+
+                        tvTitle.setText(p.title != null ? p.title : "");
+
+                        boolean isCurrent = (i == currentProgramIndex);
+                        boolean isPast = (p.stopTimestamp > 0 && p.stopTimestamp < nowSec);
+                        boolean hasReplay = (ch != null && ch.tvArchive == 1);
+
+                        if (isCurrent) {
+                            tvBadge.setVisibility(View.VISIBLE);
+                            tvBadge.setText("● DIRECT");
+                            tvBadge.setTextColor(0xFF38BDF8);
+                            pb.setVisibility(View.VISIBLE);
+                            long totalSec = p.stopTimestamp - p.startTimestamp;
+                            if (totalSec > 0) {
+                                int pct = (int) Math.max(0, Math.min(100, ((nowSec - p.startTimestamp) * 100) / totalSec));
+                                pb.setProgress(pct);
+                            }
+                        } else if (isPast && hasReplay) {
+                            tvBadge.setVisibility(View.VISIBLE);
+                            tvBadge.setText("🔄 REPLAY");
+                            tvBadge.setTextColor(0xFF10B981);
+                            pb.setVisibility(View.GONE);
+                        } else {
+                            tvBadge.setVisibility(View.GONE);
+                            pb.setVisibility(View.GONE);
+                        }
+
+                        layoutEpgSlots.addView(slot);
+                        slotViews.add(slot);
+                    }
+                } else {
+                    LayoutInflater inflater = LayoutInflater.from(itemView.getContext());
+                    View slot = inflater.inflate(R.layout.item_epg_slot, layoutEpgSlots, false);
+                    slot.setFocusable(false);
+                    slot.setClickable(false);
+
+                    TextView tvTime = slot.findViewById(R.id.tv_slot_time);
+                    TextView tvTitle = slot.findViewById(R.id.tv_slot_title);
+                    TextView tvBadge = slot.findViewById(R.id.tv_slot_badge);
+                    ProgressBar pb = slot.findViewById(R.id.pb_slot_progress);
+
+                    tvTime.setText("Direct");
+                    tvTitle.setText(fallbackTitle != null ? fallbackTitle : (ch != null ? ch.name : "Chaîne TV"));
+                    tvBadge.setVisibility(View.VISIBLE);
+                    tvBadge.setText("● LIVE");
+                    tvBadge.setTextColor(0xFF38BDF8);
+                    pb.setVisibility(View.GONE);
+
+                    layoutEpgSlots.addView(slot);
+                    slotViews.add(slot);
+                    currentProgramIndex = 0;
+                }
+
+                if (!isTimelineMode) {
+                    selectedTimelineIndex = currentProgramIndex;
+                }
+                updateTimelineCardHighlights();
+                scrollToProgram(selectedTimelineIndex, false);
+            }
+
+            public void updateTimelineCardHighlights() {
+                for (int i = 0; i < slotViews.size(); i++) {
+                    View slot = slotViews.get(i);
+                    TextView tvTitle = slot.findViewById(R.id.tv_slot_title);
+                    TextView tvTime = slot.findViewById(R.id.tv_slot_time);
+
+                    if (isTimelineMode && i == selectedTimelineIndex) {
+                        GradientDrawable bg = new GradientDrawable();
+                        bg.setCornerRadius(dpToPx(6));
+                        bg.setColor(0xFF1E3A8A);
+                        bg.setStroke(dpToPx(2), 0xFF38BDF8);
+                        slot.setBackground(bg);
+                        slot.setScaleX(1.05f);
+                        slot.setScaleY(1.05f);
+                        if (tvTitle != null) tvTitle.setTextColor(0xFFFFFFFF);
+                        if (tvTime != null) tvTime.setTextColor(0xFFBAE6FD);
+                    } else if (!isTimelineMode && i == currentProgramIndex) {
+                        GradientDrawable bg = new GradientDrawable();
+                        bg.setCornerRadius(dpToPx(6));
+                        bg.setColor(0xFF1E293B);
+                        bg.setStroke(dpToPx(1), 0xFF38BDF8);
+                        slot.setBackground(bg);
+                        slot.setScaleX(1.0f);
+                        slot.setScaleY(1.0f);
+                        if (tvTitle != null) tvTitle.setTextColor(0xFFF8FAFC);
+                        if (tvTime != null) tvTime.setTextColor(0xFF94A3B8);
+                    } else {
+                        GradientDrawable bg = new GradientDrawable();
+                        bg.setCornerRadius(dpToPx(6));
+                        bg.setColor(0xFF0F172A);
+                        bg.setStroke(dpToPx(1), 0xFF1E293B);
+                        slot.setBackground(bg);
+                        slot.setScaleX(1.0f);
+                        slot.setScaleY(1.0f);
+                        if (tvTitle != null) tvTitle.setTextColor(0xFFCBD5E1);
+                        if (tvTime != null) tvTime.setTextColor(0xFF64748B);
+                    }
+                }
+            }
+
+            public void scrollToProgram(int index, boolean smooth) {
+                if (layoutEpgTimeline == null || index < 0 || index >= slotViews.size()) return;
+                layoutEpgTimeline.post(() -> {
+                    View targetView = slotViews.get(index);
+                    if (targetView != null) {
+                        int scrollX = targetView.getLeft() - (layoutEpgTimeline.getWidth() / 3);
+                        if (smooth) {
+                            layoutEpgTimeline.smoothScrollTo(Math.max(0, scrollX), 0);
+                        } else {
+                            layoutEpgTimeline.scrollTo(Math.max(0, scrollX), 0);
+                        }
+                    }
+                });
+            }
+
+            public void activateTimelinePast() {
+                if (cachedPrograms.isEmpty()) return;
+                isTimelineMode = true;
+                if (currentProgramIndex > 0) {
+                    selectedTimelineIndex = currentProgramIndex - 1;
+                } else {
+                    selectedTimelineIndex = 0;
+                }
+                updateTimelineCardHighlights();
+                scrollToProgram(selectedTimelineIndex, true);
+                notifyProgramSelection();
+            }
+
+            public void activateTimelineFuture() {
+                if (cachedPrograms.isEmpty()) return;
+                isTimelineMode = true;
+                if (currentProgramIndex < cachedPrograms.size() - 1) {
+                    selectedTimelineIndex = currentProgramIndex + 1;
+                } else {
+                    selectedTimelineIndex = currentProgramIndex;
+                }
+                updateTimelineCardHighlights();
+                scrollToProgram(selectedTimelineIndex, true);
+                notifyProgramSelection();
+            }
+
+            public boolean timelineStepRight() {
+                if (!isTimelineMode || cachedPrograms.isEmpty()) return false;
+                if (selectedTimelineIndex < cachedPrograms.size() - 1) {
+                    selectedTimelineIndex++;
+                    updateTimelineCardHighlights();
+                    scrollToProgram(selectedTimelineIndex, true);
+                    notifyProgramSelection();
+                }
+                return true;
+            }
+
+            public boolean timelineStepLeft() {
+                if (!isTimelineMode || cachedPrograms.isEmpty()) return false;
+                if (selectedTimelineIndex > 0) {
+                    selectedTimelineIndex--;
+                    updateTimelineCardHighlights();
+                    scrollToProgram(selectedTimelineIndex, true);
+                    notifyProgramSelection();
+                }
+                return true;
+            }
+
+            public void deactivateTimeline() {
+                if (!isTimelineMode) return;
+                isTimelineMode = false;
+                selectedTimelineIndex = currentProgramIndex;
+                updateTimelineCardHighlights();
+                scrollToProgram(currentProgramIndex, true);
+                if (boundChannel != null) {
+                    XtreamClient.EpgProgram cur = getCurrentProgram(boundChannel);
+                    updateLiveHeroBanner(boundChannel, cur, false, true, false);
+                }
+            }
+
+            public XtreamClient.EpgProgram getSelectedProgram() {
+                if (selectedTimelineIndex >= 0 && selectedTimelineIndex < cachedPrograms.size()) {
+                    return cachedPrograms.get(selectedTimelineIndex);
+                }
+                return null;
+            }
+
+            private void notifyProgramSelection() {
+                if (boundChannel == null) return;
+                XtreamClient.EpgProgram p = getSelectedProgram();
+                if (p != null) {
+                    long nowSec = System.currentTimeMillis() / 1000L;
+                    boolean isPast = (p.stopTimestamp > 0 && p.stopTimestamp < nowSec);
+                    boolean isNext = (p.startTimestamp > nowSec);
+                    boolean isCurrent = !isPast && !isNext;
+                    updateLiveHeroBanner(boundChannel, p, isPast, isCurrent, isNext);
                 }
             }
         }
@@ -5088,6 +5228,20 @@ public class MainActivity extends AppCompatActivity {
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         if (keyCode == KeyEvent.KEYCODE_BACK) {
+            // 0. If in timeline mode on a channel row, deactivate timeline and consume back
+            if (recyclerChannels != null && recyclerChannels.getLayoutManager() != null) {
+                View focused = recyclerChannels.findFocus();
+                if (focused != null) {
+                    RecyclerView.ViewHolder vh = recyclerChannels.findContainingViewHolder(focused);
+                    if (vh instanceof ChannelsAdapter.ViewHolder) {
+                        ChannelsAdapter.ViewHolder cvh = (ChannelsAdapter.ViewHolder) vh;
+                        if (cvh.isTimelineMode) {
+                            cvh.deactivateTimeline();
+                            return true;
+                        }
+                    }
+                }
+            }
             if ("search".equals(currentType)) {
                 switchSection("live");
                 focusActiveSidebarButton();

@@ -1186,8 +1186,8 @@ public class PlayerActivity extends AppCompatActivity {
         DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
                 .setUserAgent(pendingUserAgent)
                 .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(isReplayCascade ? 3200 : 8000)
-                .setReadTimeoutMs(isReplayCascade ? 4000 : 12000);
+                .setConnectTimeoutMs(isReplayCascade ? 10000 : 8000)
+                .setReadTimeoutMs(isReplayCascade ? 15000 : 12000);
 
         // Ultra-fast initial playback buffer (starts playing after 500ms of stream instead of default 2500ms!)
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
@@ -1200,7 +1200,7 @@ public class PlayerActivity extends AppCompatActivity {
                 .build();
 
         DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(httpFactory)
-                .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(isReplayCascade ? 0 : 1));
+                .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(1));
 
         player = new ExoPlayer.Builder(this)
                 .setLoadControl(loadControl)
@@ -2038,7 +2038,7 @@ public class PlayerActivity extends AppCompatActivity {
                 }
             }
             if (isReplayFallbackList) {
-                showZapFeedback("Replay", "Essai format " + (index + 2) + "/" + player.getMediaItemCount() + "...");
+                showZapFeedback("Replay", "Connexion au replay (" + (index + 2) + "/" + player.getMediaItemCount() + ")...");
                 player.seekToDefaultPosition(index + 1);
                 player.prepare();
                 player.play();
@@ -2616,7 +2616,6 @@ public class PlayerActivity extends AppCompatActivity {
             itemRow.setGravity(Gravity.CENTER_VERTICAL);
             itemRow.setPadding(dp(14), dp(12), dp(14), dp(12));
             itemRow.setFocusable(true);
-            itemRow.setFocusableInTouchMode(true);
 
             LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -2731,6 +2730,11 @@ public class PlayerActivity extends AppCompatActivity {
         root.addView(btnClose, closeLp);
 
         dialog.show();
+        if (selectedIndex >= 0 && selectedIndex < itemsContainer.getChildCount()) {
+            itemsContainer.getChildAt(selectedIndex).requestFocus();
+        } else if (itemsContainer.getChildCount() > 0) {
+            itemsContainer.getChildAt(0).requestFocus();
+        }
     }
 
     private void showAudioTrackDialog() {

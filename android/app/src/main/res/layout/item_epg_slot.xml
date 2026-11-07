@@ -11,8 +11,8 @@
     android:paddingBottom="2dp"
     android:layout_marginEnd="6dp"
     android:background="@drawable/bg_epg_slot_selector"
-    android:focusable="true"
-    android:clickable="true">
+    android:focusable="false"
+    android:clickable="false">
 
     <!-- Top line: Time interval + Status badge -->
     <LinearLayout
