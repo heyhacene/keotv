@@ -2919,6 +2919,27 @@ public class MainActivity extends AppCompatActivity {
             String uRootPhp = server + "/timeshift.php?username=" + user + "&password=" + pass + "&stream=" + cleanId + "&start=" + localFormatted + "&duration=" + durationMins;
             if (seen.add(uRootPhp)) urls.add(uRootPhp);
 
+            // Re-order candidate URLs to prioritize previously successful replay format
+            try {
+                String preferredType = getSharedPreferences("keotv_player", Context.MODE_PRIVATE).getString("working_replay_type", "");
+                if (preferredType != null && !preferredType.isEmpty()) {
+                    List<String> prioritized = new ArrayList<>();
+                    List<String> others = new ArrayList<>();
+                    for (String u : urls) {
+                        if (PlayerActivity.getReplayUrlType(u).equals(preferredType)) {
+                            prioritized.add(u);
+                        } else {
+                            others.add(u);
+                        }
+                    }
+                    if (!prioritized.isEmpty()) {
+                        urls.clear();
+                        urls.addAll(prioritized);
+                        urls.addAll(others);
+                    }
+                }
+            } catch (Exception ignored) {}
+
             for (int u = 0; u < urls.size(); u++) {
                 titles.add("[Replay] " + ch.name + " - " + prog.title);
             }

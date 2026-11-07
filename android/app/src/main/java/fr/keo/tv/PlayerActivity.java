@@ -164,6 +164,22 @@ public class PlayerActivity extends AppCompatActivity {
     private final Set<Integer> triedTsFallback = new HashSet<>();
     private boolean isLive = true;
     private boolean isReplayCascade = false;
+    private boolean replayPlaybackEstablished = false;
+    private long lastGoodReplayPos = 0L;
+    private int replayMidStreamRetries = 0;
+    private int replayPrematureEndRetries = 0;
+
+    public static String getReplayUrlType(String url) {
+        if (url == null) return "unknown";
+        if (url.contains("/streaming/timeshift.php")) return "streaming_php";
+        if (url.contains("/timeshift.php")) return "root_php";
+        if (url.contains(".m3u8?utc=")) return "flussonic";
+        if (url.matches(".*/timeshift/.*/\\d{9,11}/.*\\.m3u8.*")) return "epoch_m3u8";
+        if (url.matches(".*/timeshift/.*/\\d{9,11}/.*\\.ts.*")) return "epoch_ts";
+        if (url.contains(".m3u8")) return "timeshift_m3u8";
+        if (url.contains("-") && !url.contains(":")) return "timeshift_ts_dash";
+        return "timeshift_ts";
+    }
 
     // Skip intro & Next episode overlays
     private TextView skipIntroBtn;
@@ -292,6 +308,12 @@ public class PlayerActivity extends AppCompatActivity {
         @Override
         public void run() {
             if (player != null && !isLive) {
+                if (isReplayCascade) {
+                    long p = player.getCurrentPosition();
+                    if (p > 0) {
+                        lastGoodReplayPos = p;
+                    }
+                }
                 checkPlaybackProgress();
                 updateTimelineProgress();
             }
@@ -924,7 +946,11 @@ public class PlayerActivity extends AppCompatActivity {
                 public void onStopTrackingTouch(SeekBar seekBar) {
                     isUserSeeking = false;
                     if (player != null) {
-                        player.seekTo(seekBar.getProgress() * 1000L);
+                        long target = seekBar.getProgress() * 1000L;
+                        player.seekTo(target);
+                        if (isReplayCascade) {
+                            lastGoodReplayPos = target;
+                        }
                     }
                     if (player != null && player.isPlaying() && pendingOsdTimeoutMs > 0) {
                         osdHandler.postDelayed(hideOsdRunnable, pendingOsdTimeoutMs);
@@ -1183,37 +1209,53 @@ public class PlayerActivity extends AppCompatActivity {
                 && !pendingTitles.isEmpty() && pendingTitles.get(0) != null
                 && pendingTitles.get(0).startsWith("[Replay]");
 
-        if (isReplayCascade && badgeView != null) {
-            badgeView.setText("REPLAY TV");
+        if (isReplayCascade) {
+            replayPlaybackEstablished = false;
+            lastGoodReplayPos = 0L;
+            replayMidStreamRetries = 0;
+            replayPrematureEndRetries = 0;
+            if (badgeView != null) {
+                badgeView.setText("REPLAY TV");
+            }
         }
 
         DefaultHttpDataSource.Factory httpFactory = new DefaultHttpDataSource.Factory()
                 .setUserAgent(pendingUserAgent)
                 .setAllowCrossProtocolRedirects(true)
-                .setConnectTimeoutMs(isReplayCascade ? 10000 : 8000)
-                .setReadTimeoutMs(isReplayCascade ? 15000 : 12000);
+                .setConnectTimeoutMs(isReplayCascade ? 3500 : 8000)
+                .setReadTimeoutMs(isReplayCascade ? 5000 : 10000);
 
-        // Ultra-fast initial playback buffer (starts playing after 500ms of stream instead of default 2500ms!)
+        int minBufferMs = isReplayCascade ? 20000 : 2500;
+        int maxBufferMs = isReplayCascade ? 60000 : 15000;
+        int bufferForPlaybackMs = isReplayCascade ? 800 : 500;
+        int bufferForPlaybackAfterRebufferMs = isReplayCascade ? 2500 : 1200;
+
         DefaultLoadControl loadControl = new DefaultLoadControl.Builder()
                 .setBufferDurationsMs(
-                        2500,  // minBufferMs
-                        15000, // maxBufferMs
-                        500,   // bufferForPlaybackMs (instant startup)
-                        1200   // bufferForPlaybackAfterRebufferMs
+                        minBufferMs,
+                        maxBufferMs,
+                        bufferForPlaybackMs,
+                        bufferForPlaybackAfterRebufferMs
                 )
+                .setPrioritizeTimeOverSizeThresholds(true)
                 .build();
 
         DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
-                .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES | DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS)
+                .setTsExtractorFlags(
+                        DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES |
+                        DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS |
+                        DefaultTsPayloadReaderFactory.FLAG_IGNORE_SPLICE_INFO
+                )
                 .setTsExtractorMode(TsExtractor.MODE_SINGLE_PMT);
 
         DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(httpFactory, extractorsFactory)
-                .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(1));
+                .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(3));
 
         player = new ExoPlayer.Builder(this)
                 .setLoadControl(loadControl)
                 .setMediaSourceFactory(mediaSourceFactory)
                 .build();
+        player.setWakeMode(C.WAKE_MODE_NETWORK);
         playerView.setPlayer(player);
 
         List<MediaItem> items = new ArrayList<>();
@@ -1251,6 +1293,11 @@ public class PlayerActivity extends AppCompatActivity {
         playerListener = new Player.Listener() {
             @Override
             public void onMediaItemTransition(MediaItem mediaItem, int reason) {
+                if (isReplayCascade) {
+                    replayPlaybackEstablished = false;
+                    lastGoodReplayPos = 0L;
+                    replayMidStreamRetries = 0;
+                }
                 introSkippedForCurrent = false;
                 introAutoHiddenForCurrent = false;
                 introShownAtMs = 0L;
@@ -1304,12 +1351,43 @@ public class PlayerActivity extends AppCompatActivity {
                 } else if (playbackState == Player.STATE_READY) {
                     if (loadingProgressBar != null) loadingProgressBar.setVisibility(View.GONE);
                     errorView.setVisibility(View.GONE);
+                    if (isReplayCascade) {
+                        replayPlaybackEstablished = true;
+                        replayMidStreamRetries = 0;
+                        replayPrematureEndRetries = 0;
+                        int curIdx = player != null ? player.getCurrentMediaItemIndex() : -1;
+                        if (curIdx >= 0 && curIdx < pendingUrls.size()) {
+                            String winUrl = pendingUrls.get(curIdx);
+                            String winType = getReplayUrlType(winUrl);
+                            getSharedPreferences("keotv_player", Context.MODE_PRIVATE)
+                                    .edit()
+                                    .putString("working_replay_type", winType)
+                                    .apply();
+                        }
+                    }
                 } else if (playbackState == Player.STATE_ENDED) {
                     if (loadingProgressBar != null) loadingProgressBar.setVisibility(View.GONE);
+                    if (isReplayCascade) {
+                        long pos = player != null ? player.getCurrentPosition() : 0L;
+                        long dur = player != null ? player.getDuration() : 0L;
+                        // If playback ended prematurely far before the end of the program (e.g. server closed socket mid-stream)
+                        if (dur > 60000L && pos > 0 && pos < (dur - 45000L) && replayPrematureEndRetries < 4) {
+                            replayPrematureEndRetries++;
+                            showZapFeedback("Replay", "Reprise de la lecture...");
+                            long resumePos = Math.max(0L, pos - 2000L);
+                            int curIdx = player != null ? player.getCurrentMediaItemIndex() : 0;
+                            player.seekTo(curIdx, resumePos);
+                            player.prepare();
+                            player.play();
+                            return;
+                        }
+                        showZapFeedback("Replay", "Fin du replay");
+                        return;
+                    }
                     // Mark current item as completed (100%)
                     saveCurrentPlaybackPosition(true);
-                    // Auto-advance to next episode if available and not dismissed
-                    if (!isLive && player != null && player.hasNextMediaItem() && !nextEpisodeDismissed) {
+                    // Auto-advance to next episode strictly for Series
+                    if (!isLive && !isReplayCascade && pendingSeriesId != null && !pendingSeriesId.isEmpty() && player != null && player.hasNextMediaItem() && !nextEpisodeDismissed) {
                         launchNextEpisode();
                     }
                 }
@@ -2047,17 +2125,27 @@ public class PlayerActivity extends AppCompatActivity {
             return;
         }
 
-        // 1. If this is a Replay / Catchup stream (!isLive and multiple fallback URLs were provided),
-        // automatically advance to the next fallback URL format!
-        if (!isLive && pendingSeriesId == null && player.getMediaItemCount() > 1 && index < player.getMediaItemCount() - 1) {
-            boolean isReplayFallbackList = false;
-            if (current != null && current.mediaMetadata != null && current.mediaMetadata.title != null) {
-                String t = current.mediaMetadata.title.toString();
-                if (t.startsWith("[Replay]")) {
-                    isReplayFallbackList = true;
+        // 1. If this is a Replay / Catchup stream (!isLive and multiple fallback URLs were provided)
+        if (isReplayCascade) {
+            // A. If replay playback was already established and we were streaming mid-program:
+            // DO NOT cascade to the next format URL! Reconnect in-place on the working URL.
+            if (replayPlaybackEstablished && lastGoodReplayPos > 3000L) {
+                if (replayMidStreamRetries < 4) {
+                    replayMidStreamRetries++;
+                    showZapFeedback("Replay", "Reconnexion en cours... (" + replayMidStreamRetries + "/4)");
+                    long resumePos = Math.max(0L, lastGoodReplayPos - 2000L);
+                    player.seekTo(index, resumePos);
+                    player.prepare();
+                    player.play();
+                    return;
                 }
             }
-            if (isReplayFallbackList) {
+
+            // B. If initial startup probe failed (or mid-stream retries exhausted), try the next URL format:
+            if (index < player.getMediaItemCount() - 1) {
+                replayPlaybackEstablished = false;
+                lastGoodReplayPos = 0L;
+                replayMidStreamRetries = 0;
                 showZapFeedback("Replay", "Connexion au replay (" + (index + 2) + "/" + player.getMediaItemCount() + ")...");
                 player.seekToDefaultPosition(index + 1);
                 player.prepare();
@@ -2525,6 +2613,9 @@ public class PlayerActivity extends AppCompatActivity {
         long dur = player.getDuration();
         if (dur > 0 && target > dur) target = dur;
         player.seekTo(target);
+        if (isReplayCascade) {
+            lastGoodReplayPos = target;
+        }
         showOsd();
         String label = deltaMs > 0 ? "⏩ +" + (deltaMs / 1000) + "s" : "⏪ " + (deltaMs / 1000) + "s";
         showZapFeedback(label, "");
