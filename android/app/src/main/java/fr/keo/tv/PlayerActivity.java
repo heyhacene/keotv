@@ -1240,11 +1240,7 @@ public class PlayerActivity extends AppCompatActivity {
                 .build();
 
         DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
-                .setTsExtractorFlags(
-                        DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES |
-                        DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS |
-                        DefaultTsPayloadReaderFactory.FLAG_IGNORE_SPLICE_INFO
-                )
+                .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES | DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS)
                 .setTsExtractorMode(TsExtractor.MODE_SINGLE_PMT);
 
         DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(httpFactory, extractorsFactory)
