@@ -308,15 +308,15 @@ public class KeoDatabase extends SQLiteOpenHelper {
     }
 
     // Categories queries
-    public List<CategoryItem> getCategories(String type) {
+    public List<CategoryItem> getCategories(String type, boolean includeFavs) {
         List<CategoryItem> list = new ArrayList<>();
         SQLiteDatabase db = getReadableDatabase();
 
-        // Add virtual favorites bouquet for live channels
-        if ("live".equals(type) || type == null) {
+        // Add virtual favorites bouquet for live channels if requested
+        if (includeFavs && ("live".equals(type) || type == null)) {
             int favCount = getFavoriteCount();
             if (favCount > 0) {
-                CategoryItem fav = new CategoryItem("grp_favs", "⭐ Favoris", "live", favCount, 0);
+                CategoryItem fav = new CategoryItem("grp_favs", "⭐ Favoris", "live", favCount, -100);
                 list.add(fav);
             }
         }
@@ -347,6 +347,210 @@ public class KeoDatabase extends SQLiteOpenHelper {
             list.add(item);
         }
         c.close();
+        return list;
+    }
+
+    public List<CategoryItem> getCategories(String type) {
+        return getCategories(type, true);
+    }
+
+    public List<CategoryItem> getAllCategoriesForManager(String type) {
+        List<CategoryItem> list = new ArrayList<>();
+        SQLiteDatabase db = getReadableDatabase();
+        String sql = "SELECT id, name, type, count, custom_order, is_hidden, is_adult FROM categories";
+        String[] args = null;
+        if (type != null && !type.isEmpty()) {
+            sql += " WHERE type = ?";
+            args = new String[]{type};
+        }
+        sql += " ORDER BY custom_order ASC, name ASC";
+        Cursor c = db.rawQuery(sql, args);
+        while (c != null && c.moveToNext()) {
+            CategoryItem item = new CategoryItem(
+                    c.getString(0),
+                    c.getString(1),
+                    c.getString(2),
+                    c.getInt(3),
+                    c.getInt(4)
+            );
+            item.isHidden = c.getInt(5) == 1;
+            item.isAdult = c.getInt(6) == 1;
+            list.add(item);
+        }
+        if (c != null) c.close();
+        return list;
+    }
+
+    public void updateCategoryOrder(String catId, int order) {
+        SQLiteDatabase db = getWritableDatabase();
+        ContentValues cv = new ContentValues();
+        cv.put("custom_order", order);
+        db.update("categories", cv, "id = ?", new String[]{catId});
+    }
+
+    public void swapCategoryOrder(String catId1, int order1, String catId2, int order2) {
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            ContentValues cv1 = new ContentValues();
+            cv1.put("custom_order", order2);
+            db.update("categories", cv1, "id = ?", new String[]{catId1});
+
+            ContentValues cv2 = new ContentValues();
+            cv2.put("custom_order", order1);
+            db.update("categories", cv2, "id = ?", new String[]{catId2});
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    public void toggleCategoryHidden(String catId, boolean hidden) {
+        SQLiteDatabase db = getWritableDatabase();
+        ContentValues cv = new ContentValues();
+        cv.put("is_hidden", hidden ? 1 : 0);
+        db.update("categories", cv, "id = ?", new String[]{catId});
+    }
+
+    public void resetCategoryOrder(String type) {
+        SQLiteDatabase db = getWritableDatabase();
+        db.execSQL("UPDATE categories SET custom_order = (SELECT count(*) FROM categories c2 WHERE c2.type = categories.type AND c2.name < categories.name) WHERE type = ?", new String[]{type});
+    }
+
+    public void swapChannelOrder(String chId1, int num1, String chId2, int num2) {
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            ContentValues cv1 = new ContentValues();
+            cv1.put("num", num2);
+            db.update("channels", cv1, "id = ?", new String[]{chId1});
+
+            ContentValues cv2 = new ContentValues();
+            cv2.put("num", num1);
+            db.update("channels", cv2, "id = ?", new String[]{chId2});
+            db.setTransactionSuccessful();
+        } finally {
+            db.endTransaction();
+        }
+    }
+
+    public int getForYouVodCount() {
+        return Math.min(50, getChannelCountByType("vod"));
+    }
+
+    public int getForYouSeriesCount() {
+        return Math.min(50, getChannelCountByType("series"));
+    }
+
+    public List<ChannelItem> getForYouVod(Context context, int limit) {
+        List<ChannelItem> list = new ArrayList<>();
+        Set<String> seenIds = new HashSet<>();
+
+        // 1. In-progress movies from KEY_POSITIONS_JSON (Continue Watching)
+        try {
+            if (context != null) {
+                SharedPreferences prefs = context.getSharedPreferences(PlayerActivity.PREFS_POSITIONS, Context.MODE_PRIVATE);
+                String jsonStr = prefs.getString(PlayerActivity.KEY_POSITIONS_JSON, "{}");
+                org.json.JSONObject root = new org.json.JSONObject(jsonStr);
+                java.util.Iterator<String> keys = root.keys();
+                List<org.json.JSONObject> inProgress = new ArrayList<>();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    org.json.JSONObject obj = root.optJSONObject(key);
+                    if (obj != null && !obj.optBoolean("completed", false)) {
+                        long pos = obj.optLong("positionMs", 0L);
+                        long dur = obj.optLong("durationMs", 0L);
+                        if (pos > 15000L && (dur == 0 || pos < dur - 45000L)) {
+                            inProgress.add(obj);
+                        }
+                    }
+                }
+                Collections.sort(inProgress, (a, b) -> Long.compare(b.optLong("updatedAt", 0L), a.optLong("updatedAt", 0L)));
+                SQLiteDatabase db = getReadableDatabase();
+                for (org.json.JSONObject obj : inProgress) {
+                    String url = obj.optString("url", "");
+                    String title = obj.optString("title", "");
+                    Cursor c = db.rawQuery("SELECT " + CHANNEL_COLUMNS + " FROM channels WHERE stream_type = 'vod' AND (stream_url = ? OR name = ?) LIMIT 1", new String[]{url, title});
+                    if (c != null && c.moveToNext()) {
+                        ChannelItem item = cursorToChannel(c);
+                        if (seenIds.add(item.id)) {
+                            list.add(item);
+                        }
+                    }
+                    if (c != null) c.close();
+                    if (list.size() >= 15) break;
+                }
+            }
+        } catch (Exception ignored) {}
+
+        // 2. High-rated and recent movies from SQLite
+        try {
+            SQLiteDatabase db = getReadableDatabase();
+            Cursor c = db.rawQuery("SELECT " + CHANNEL_COLUMNS + " FROM channels WHERE stream_type = 'vod' AND is_separator = 0 ORDER BY rating DESC, id DESC LIMIT " + (limit * 2), null);
+            while (c != null && c.moveToNext() && list.size() < limit) {
+                ChannelItem item = cursorToChannel(c);
+                if (seenIds.add(item.id)) {
+                    list.add(item);
+                }
+            }
+            if (c != null) c.close();
+        } catch (Exception ignored) {}
+
+        return list;
+    }
+
+    public List<ChannelItem> getForYouSeries(Context context, int limit) {
+        List<ChannelItem> list = new ArrayList<>();
+        Set<String> seenIds = new HashSet<>();
+
+        // 1. In-progress series from KEY_POSITIONS_JSON
+        try {
+            if (context != null) {
+                SharedPreferences prefs = context.getSharedPreferences(PlayerActivity.PREFS_POSITIONS, Context.MODE_PRIVATE);
+                String jsonStr = prefs.getString(PlayerActivity.KEY_POSITIONS_JSON, "{}");
+                org.json.JSONObject root = new org.json.JSONObject(jsonStr);
+                java.util.Iterator<String> keys = root.keys();
+                List<org.json.JSONObject> inProgress = new ArrayList<>();
+                while (keys.hasNext()) {
+                    String key = keys.next();
+                    org.json.JSONObject obj = root.optJSONObject(key);
+                    if (obj != null && !obj.optBoolean("completed", false)) {
+                        String sId = obj.optString("seriesId", "");
+                        if (!sId.isEmpty()) {
+                            inProgress.add(obj);
+                        }
+                    }
+                }
+                Collections.sort(inProgress, (a, b) -> Long.compare(b.optLong("updatedAt", 0L), a.optLong("updatedAt", 0L)));
+                SQLiteDatabase db = getReadableDatabase();
+                for (org.json.JSONObject obj : inProgress) {
+                    String sId = obj.optString("seriesId", "");
+                    Cursor c = db.rawQuery("SELECT " + CHANNEL_COLUMNS + " FROM channels WHERE stream_type = 'series' AND (stream_id = ? OR id = ?) LIMIT 1", new String[]{sId, "xtream_series_" + sId});
+                    if (c != null && c.moveToNext()) {
+                        ChannelItem item = cursorToChannel(c);
+                        if (seenIds.add(item.id)) {
+                            list.add(item);
+                        }
+                    }
+                    if (c != null) c.close();
+                    if (list.size() >= 15) break;
+                }
+            }
+        } catch (Exception ignored) {}
+
+        // 2. High-rated and popular series from SQLite
+        try {
+            SQLiteDatabase db = getReadableDatabase();
+            Cursor c = db.rawQuery("SELECT " + CHANNEL_COLUMNS + " FROM channels WHERE stream_type = 'series' AND is_separator = 0 ORDER BY rating DESC, id DESC LIMIT " + (limit * 2), null);
+            while (c != null && c.moveToNext() && list.size() < limit) {
+                ChannelItem item = cursorToChannel(c);
+                if (seenIds.add(item.id)) {
+                    list.add(item);
+                }
+            }
+            if (c != null) c.close();
+        } catch (Exception ignored) {}
+
         return list;
     }
 
@@ -756,6 +960,19 @@ public class KeoDatabase extends SQLiteOpenHelper {
     private void doBulkInsertCategories(SQLiteDatabase db, List<CategoryItem> categories, String typeToClear) {
         db.beginTransaction();
         try {
+            // Read existing user customization (custom_order & is_hidden) before clearing/replacing
+            Map<String, int[]> customPrefs = new HashMap<>();
+            Cursor c = null;
+            try {
+                c = db.rawQuery("SELECT id, custom_order, is_hidden FROM categories", null);
+                while (c != null && c.moveToNext()) {
+                    customPrefs.put(c.getString(0), new int[]{c.getInt(1), c.getInt(2)});
+                }
+            } catch (Exception ignored) {
+            } finally {
+                if (c != null) c.close();
+            }
+
             if (typeToClear != null && !typeToClear.isEmpty()) {
                 db.execSQL("DELETE FROM categories WHERE type = ?", new String[]{typeToClear});
             }
@@ -764,13 +981,22 @@ public class KeoDatabase extends SQLiteOpenHelper {
                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
 
             for (CategoryItem cat : categories) {
+                int order = cat.customOrder;
+                boolean hidden = cat.isHidden;
+                if (customPrefs.containsKey(cat.id)) {
+                    int[] p = customPrefs.get(cat.id);
+                    if (p != null) {
+                        order = p[0];
+                        hidden = p[1] == 1;
+                    }
+                }
                 stmt.bindString(1, cat.id);
                 stmt.bindString(2, cat.name != null ? cat.name : "");
                 stmt.bindString(3, cat.type != null ? cat.type : "live");
                 stmt.bindLong(4, cat.count);
-                stmt.bindLong(5, cat.customOrder);
+                stmt.bindLong(5, order);
                 stmt.bindString(6, "Tv");
-                stmt.bindLong(7, cat.isHidden ? 1 : 0);
+                stmt.bindLong(7, hidden ? 1 : 0);
                 stmt.bindLong(8, cat.isAdult ? 1 : 0);
                 stmt.executeInsert();
             }

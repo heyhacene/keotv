@@ -677,9 +677,9 @@ public class PlayerActivity extends AppCompatActivity {
         centerControlsCard.setVisibility(View.GONE);
 
         GradientDrawable centerBg = new GradientDrawable();
-        centerBg.setColor(Color.parseColor("#55090D16"));
+        centerBg.setColor(Color.parseColor("#26090D16"));
         centerBg.setCornerRadius(dp(38));
-        centerBg.setStroke(dp(1), Color.parseColor("#4038BDF8"));
+        centerBg.setStroke(dp(1), Color.parseColor("#2638BDF8"));
         centerControlsCard.setBackground(centerBg);
 
         // Center Rewind button
@@ -693,9 +693,9 @@ public class PlayerActivity extends AppCompatActivity {
         btnCenterRew.setFocusable(true);
         btnCenterRew.setFocusableInTouchMode(true);
         GradientDrawable rewBg = new GradientDrawable();
-        rewBg.setColor(Color.parseColor("#221E293B"));
+        rewBg.setColor(Color.parseColor("#141E293B"));
         rewBg.setCornerRadius(dp(24));
-        rewBg.setStroke(dp(1), Color.parseColor("#334155"));
+        rewBg.setStroke(dp(1), Color.parseColor("#22334155"));
         btnCenterRew.setBackground(rewBg);
         btnCenterRew.setOnClickListener(v -> {
             showOsd();
@@ -713,8 +713,8 @@ public class PlayerActivity extends AppCompatActivity {
                 btnCenterRew.setScaleX(1.08f);
                 btnCenterRew.setScaleY(1.08f);
             } else {
-                d.setColor(Color.parseColor("#221E293B"));
-                d.setStroke(dp(1), Color.parseColor("#334155"));
+                d.setColor(Color.parseColor("#141E293B"));
+                d.setStroke(dp(1), Color.parseColor("#22334155"));
                 btnCenterRew.setScaleX(1.0f);
                 btnCenterRew.setScaleY(1.0f);
             }
@@ -736,7 +736,7 @@ public class PlayerActivity extends AppCompatActivity {
         btnCenterPlayPause.setLayoutParams(playLp);
 
         GradientDrawable centerPlayBg = new GradientDrawable();
-        centerPlayBg.setColor(Color.parseColor("#800284C7"));
+        centerPlayBg.setColor(Color.parseColor("#660284C7"));
         centerPlayBg.setCornerRadius(dp(35));
         centerPlayBg.setStroke(dp(2), Color.parseColor("#38BDF8"));
         btnCenterPlayPause.setBackground(centerPlayBg);
@@ -749,7 +749,7 @@ public class PlayerActivity extends AppCompatActivity {
                 btnCenterPlayPause.setScaleX(1.12f);
                 btnCenterPlayPause.setScaleY(1.12f);
             } else {
-                d.setColor(Color.parseColor("#800284C7"));
+                d.setColor(Color.parseColor("#660284C7"));
                 d.setStroke(dp(2), Color.parseColor("#38BDF8"));
                 btnCenterPlayPause.setScaleX(1.0f);
                 btnCenterPlayPause.setScaleY(1.0f);
@@ -768,9 +768,9 @@ public class PlayerActivity extends AppCompatActivity {
         btnCenterFwd.setFocusable(true);
         btnCenterFwd.setFocusableInTouchMode(true);
         GradientDrawable fwdBg = new GradientDrawable();
-        fwdBg.setColor(Color.parseColor("#221E293B"));
+        fwdBg.setColor(Color.parseColor("#141E293B"));
         fwdBg.setCornerRadius(dp(24));
-        fwdBg.setStroke(dp(1), Color.parseColor("#334155"));
+        fwdBg.setStroke(dp(1), Color.parseColor("#22334155"));
         btnCenterFwd.setBackground(fwdBg);
         btnCenterFwd.setOnClickListener(v -> {
             showOsd();
@@ -788,8 +788,8 @@ public class PlayerActivity extends AppCompatActivity {
                 btnCenterFwd.setScaleX(1.08f);
                 btnCenterFwd.setScaleY(1.08f);
             } else {
-                d.setColor(Color.parseColor("#221E293B"));
-                d.setStroke(dp(1), Color.parseColor("#334155"));
+                d.setColor(Color.parseColor("#141E293B"));
+                d.setStroke(dp(1), Color.parseColor("#22334155"));
                 btnCenterFwd.setScaleX(1.0f);
                 btnCenterFwd.setScaleY(1.0f);
             }
@@ -829,8 +829,8 @@ public class PlayerActivity extends AppCompatActivity {
         FrameLayout.LayoutParams centerParams = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
         if (!isLive) {
-            // For VOD/Series/Replay: position playback controls slightly lower down to leave center of film clear
-            centerParams.topMargin = dp(65);
+            // For VOD/Series/Replay: position playback controls lower down to leave center of film clear
+            centerParams.topMargin = dp(115);
         }
         root.addView(centerControlsCard, centerParams);
 
@@ -842,7 +842,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         GradientDrawable bottomBg = new GradientDrawable(
                 GradientDrawable.Orientation.BOTTOM_TOP,
-                new int[]{Color.parseColor("#99090D16"), Color.parseColor("#4D090D16"), Color.TRANSPARENT}
+                new int[]{Color.parseColor("#80090D16"), Color.parseColor("#26090D16"), Color.TRANSPARENT}
         );
         bottomControlsContainer.setBackground(bottomBg);
 
@@ -1733,13 +1733,16 @@ public class PlayerActivity extends AppCompatActivity {
                 .setUri(url)
                 .setMediaMetadata(new androidx.media3.common.MediaMetadata.Builder().setTitle(title).build());
         if (url != null) {
-            if (url.contains(".m3u8")) {
+            String lower = url.toLowerCase();
+            if (lower.contains(".m3u8")) {
                 builder.setMimeType(MimeTypes.APPLICATION_M3U8);
-            } else if (url.contains(".mpd")) {
+            } else if (lower.contains(".mpd")) {
                 builder.setMimeType(MimeTypes.APPLICATION_MPD);
-            } else if (url.contains(".ts") || url.contains("timeshift") || url.contains("/live/")) {
+            } else if (lower.endsWith(".ts") || lower.contains(".ts?")) {
                 builder.setMimeType(MimeTypes.VIDEO_MP2T);
             }
+            // Do not force VIDEO_MP2T on timeshift.php or extensionless endpoints
+            // so ExoPlayer automatically sniffs Content-Type header / stream format
         }
         return builder.build();
     }
@@ -2767,6 +2770,15 @@ public class PlayerActivity extends AppCompatActivity {
         List<Integer> trackIndices = new ArrayList<>();
         int selectedIndex = -1;
 
+        SharedPreferences p = getSharedPreferences("keotv_series_prefs", Context.MODE_PRIVATE);
+        String savedAudio = null;
+        if (pendingSeriesId != null && !pendingSeriesId.isEmpty()) {
+            savedAudio = p.getString("audio_" + pendingSeriesId, p.getString("global_series_audio", null));
+        } else if (!isLive) {
+            String curUrl = getCurrentPlayingUrl();
+            if (!curUrl.isEmpty()) savedAudio = p.getString("vod_audio_" + curUrl, p.getString("global_vod_audio", null));
+        }
+
         for (Tracks.Group group : tracks.getGroups()) {
             if (group.getType() == C.TRACK_TYPE_AUDIO) {
                 for (int i = 0; i < group.length; i++) {
@@ -2781,7 +2793,27 @@ public class PlayerActivity extends AppCompatActivity {
 
                     if (group.isTrackSelected(i)) {
                         selectedIndex = trackNames.size() - 1;
+                    } else if (selectedIndex == -1 && savedAudio != null && !savedAudio.isEmpty()) {
+                        String fLang = format.language != null ? format.language.toLowerCase() : "";
+                        String fLabel = format.label != null ? format.label.toLowerCase() : "";
+                        String sLower = savedAudio.toLowerCase();
+                        if (fLang.equals(sLower) || fLabel.equals(sLower) || fLang.contains(sLower) || sLower.contains(fLang)) {
+                            selectedIndex = trackNames.size() - 1;
+                        }
                     }
+                }
+            }
+        }
+
+        if (savedAudio != null && !savedAudio.isEmpty()) {
+            for (int k = 0; k < audioGroups.size(); k++) {
+                Format format = audioGroups.get(k).getTrackFormat(trackIndices.get(k));
+                String fLang = format.language != null ? format.language.toLowerCase() : "";
+                String fLabel = format.label != null ? format.label.toLowerCase() : "";
+                String sLower = savedAudio.toLowerCase();
+                if (fLang.equals(sLower) || fLabel.equals(sLower) || (!fLang.isEmpty() && sLower.contains(fLang)) || (!fLabel.isEmpty() && sLower.contains(fLabel))) {
+                    selectedIndex = k;
+                    break;
                 }
             }
         }
@@ -2807,12 +2839,11 @@ public class PlayerActivity extends AppCompatActivity {
                     player.getTrackSelectionParameters()
                             .buildUpon()
                             .setOverrideForType(new TrackSelectionOverride(
-                                    chosenGroup.getMediaTrackGroup(), Collections.singletonList(trackIdx)))
+                                     chosenGroup.getMediaTrackGroup(), Collections.singletonList(trackIdx)))
                             .build()
             );
 
             // Persist preference for this series or movie
-            SharedPreferences p = getSharedPreferences("keotv_series_prefs", Context.MODE_PRIVATE);
             if (pendingSeriesId != null && !pendingSeriesId.isEmpty()) {
                 p.edit().putString("audio_" + pendingSeriesId, saveVal)
                         .putString("global_series_audio", saveVal)
@@ -2844,6 +2875,15 @@ public class PlayerActivity extends AppCompatActivity {
         int selectedIndex = 0;
         boolean isDisabled = player.getTrackSelectionParameters().disabledTrackTypes.contains(C.TRACK_TYPE_TEXT);
 
+        SharedPreferences p = getSharedPreferences("keotv_series_prefs", Context.MODE_PRIVATE);
+        String savedSub = null;
+        if (pendingSeriesId != null && !pendingSeriesId.isEmpty()) {
+            savedSub = p.getString("sub_" + pendingSeriesId, p.getString("global_series_sub", null));
+        } else if (!isLive) {
+            String curUrl = getCurrentPlayingUrl();
+            if (!curUrl.isEmpty()) savedSub = p.getString("vod_sub_" + curUrl, p.getString("global_vod_sub", null));
+        }
+
         for (Tracks.Group group : tracks.getGroups()) {
             if (group.getType() == C.TRACK_TYPE_TEXT) {
                 for (int i = 0; i < group.length; i++) {
@@ -2857,6 +2897,23 @@ public class PlayerActivity extends AppCompatActivity {
 
                     if (!isDisabled && group.isTrackSelected(i)) {
                         selectedIndex = trackNames.size() - 1;
+                    }
+                }
+            }
+        }
+
+        if ("off".equalsIgnoreCase(savedSub) || "none".equalsIgnoreCase(savedSub)) {
+            selectedIndex = 0;
+        } else if (savedSub != null && !savedSub.isEmpty()) {
+            for (int k = 1; k < textGroups.size(); k++) {
+                if (textGroups.get(k) != null) {
+                    Format format = textGroups.get(k).getTrackFormat(trackIndices.get(k));
+                    String fLang = format.language != null ? format.language.toLowerCase() : "";
+                    String fLabel = format.label != null ? format.label.toLowerCase() : "";
+                    String sLower = savedSub.toLowerCase();
+                    if (fLang.equals(sLower) || fLabel.equals(sLower) || (!fLang.isEmpty() && sLower.contains(fLang)) || (!fLabel.isEmpty() && sLower.contains(fLabel))) {
+                        selectedIndex = k;
+                        break;
                     }
                 }
             }

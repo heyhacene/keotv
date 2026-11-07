@@ -1151,6 +1151,10 @@ public class MainActivity extends AppCompatActivity {
     private void loadLocalData() {
         new Thread(() -> {
             final List<KeoDatabase.CategoryItem> cats;
+            SharedPreferences prefs = getSharedPreferences("keotv_prefs", MODE_PRIVATE);
+            boolean showFavs = prefs.getBoolean("pref_show_favorites_category", true);
+            boolean showForYou = prefs.getBoolean("pref_show_for_you", true);
+
             if ("replay".equals(currentType)) {
                 cats = db.getReplayCategories();
             } else if ("favs".equals(currentType)) {
@@ -1164,7 +1168,18 @@ public class MainActivity extends AppCompatActivity {
                 int favSeries = db.getFavoriteCount("series");
                 if (favSeries > 0) cats.add(new KeoDatabase.CategoryItem("grp_favs_series", "🍿 Séries", "favs", favSeries, 3));
             } else {
-                cats = db.getCategories(currentType);
+                cats = new ArrayList<>(db.getCategories(currentType, showFavs));
+                if (showForYou && "vod".equals(currentType)) {
+                    int forYouCount = db.getForYouVodCount();
+                    if (forYouCount > 0) {
+                        cats.add(0, new KeoDatabase.CategoryItem("cat_vod_for_you", "✨ Pour vous", "vod", forYouCount, -1));
+                    }
+                } else if (showForYou && "series".equals(currentType)) {
+                    int forYouCount = db.getForYouSeriesCount();
+                    if (forYouCount > 0) {
+                        cats.add(0, new KeoDatabase.CategoryItem("cat_series_for_you", "✨ Pour vous", "series", forYouCount, -1));
+                    }
+                }
             }
 
             runOnUiThread(() -> {
@@ -1201,6 +1216,10 @@ public class MainActivity extends AppCompatActivity {
             try {
                 if ("replay".equals(currentType)) {
                     channelsList = db.getReplayChannelsByGroup(cat.id);
+                } else if ("cat_vod_for_you".equals(cat.id)) {
+                    channelsList = db.getForYouVod(MainActivity.this, 60);
+                } else if ("cat_series_for_you".equals(cat.id)) {
+                    channelsList = db.getForYouSeries(MainActivity.this, 60);
                 } else if ("grp_favs".equals(cat.id)) {
                     channelsList = db.getFavoriteChannels();
                 } else if ("grp_favs_live".equals(cat.id)) {
@@ -2812,7 +2831,16 @@ public class MainActivity extends AppCompatActivity {
             if (!server.startsWith("http://") && !server.startsWith("https://")) server = "http://" + server;
             String user = pl.username.trim();
             String pass = pl.password.trim();
-            String cleanId = ch.streamId != null && !ch.streamId.isEmpty() ? ch.streamId : ch.id.replace("xtream_live_", "").replace("xtream_replay_", "");
+
+            // Extract clean numeric streamId
+            String cleanId = ch.streamId != null && !ch.streamId.isEmpty() ? ch.streamId : "";
+            if (cleanId.isEmpty() && ch.id != null) {
+                cleanId = ch.id.replaceAll("^.*_", "");
+            }
+            if (cleanId.isEmpty() && ch.streamUrl != null) {
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile("/(\\d+)(?:\\.[a-zA-Z0-9]+)?(?:\\?|$)").matcher(ch.streamUrl);
+                if (m.find()) cleanId = m.group(1);
+            }
 
             // Duration in minutes
             long durationMins = (prog.stopMs - prog.startMs) / (60 * 1000);
@@ -2820,41 +2848,71 @@ public class MainActivity extends AppCompatActivity {
             long startSec = prog.startMs / 1000L;
             long stopSec = prog.stopMs / 1000L;
 
-            // Direct extraction from prog.start (YYYY-MM-DD HH:mm:ss) to preserve exact server clock!
-            String startFormatted = "";
+            // Formats for start date:
+            // 1. Raw start from server EPG (exact server clock without timezone offset issues!)
+            String rawStart = "";
             if (prog.start != null && prog.start.length() >= 16) {
-                // e.g. "2025-11-07 14:00:00" -> "2025-11-07:14-00"
-                startFormatted = prog.start.substring(0, 10) + ":" + prog.start.substring(11, 13) + "-" + prog.start.substring(14, 16);
-            } else {
-                SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
-                startFormatted = sdf.format(new Date(prog.startMs));
+                rawStart = prog.start.substring(0, 10) + ":" + prog.start.substring(11, 13) + "-" + prog.start.substring(14, 16);
             }
-            String startFormattedDash = startFormatted.replace(":", "-");
+
+            // 2. Local device clock format
+            SimpleDateFormat sdfLocal = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
+            String localFormatted = sdfLocal.format(new Date(prog.startMs));
+
+            // 3. UTC clock format
+            SimpleDateFormat sdfUtc = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
+            sdfUtc.setTimeZone(TimeZone.getTimeZone("UTC"));
+            String utcFormatted = sdfUtc.format(new Date(prog.startMs));
 
             String encUser = URLEncoder.encode(user, "UTF-8");
             String encPass = URLEncoder.encode(pass, "UTF-8");
 
             List<String> urls = new ArrayList<>();
             List<String> titles = new ArrayList<>();
+            java.util.Set<String> seen = new java.util.HashSet<>();
 
-            // 1. Direct Xtream MPEG-TS format with raw credentials (most common for XC & XUI)
-            urls.add(server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + startFormatted + "/" + cleanId + ".ts");
-            // 2. Direct Xtream MPEG-TS format with encoded credentials
-            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormatted + "/" + cleanId + ".ts");
-            // 3. Xtream streaming PHP endpoint with raw credentials
-            urls.add(server + "/streaming/timeshift.php?username=" + user + "&password=" + pass + "&stream=" + cleanId + "&start=" + startFormatted + "&duration=" + durationMins);
-            // 4. Xtream streaming PHP endpoint with encoded credentials
-            urls.add(server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormatted + "&duration=" + durationMins);
-            // 5. Dash separator format (for reverse proxies rejecting colons in paths)
-            urls.add(server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + startFormattedDash + "/" + cleanId + ".ts");
-            // 6. Flussonic / XC HLS catchup format (m3u8 with utc/lutc parameters)
-            urls.add(server + "/live/" + user + "/" + pass + "/" + cleanId + ".m3u8?utc=" + startSec + "&lutc=" + stopSec);
-            // 7. Unix timestamp epoch format (used by XUI.one, ZapX)
-            urls.add(server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + startSec + "/" + cleanId + ".ts");
-            // 8. Direct Xtream HLS format (.m3u8)
-            urls.add(server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + startFormatted + "/" + cleanId + ".m3u8");
-            // 9. Root timeshift.php fallback
-            urls.add(server + "/timeshift.php?username=" + user + "&password=" + pass + "&stream=" + cleanId + "&start=" + startFormatted + "&duration=" + durationMins);
+            java.util.List<String> timeFormats = new ArrayList<>();
+            if (!rawStart.isEmpty()) timeFormats.add(rawStart);
+            if (!timeFormats.contains(localFormatted)) timeFormats.add(localFormatted);
+            if (!timeFormats.contains(utcFormatted)) timeFormats.add(utcFormatted);
+
+            for (String tf : timeFormats) {
+                String tfDash = tf.replace(":", "-");
+                // Standard TS format (Raw credentials)
+                String u1 = server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + tf + "/" + cleanId + ".ts";
+                if (seen.add(u1)) urls.add(u1);
+
+                // Standard HLS format
+                String u2 = server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + tf + "/" + cleanId + ".m3u8";
+                if (seen.add(u2)) urls.add(u2);
+
+                // Streaming PHP timeshift endpoint
+                String u3 = server + "/streaming/timeshift.php?username=" + user + "&password=" + pass + "&stream=" + cleanId + "&start=" + tf + "&duration=" + durationMins;
+                if (seen.add(u3)) urls.add(u3);
+
+                // Encoded credentials variant
+                String u4 = server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + tf + "/" + cleanId + ".ts";
+                if (seen.add(u4)) urls.add(u4);
+
+                // Dash separator variant
+                String u5 = server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + tfDash + "/" + cleanId + ".ts";
+                if (seen.add(u5)) urls.add(u5);
+            }
+
+            // Unix timestamp epoch formats (XUI.one, ZapX)
+            String uEpochTs = server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + startSec + "/" + cleanId + ".ts";
+            if (seen.add(uEpochTs)) urls.add(uEpochTs);
+
+            String uEpochM3u8 = server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + startSec + "/" + cleanId + ".m3u8";
+            if (seen.add(uEpochM3u8)) urls.add(uEpochM3u8);
+
+            // Flussonic / XC HLS catchup format (m3u8 with utc/lutc parameters)
+            String uFlussonic = server + "/live/" + user + "/" + pass + "/" + cleanId + ".m3u8?utc=" + startSec + "&lutc=" + stopSec;
+            if (seen.add(uFlussonic)) urls.add(uFlussonic);
+
+            // Root timeshift.php fallback
+            String uRootPhp = server + "/timeshift.php?username=" + user + "&password=" + pass + "&stream=" + cleanId + "&start=" + localFormatted + "&duration=" + durationMins;
+            if (seen.add(uRootPhp)) urls.add(uRootPhp);
 
             for (int u = 0; u < urls.size(); u++) {
                 titles.add("[Replay] " + ch.name + " - " + prog.title);
@@ -3689,6 +3747,7 @@ public class MainActivity extends AppCompatActivity {
             tvBuild.setBackground(bBg);
             header.addView(tvBuild);
 
+            root.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
             root.addView(header);
 
             TextView tvSub = new TextView(this);
@@ -3699,6 +3758,8 @@ public class MainActivity extends AppCompatActivity {
             root.addView(tvSub);
 
             ScrollView sv = new ScrollView(this);
+            sv.setFocusable(false);
+            sv.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
             LinearLayout listContainer = new LinearLayout(this);
             listContainer.setOrientation(LinearLayout.VERTICAL);
 
@@ -3707,21 +3768,48 @@ public class MainActivity extends AppCompatActivity {
                 dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             }
 
-            // 1. Dons & Feedback (restored pre-build 100)
+            // 1. Organiser les bouquets & chaînes (Custom order & visibility)
+            listContainer.addView(createSettingsCard("📁", "Organiser les bouquets & chaînes",
+                    "Réorganiser l'ordre d'affichage (▲/▼), masquer ou afficher des bouquets et chaînes", v -> {
+                        dialog.dismiss();
+                        showCategoryManagerDialog();
+                    }));
+
+            // 2. Favoris en tête des bouquets
+            final boolean showFavs = prefs.getBoolean("pref_show_favorites_category", true);
+            listContainer.addView(createSettingsCard("⭐", "Favoris en tête des bouquets : " + (showFavs ? "ACTIVÉ" : "DÉSACTIVÉ"),
+                    showFavs ? "Le bouquet ⭐ Favoris s'affiche au sommet • Cliquer pour masquer" : "Le bouquet ⭐ Favoris est masqué • Cliquer pour activer", v -> {
+                        dialog.dismiss();
+                        prefs.edit().putBoolean("pref_show_favorites_category", !showFavs).apply();
+                        loadLocalData();
+                        Toast.makeText(this, !showFavs ? "Favoris en tête activés" : "Favoris en tête masqués", Toast.LENGTH_SHORT).show();
+                    }));
+
+            // 3. Recommandations 'Pour vous' (VOD & Séries)
+            final boolean showForYou = prefs.getBoolean("pref_show_for_you", true);
+            listContainer.addView(createSettingsCard("✨", "Recommandations 'Pour vous' : " + (showForYou ? "ACTIVÉ" : "DÉSACTIVÉ"),
+                    showForYou ? "Le bouquet ✨ Pour vous s'affiche en tête des films et séries • Cliquer pour masquer" : "Le bouquet ✨ Pour vous est masqué • Cliquer pour activer", v -> {
+                        dialog.dismiss();
+                        prefs.edit().putBoolean("pref_show_for_you", !showForYou).apply();
+                        loadLocalData();
+                        Toast.makeText(this, !showForYou ? "Recommandations activées" : "Recommandations masquées", Toast.LENGTH_SHORT).show();
+                    }));
+
+            // 4. Dons & Feedback (restored pre-build 100)
             listContainer.addView(createSettingsCard("💖", "Soutenir le projet & Avis / Feedback",
                     "Faire un don (GitHub Sponsors / PayPal) ou signaler un bug", v -> {
                         dialog.dismiss();
                         showDonationsAndFeedbackDialog();
                     }));
 
-            // 2. Contrôle Parental
+            // 5. Contrôle Parental
             listContainer.addView(createSettingsCard("🛡️", "Contrôle Parental & Code PIN",
                     "Verrouiller ou déverrouiller l'accès aux bouquets adultes (PIN)", v -> {
                         dialog.dismiss();
                         showParentalControlDialog();
                     }));
 
-            // 3. Compte Cloud & Synchronisation
+            // 6. Compte Cloud & Synchronisation
             if (isCloudConnected) {
                 listContainer.addView(createSettingsCard("☁️", "Compte Cloud : " + cloudUser,
                         "Connecté • Synchronisation automatique TV & Mobile", v -> {
@@ -3749,14 +3837,14 @@ public class MainActivity extends AppCompatActivity {
                         }));
             }
 
-            // 4. Lecteur Vidéo & Performances
+            // 7. Lecteur Vidéo & Performances
             listContainer.addView(createSettingsCard("📺", "Lecteur Vidéo & Performances",
                     "Accélération matérielle GPU, moteur Media3 ExoPlayer, taille du tampon", v -> {
                         dialog.dismiss();
                         showPlayerSettingsDialog();
                     }));
 
-            // 5. Purge Cache
+            // 8. Purge Cache
             listContainer.addView(createSettingsCard("🧹", "Vider le Cache & Resynchroniser",
                     "Purger le cache local des chaînes et retélécharger la playlist", v -> {
                         dialog.dismiss();
@@ -3766,21 +3854,21 @@ public class MainActivity extends AppCompatActivity {
                         triggerSync();
                     }));
 
-            // 6. Mise à Jour OTA
+            // 9. Mise à Jour OTA
             listContainer.addView(createSettingsCard("🔄", "Rechercher des Mises à Jour (OTA)",
                     "Vérifier la dernière version de KeoTV et mettre à jour l'APK", v -> {
                         dialog.dismiss();
                         UpdateManager.checkForUpdates(this, true);
                     }));
 
-            // 7. Diagnostic Système
+            // 10. Diagnostic Système
             listContainer.addView(createSettingsCard("📊", "Diagnostic & État du Système",
                     "Statistiques du catalogue, mémoire RAM et base SQLite", v -> {
                         dialog.dismiss();
                         showDiagnosticDialog();
                     }));
 
-            // 8. Réinitialisation Usine
+            // 11. Réinitialisation Usine
             listContainer.addView(createSettingsCard("⚠️", "Réinitialisation Usine Complète",
                     "Effacer toutes les playlists locales, comptes et réinitialiser l'app", v -> {
                         dialog.dismiss();
@@ -3822,12 +3910,14 @@ public class MainActivity extends AppCompatActivity {
             closeLp.topMargin = dpToPx(10);
             root.addView(btnClose, closeLp);
 
-            dialog.show();
-            listContainer.post(() -> {
-                if (listContainer.getChildCount() > 0) {
-                    listContainer.getChildAt(0).requestFocus();
-                }
+            dialog.setOnShowListener(d -> {
+                listContainer.post(() -> {
+                    if (listContainer.getChildCount() > 0) {
+                        listContainer.getChildAt(0).requestFocus();
+                    }
+                });
             });
+            dialog.show();
         } catch (Throwable t) {
             Log.e(TAG, "Failed to show settings dialog", t);
         }
@@ -3916,6 +4006,470 @@ public class MainActivity extends AppCompatActivity {
         });
 
         return card;
+    }
+
+    // =============================================================================================
+    // CATEGORY & CHANNEL ORDER MANAGER
+    // =============================================================================================
+    private String activeManagerType = "live";
+
+    private void showCategoryManagerDialog() {
+        if (isFinishing() || isDestroyed()) return;
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dpToPx(20), dpToPx(16), dpToPx(20), dpToPx(16));
+        root.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+
+        GradientDrawable rootBg = new GradientDrawable();
+        rootBg.setColor(0xFF0F172A);
+        rootBg.setCornerRadius(dpToPx(16));
+        rootBg.setStroke(dpToPx(1), 0xFF334155);
+        root.setBackground(rootBg);
+
+        // Header Title
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("📁 ORGANISER LES BOUQUETS & CHAÎNES");
+        tvTitle.setTextSize(16f);
+        tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        tvTitle.setTextColor(Color.WHITE);
+        header.addView(tvTitle, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+        // Reset button
+        TextView btnReset = new TextView(this);
+        btnReset.setText("🔄 Réinitialiser l'ordre");
+        btnReset.setTextSize(12f);
+        btnReset.setTypeface(Typeface.DEFAULT_BOLD);
+        btnReset.setTextColor(0xFF38BDF8);
+        btnReset.setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6));
+        btnReset.setFocusable(true);
+        GradientDrawable rBg = new GradientDrawable();
+        rBg.setColor(0xFF0C4A6E);
+        rBg.setCornerRadius(dpToPx(8));
+        rBg.setStroke(dpToPx(1), 0xFF0284C7);
+        btnReset.setBackground(rBg);
+        header.addView(btnReset);
+
+        root.addView(header);
+
+        // Tabs Row: Direct TV / Films VOD / Séries TV
+        LinearLayout tabsRow = new LinearLayout(this);
+        tabsRow.setOrientation(LinearLayout.HORIZONTAL);
+        tabsRow.setPadding(0, dpToPx(12), 0, dpToPx(12));
+
+        final TextView tabLive = createManagerTab("📺 Direct TV", "live".equals(activeManagerType));
+        final TextView tabVod = createManagerTab("🎬 Films VOD", "vod".equals(activeManagerType));
+        final TextView tabSeries = createManagerTab("🍿 Séries TV", "series".equals(activeManagerType));
+
+        tabsRow.addView(tabLive);
+        tabsRow.addView(tabVod);
+        tabsRow.addView(tabSeries);
+        root.addView(tabsRow);
+
+        // Scrollable List Container
+        ScrollView sv = new ScrollView(this);
+        sv.setFocusable(false);
+        sv.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        LinearLayout.LayoutParams svLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(380));
+        final LinearLayout listContainer = new LinearLayout(this);
+        listContainer.setOrientation(LinearLayout.VERTICAL);
+        sv.addView(listContainer);
+        root.addView(sv, svLp);
+
+        // Bottom Close button
+        TextView btnClose = new TextView(this);
+        btnClose.setText("Fermer & Appliquer");
+        btnClose.setTextSize(13f);
+        btnClose.setTypeface(Typeface.DEFAULT_BOLD);
+        btnClose.setTextColor(0xFF94A3B8);
+        btnClose.setGravity(Gravity.CENTER);
+        btnClose.setPadding(dpToPx(16), dpToPx(10), dpToPx(16), dpToPx(10));
+        btnClose.setFocusable(true);
+        GradientDrawable closeBg = new GradientDrawable();
+        closeBg.setColor(0xFF1E293B);
+        closeBg.setCornerRadius(dpToPx(8));
+        btnClose.setBackground(closeBg);
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        closeLp.topMargin = dpToPx(10);
+        root.addView(btnClose, closeLp);
+
+        final AlertDialog dialog = builder.setView(root).create();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
+
+        btnClose.setOnClickListener(v -> dialog.dismiss());
+        btnClose.setOnFocusChangeListener((v, hasFocus) -> {
+            GradientDrawable d = (GradientDrawable) btnClose.getBackground();
+            if (hasFocus) {
+                d.setColor(0xFF334155);
+                d.setStroke(dpToPx(2), Color.WHITE);
+                btnClose.setTextColor(Color.WHITE);
+            } else {
+                d.setColor(0xFF1E293B);
+                d.setStroke(0, Color.TRANSPARENT);
+                btnClose.setTextColor(0xFF94A3B8);
+            }
+        });
+
+        dialog.setOnDismissListener(d -> loadLocalData());
+
+        // Refresh List logic
+        final Runnable refreshList = new Runnable() {
+            @Override
+            public void run() {
+                updateManagerTabStyle(tabLive, "live".equals(activeManagerType));
+                updateManagerTabStyle(tabVod, "vod".equals(activeManagerType));
+                updateManagerTabStyle(tabSeries, "series".equals(activeManagerType));
+
+                new Thread(() -> {
+                    final List<KeoDatabase.CategoryItem> categories = db.getAllCategoriesForManager(activeManagerType);
+                    runOnUiThread(() -> {
+                        listContainer.removeAllViews();
+                        if (categories.isEmpty()) {
+                            TextView emptyTv = new TextView(MainActivity.this);
+                            emptyTv.setText("Aucun bouquet trouvé dans cette section");
+                            emptyTv.setTextColor(0xFF94A3B8);
+                            emptyTv.setPadding(dpToPx(16), dpToPx(20), dpToPx(16), dpToPx(20));
+                            listContainer.addView(emptyTv);
+                            return;
+                        }
+
+                        for (int i = 0; i < categories.size(); i++) {
+                            final int index = i;
+                            final KeoDatabase.CategoryItem cat = categories.get(i);
+                            final KeoDatabase.CategoryItem prevCat = (i > 0) ? categories.get(i - 1) : null;
+                            final KeoDatabase.CategoryItem nextCat = (i < categories.size() - 1) ? categories.get(i + 1) : null;
+
+                            LinearLayout row = new LinearLayout(MainActivity.this);
+                            row.setOrientation(LinearLayout.HORIZONTAL);
+                            row.setGravity(Gravity.CENTER_VERTICAL);
+                            row.setPadding(dpToPx(12), dpToPx(8), dpToPx(12), dpToPx(8));
+                            row.setFocusable(false);
+
+                            GradientDrawable rowBg = new GradientDrawable();
+                            rowBg.setColor(cat.isHidden ? 0x221E293B : 0xFF1E293B);
+                            rowBg.setCornerRadius(dpToPx(8));
+                            rowBg.setStroke(dpToPx(1), cat.isHidden ? 0xFF1E293B : 0xFF334155);
+                            row.setBackground(rowBg);
+
+                            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                            rowLp.setMargins(0, dpToPx(3), 0, dpToPx(3));
+                            row.setLayoutParams(rowLp);
+
+                            // Category Name + Count
+                            TextView tvCatName = new TextView(MainActivity.this);
+                            tvCatName.setText((index + 1) + ". " + cat.name + " (" + cat.itemCount + ")");
+                            tvCatName.setTextSize(13f);
+                            tvCatName.setTypeface(Typeface.DEFAULT_BOLD);
+                            tvCatName.setTextColor(cat.isHidden ? 0xFF64748B : Color.WHITE);
+                            row.addView(tvCatName, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+                            // Action: Move Up ▲
+                            TextView btnUp = createManagerMiniBtn("▲", v -> {
+                                if (prevCat != null) {
+                                    db.swapCategoryOrder(cat.id, cat.customOrder, prevCat.id, prevCat.customOrder);
+                                    run();
+                                }
+                            });
+                            btnUp.setEnabled(prevCat != null);
+                            btnUp.setAlpha(prevCat != null ? 1.0f : 0.3f);
+                            row.addView(btnUp);
+
+                            // Action: Move Down ▼
+                            TextView btnDown = createManagerMiniBtn("▼", v -> {
+                                if (nextCat != null) {
+                                    db.swapCategoryOrder(cat.id, cat.customOrder, nextCat.id, nextCat.customOrder);
+                                    run();
+                                }
+                            });
+                            btnDown.setEnabled(nextCat != null);
+                            btnDown.setAlpha(nextCat != null ? 1.0f : 0.3f);
+                            row.addView(btnDown);
+
+                            // Action: Hide / Show 👁️
+                            TextView btnEye = createManagerMiniBtn(cat.isHidden ? "🙈" : "👁️", v -> {
+                                db.toggleCategoryHidden(cat.id, !cat.isHidden);
+                                run();
+                            });
+                            row.addView(btnEye);
+
+                            // Action: Channels 📋
+                            TextView btnChannels = createManagerMiniBtn("📋 Chaînes", v -> {
+                                showChannelManagerDialog(cat);
+                            });
+                            row.addView(btnChannels);
+
+                            listContainer.addView(row);
+                        }
+                    });
+                }).start();
+            }
+        };
+
+        tabLive.setOnClickListener(v -> { activeManagerType = "live"; refreshList.run(); });
+        tabVod.setOnClickListener(v -> { activeManagerType = "vod"; refreshList.run(); });
+        tabSeries.setOnClickListener(v -> { activeManagerType = "series"; refreshList.run(); });
+
+        btnReset.setOnClickListener(v -> {
+            new AlertDialog.Builder(this)
+                    .setTitle("Réinitialiser l'ordre")
+                    .setMessage("Voulez-vous rétablir l'ordre d'origine pour ces bouquets ?")
+                    .setPositiveButton("Réinitialiser", (d, w) -> {
+                        db.resetCategoryOrder(activeManagerType);
+                        Toast.makeText(MainActivity.this, "Ordre réinitialisé", Toast.LENGTH_SHORT).show();
+                        refreshList.run();
+                    })
+                    .setNegativeButton("Annuler", null)
+                    .show();
+        });
+
+        dialog.show();
+        refreshList.run();
+        dialog.setOnShowListener(d -> {
+            tabLive.post(() -> tabLive.requestFocus());
+        });
+    }
+
+    private TextView createManagerTab(String title, boolean active) {
+        TextView tab = new TextView(this);
+        tab.setText(title);
+        tab.setTextSize(13f);
+        tab.setTypeface(Typeface.DEFAULT_BOLD);
+        tab.setFocusable(true);
+        tab.setGravity(Gravity.CENTER);
+        tab.setPadding(dpToPx(14), dpToPx(8), dpToPx(14), dpToPx(8));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f);
+        lp.setMargins(dpToPx(4), 0, dpToPx(4), 0);
+        tab.setLayoutParams(lp);
+        updateManagerTabStyle(tab, active);
+        tab.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus) {
+                tab.setScaleX(1.05f);
+                tab.setScaleY(1.05f);
+            } else {
+                tab.setScaleX(1.0f);
+                tab.setScaleY(1.0f);
+            }
+        });
+        return tab;
+    }
+
+    private void updateManagerTabStyle(TextView tab, boolean active) {
+        GradientDrawable d = new GradientDrawable();
+        if (active) {
+            d.setColor(0xFF0284C7);
+            d.setStroke(dpToPx(2), Color.WHITE);
+            tab.setTextColor(Color.WHITE);
+        } else {
+            d.setColor(0xFF1E293B);
+            d.setStroke(dpToPx(1), 0xFF334155);
+            tab.setTextColor(0xFF94A3B8);
+        }
+        d.setCornerRadius(dpToPx(8));
+        tab.setBackground(d);
+    }
+
+    private TextView createManagerMiniBtn(String text, View.OnClickListener onClick) {
+        TextView btn = new TextView(this);
+        btn.setText(text);
+        btn.setTextSize(12f);
+        btn.setTypeface(Typeface.DEFAULT_BOLD);
+        btn.setTextColor(0xFFE2E8F0);
+        btn.setGravity(Gravity.CENTER);
+        btn.setFocusable(true);
+        btn.setPadding(dpToPx(10), dpToPx(6), dpToPx(10), dpToPx(6));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xFF334155);
+        bg.setCornerRadius(dpToPx(6));
+        btn.setBackground(bg);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.setMargins(dpToPx(3), 0, dpToPx(3), 0);
+        btn.setLayoutParams(lp);
+        btn.setOnClickListener(onClick);
+        btn.setOnFocusChangeListener((v, hasFocus) -> {
+            GradientDrawable d = (GradientDrawable) btn.getBackground();
+            if (hasFocus) {
+                d.setColor(0xFF0284C7);
+                d.setStroke(dpToPx(2), Color.WHITE);
+                btn.setTextColor(Color.WHITE);
+                btn.setScaleX(1.1f);
+                btn.setScaleY(1.1f);
+            } else {
+                d.setColor(0xFF334155);
+                d.setStroke(0, Color.TRANSPARENT);
+                btn.setTextColor(0xFFE2E8F0);
+                btn.setScaleX(1.0f);
+                btn.setScaleY(1.0f);
+            }
+        });
+        btn.setOnKeyListener((v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)) {
+                btn.performClick();
+                return true;
+            }
+            return false;
+        });
+        return btn;
+    }
+
+    private void showChannelManagerDialog(final KeoDatabase.CategoryItem cat) {
+        if (cat == null || isFinishing() || isDestroyed()) return;
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dpToPx(20), dpToPx(16), dpToPx(20), dpToPx(16));
+        root.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+
+        GradientDrawable rootBg = new GradientDrawable();
+        rootBg.setColor(0xFF0F172A);
+        rootBg.setCornerRadius(dpToPx(16));
+        rootBg.setStroke(dpToPx(1), 0xFF334155);
+        root.setBackground(rootBg);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("📋 CHAÎNES : " + cat.name.toUpperCase());
+        tvTitle.setTextSize(15f);
+        tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        tvTitle.setTextColor(Color.WHITE);
+        tvTitle.setPadding(0, 0, 0, dpToPx(10));
+        root.addView(tvTitle);
+
+        ScrollView sv = new ScrollView(this);
+        sv.setFocusable(false);
+        sv.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        LinearLayout.LayoutParams svLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dpToPx(380));
+        final LinearLayout listContainer = new LinearLayout(this);
+        listContainer.setOrientation(LinearLayout.VERTICAL);
+        sv.addView(listContainer);
+        root.addView(sv, svLp);
+
+        TextView btnClose = new TextView(this);
+        btnClose.setText("Retour aux bouquets");
+        btnClose.setTextSize(13f);
+        btnClose.setTypeface(Typeface.DEFAULT_BOLD);
+        btnClose.setTextColor(0xFF94A3B8);
+        btnClose.setGravity(Gravity.CENTER);
+        btnClose.setPadding(dpToPx(16), dpToPx(10), dpToPx(16), dpToPx(10));
+        btnClose.setFocusable(true);
+        GradientDrawable closeBg = new GradientDrawable();
+        closeBg.setColor(0xFF1E293B);
+        closeBg.setCornerRadius(dpToPx(8));
+        btnClose.setBackground(closeBg);
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        closeLp.topMargin = dpToPx(10);
+        root.addView(btnClose, closeLp);
+
+        final AlertDialog dialog = builder.setView(root).create();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
+        btnClose.setOnClickListener(v -> dialog.dismiss());
+        btnClose.setOnFocusChangeListener((v, hasFocus) -> {
+            GradientDrawable d = (GradientDrawable) btnClose.getBackground();
+            if (hasFocus) {
+                d.setColor(0xFF334155);
+                d.setStroke(dpToPx(2), Color.WHITE);
+                btnClose.setTextColor(Color.WHITE);
+            } else {
+                d.setColor(0xFF1E293B);
+                d.setStroke(0, Color.TRANSPARENT);
+                btnClose.setTextColor(0xFF94A3B8);
+            }
+        });
+
+        final Runnable refreshChannels = new Runnable() {
+            @Override
+            public void run() {
+                new Thread(() -> {
+                    final List<KeoDatabase.ChannelItem> channels = db.getChannelsByGroup(cat.id);
+                    runOnUiThread(() -> {
+                        listContainer.removeAllViews();
+                        if (channels.isEmpty()) {
+                            TextView emptyTv = new TextView(MainActivity.this);
+                            emptyTv.setText("Aucune chaîne trouvée dans ce bouquet");
+                            emptyTv.setTextColor(0xFF94A3B8);
+                            emptyTv.setPadding(dpToPx(16), dpToPx(20), dpToPx(16), dpToPx(20));
+                            listContainer.addView(emptyTv);
+                            return;
+                        }
+
+                        for (int i = 0; i < channels.size(); i++) {
+                            final int index = i;
+                            final KeoDatabase.ChannelItem ch = channels.get(i);
+                            final KeoDatabase.ChannelItem prevCh = (i > 0) ? channels.get(i - 1) : null;
+                            final KeoDatabase.ChannelItem nextCh = (i < channels.size() - 1) ? channels.get(i + 1) : null;
+
+                            LinearLayout row = new LinearLayout(MainActivity.this);
+                            row.setOrientation(LinearLayout.HORIZONTAL);
+                            row.setGravity(Gravity.CENTER_VERTICAL);
+                            row.setPadding(dpToPx(12), dpToPx(8), dpToPx(12), dpToPx(8));
+                            row.setFocusable(false);
+
+                            GradientDrawable rowBg = new GradientDrawable();
+                            rowBg.setColor(0xFF1E293B);
+                            rowBg.setCornerRadius(dpToPx(8));
+                            rowBg.setStroke(dpToPx(1), 0xFF334155);
+                            row.setBackground(rowBg);
+
+                            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                            rowLp.setMargins(0, dpToPx(3), 0, dpToPx(3));
+                            row.setLayoutParams(rowLp);
+
+                            TextView tvChName = new TextView(MainActivity.this);
+                            tvChName.setText((index + 1) + ". " + ch.name);
+                            tvChName.setTextSize(13f);
+                            tvChName.setTypeface(Typeface.DEFAULT_BOLD);
+                            tvChName.setTextColor(Color.WHITE);
+                            row.addView(tvChName, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+                            // Action: Move Up ▲
+                            TextView btnUp = createManagerMiniBtn("▲", v -> {
+                                if (prevCh != null) {
+                                    db.swapChannelOrder(ch.id, ch.num, prevCh.id, prevCh.num);
+                                    run();
+                                }
+                            });
+                            btnUp.setEnabled(prevCh != null);
+                            btnUp.setAlpha(prevCh != null ? 1.0f : 0.3f);
+                            row.addView(btnUp);
+
+                            // Action: Move Down ▼
+                            TextView btnDown = createManagerMiniBtn("▼", v -> {
+                                if (nextCh != null) {
+                                    db.swapChannelOrder(ch.id, ch.num, nextCh.id, nextCh.num);
+                                    run();
+                                }
+                            });
+                            btnDown.setEnabled(nextCh != null);
+                            btnDown.setAlpha(nextCh != null ? 1.0f : 0.3f);
+                            row.addView(btnDown);
+
+                            // Action: Favorite Star
+                            TextView btnStar = createManagerMiniBtn(ch.isFav ? "⭐" : "☆", v -> {
+                                db.toggleFavorite(ch.id, !ch.isFav);
+                                run();
+                            });
+                            row.addView(btnStar);
+
+                            listContainer.addView(row);
+                        }
+                    });
+                }).start();
+            }
+        };
+
+        dialog.show();
+        refreshChannels.run();
     }
 
     private void showDonationsAndFeedbackDialog() {
@@ -4812,13 +5366,11 @@ public class MainActivity extends AppCompatActivity {
                             long nowSec = System.currentTimeMillis() / 1000L;
                             if (p != null && p.stopTimestamp > 0 && p.stopTimestamp < nowSec) {
                                 // Past program -> Launch Replay!
-                                if (item.tvArchive == 1 || "replay".equals(currentType)) {
-                                    KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
-                                    if (pl != null) {
-                                        playCatchupStream(item, p, pl);
-                                    }
+                                KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
+                                if (pl != null) {
+                                    playCatchupStream(item, p, pl);
                                 } else {
-                                    Toast.makeText(MainActivity.this, "Le Replay n'est pas disponible pour cette chaîne", Toast.LENGTH_SHORT).show();
+                                    Toast.makeText(MainActivity.this, "Compte non configuré pour le replay", Toast.LENGTH_SHORT).show();
                                 }
                             } else if (p != null && p.startTimestamp > nowSec) {
                                 // Future program
@@ -4850,12 +5402,28 @@ public class MainActivity extends AppCompatActivity {
                                     holder.activateTimelineFuture();
                                     return true;
                                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                                    if (event.getRepeatCount() >= 1 || (event.getEventTime() - event.getDownTime() >= 350)) {
-                                        // Long-press DPAD_LEFT activates Timeline Exploration to Past (Replay)!
-                                        holder.activateTimelinePast();
+                                    if (event.getRepeatCount() == 0) {
+                                        holder.leftLongPressTriggered = false;
+                                        if (holder.leftLongPressRunnable != null) {
+                                            holder.itemView.removeCallbacks(holder.leftLongPressRunnable);
+                                        }
+                                        holder.leftLongPressRunnable = () -> {
+                                            holder.leftLongPressTriggered = true;
+                                            holder.activateTimelinePast();
+                                        };
+                                        holder.itemView.postDelayed(holder.leftLongPressRunnable, 300);
+                                        return true; // Consume so Android does not immediately steal focus to bouquets!
+                                    } else if (event.getRepeatCount() >= 1) {
+                                        if (!holder.leftLongPressTriggered) {
+                                            holder.leftLongPressTriggered = true;
+                                            if (holder.leftLongPressRunnable != null) {
+                                                holder.itemView.removeCallbacks(holder.leftLongPressRunnable);
+                                            }
+                                            holder.activateTimelinePast();
+                                        }
                                         return true;
                                     }
-                                    return false;
+                                    return true;
                                 }
                             } else {
                                 // TIMELINE EXPLORATION MODE
@@ -4876,8 +5444,14 @@ public class MainActivity extends AppCompatActivity {
                             }
                         } else if (event.getAction() == KeyEvent.ACTION_UP) {
                             if (!holder.isTimelineMode && keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                                // Short press DPAD_LEFT: Return to categories list
-                                focusCategoriesList();
+                                if (holder.leftLongPressRunnable != null) {
+                                    holder.itemView.removeCallbacks(holder.leftLongPressRunnable);
+                                }
+                                if (!holder.leftLongPressTriggered) {
+                                    // Short press DPAD_LEFT: Return to categories list
+                                    focusCategoriesList();
+                                }
+                                holder.leftLongPressTriggered = false;
                                 return true;
                             } else if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
                                 holder.itemView.performClick();
@@ -4935,6 +5509,8 @@ public class MainActivity extends AppCompatActivity {
             boolean isTimelineMode = false;
             int selectedTimelineIndex = -1;
             int currentProgramIndex = -1;
+            Runnable leftLongPressRunnable = null;
+            boolean leftLongPressTriggered = false;
             final List<XtreamClient.EpgProgram> cachedPrograms = new ArrayList<>();
             final List<View> slotViews = new ArrayList<>();
             KeoDatabase.ChannelItem boundChannel = null;
@@ -5137,7 +5713,20 @@ public class MainActivity extends AppCompatActivity {
             }
 
             public void activateTimelinePast() {
-                if (cachedPrograms.isEmpty()) return;
+                if (cachedPrograms.isEmpty()) {
+                    if (boundChannel != null) {
+                        List<XtreamClient.EpgProgram> progs = epgProgramsCache.get(boundChannel.id);
+                        if (progs != null && !progs.isEmpty()) {
+                            bindTimeline(boundChannel, progs, boundChannel.name);
+                        } else {
+                            fetchEpgForChannel(boundChannel);
+                            Toast.makeText(itemView.getContext(), "Chargement du guide TV (Replay)...", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                    } else {
+                        return;
+                    }
+                }
                 isTimelineMode = true;
                 if (currentProgramIndex > 0) {
                     selectedTimelineIndex = currentProgramIndex - 1;
@@ -5150,7 +5739,20 @@ public class MainActivity extends AppCompatActivity {
             }
 
             public void activateTimelineFuture() {
-                if (cachedPrograms.isEmpty()) return;
+                if (cachedPrograms.isEmpty()) {
+                    if (boundChannel != null) {
+                        List<XtreamClient.EpgProgram> progs = epgProgramsCache.get(boundChannel.id);
+                        if (progs != null && !progs.isEmpty()) {
+                            bindTimeline(boundChannel, progs, boundChannel.name);
+                        } else {
+                            fetchEpgForChannel(boundChannel);
+                            Toast.makeText(itemView.getContext(), "Chargement du guide TV...", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                    } else {
+                        return;
+                    }
+                }
                 isTimelineMode = true;
                 if (currentProgramIndex < cachedPrograms.size() - 1) {
                     selectedTimelineIndex = currentProgramIndex + 1;

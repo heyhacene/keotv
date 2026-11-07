@@ -810,16 +810,16 @@ public class XtreamClient {
 
                 Map<String, EpgProgram> merged = new java.util.LinkedHashMap<>();
 
-                // 1. Fetch archives/past EPG if channel supports catchup
-                if (hasArchive) {
-                    try {
-                        String catchupUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_simple_data_table&stream_id=" + streamId;
-                        String jsonStr = fetchUrl(catchupUrl);
+                // 1. Fetch archives/past EPG table (all Xtream panels supporting catchup provide get_simple_data_table)
+                try {
+                    String catchupUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_simple_data_table&stream_id=" + streamId;
+                    String jsonStr = fetchUrl(catchupUrl);
+                    if (jsonStr != null && !jsonStr.trim().isEmpty()) {
                         JsonObject root = JsonParser.parseString(jsonStr).getAsJsonObject();
                         if (root.has("epg_listings") && root.get("epg_listings").isJsonArray()) {
                             JsonArray arr = root.getAsJsonArray("epg_listings");
-                            // Keep at most the 25 most recent past programs for fast parsing and zero memory bloat
-                            int startJson = Math.max(0, arr.size() - 25);
+                            // Keep at most the 30 most recent past programs for fast parsing and zero memory bloat
+                            int startJson = Math.max(0, arr.size() - 30);
                             for (int k = startJson; k < arr.size(); k++) {
                                 JsonElement el = arr.get(k);
                                 if (!el.isJsonObject()) continue;
@@ -831,8 +831,8 @@ public class XtreamClient {
                                 }
                             }
                         }
-                    } catch (Exception ignored) {}
-                }
+                    }
+                } catch (Exception ignored) {}
 
                 // 2. Fetch short EPG for current and future listings
                 try {
@@ -898,18 +898,44 @@ public class XtreamClient {
             p.start = getOptString(obj, "start", "");
             p.stop = obj.has("end") ? getOptString(obj, "end", "") : getOptString(obj, "stop", "");
 
-            if (obj.has("start_timestamp")) {
-                p.startTimestamp = obj.get("start_timestamp").getAsLong();
-            } else if (!p.start.isEmpty()) {
-                Date d = sdf.parse(p.start);
-                if (d != null) p.startTimestamp = d.getTime() / 1000L;
+            if (obj.has("start_timestamp") && !obj.get("start_timestamp").isJsonNull()) {
+                try {
+                    String s = obj.get("start_timestamp").getAsString().trim();
+                    if (!s.isEmpty()) p.startTimestamp = Long.parseLong(s);
+                } catch (Exception ignored) {}
             }
-            if (obj.has("stop_timestamp")) {
-                p.stopTimestamp = obj.get("stop_timestamp").getAsLong();
-            } else if (!p.stop.isEmpty()) {
-                Date d = sdf.parse(p.stop);
-                if (d != null) p.stopTimestamp = d.getTime() / 1000L;
+            if (p.startTimestamp == 0 && !p.start.isEmpty()) {
+                try {
+                    Date d = sdf.parse(p.start);
+                    if (d != null) p.startTimestamp = d.getTime() / 1000L;
+                } catch (Exception e) {
+                    try {
+                        SimpleDateFormat sdfShort = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US);
+                        Date d = sdfShort.parse(p.start);
+                        if (d != null) p.startTimestamp = d.getTime() / 1000L;
+                    } catch (Exception ignored) {}
+                }
             }
+
+            if (obj.has("stop_timestamp") && !obj.get("stop_timestamp").isJsonNull()) {
+                try {
+                    String s = obj.get("stop_timestamp").getAsString().trim();
+                    if (!s.isEmpty()) p.stopTimestamp = Long.parseLong(s);
+                } catch (Exception ignored) {}
+            }
+            if (p.stopTimestamp == 0 && !p.stop.isEmpty()) {
+                try {
+                    Date d = sdf.parse(p.stop);
+                    if (d != null) p.stopTimestamp = d.getTime() / 1000L;
+                } catch (Exception e) {
+                    try {
+                        SimpleDateFormat sdfShort = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US);
+                        Date d = sdfShort.parse(p.stop);
+                        if (d != null) p.stopTimestamp = d.getTime() / 1000L;
+                    } catch (Exception ignored) {}
+                }
+            }
+
             if (p.stopTimestamp > p.startTimestamp) {
                 p.durationMinutes = (int) ((p.stopTimestamp - p.startTimestamp) / 60);
             }
