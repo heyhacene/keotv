@@ -4165,7 +4165,7 @@ public class MainActivity extends AppCompatActivity {
 
                             // Category Name + Count
                             TextView tvCatName = new TextView(MainActivity.this);
-                            tvCatName.setText((index + 1) + ". " + cat.name + " (" + cat.itemCount + ")");
+                            tvCatName.setText((index + 1) + ". " + cat.name + (cat.count > 0 ? " (" + cat.count + ")" : ""));
                             tvCatName.setTextSize(13f);
                             tvCatName.setTypeface(Typeface.DEFAULT_BOLD);
                             tvCatName.setTextColor(cat.isHidden ? 0xFF64748B : Color.WHITE);
