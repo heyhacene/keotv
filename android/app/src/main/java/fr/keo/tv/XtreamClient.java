@@ -703,6 +703,7 @@ public class XtreamClient {
         public long startMs;
         public long stopMs;
         public int durationMinutes;
+        public boolean hasArchive = false;
 
         public String getFormattedTime() {
             try {
@@ -793,6 +794,44 @@ public class XtreamClient {
         return text;
     }
 
+    private static List<EpgProgram> parseEpgListingsFromJson(String jsonStr, SimpleDateFormat sdf) {
+        List<EpgProgram> list = new ArrayList<>();
+        if (jsonStr == null || jsonStr.trim().isEmpty()) return list;
+        try {
+            JsonElement rootEl = JsonParser.parseString(jsonStr.trim());
+            JsonArray arr = null;
+            if (rootEl.isJsonObject()) {
+                JsonObject rootObj = rootEl.getAsJsonObject();
+                if (rootObj.has("epg_listings")) {
+                    JsonElement epgEl = rootObj.get("epg_listings");
+                    if (epgEl != null && epgEl.isJsonArray()) {
+                        arr = epgEl.getAsJsonArray();
+                    } else if (epgEl != null && epgEl.isJsonObject()) {
+                        arr = new JsonArray();
+                        for (Map.Entry<String, JsonElement> entry : epgEl.getAsJsonObject().entrySet()) {
+                            if (entry.getValue() != null && entry.getValue().isJsonObject()) {
+                                arr.add(entry.getValue());
+                            }
+                        }
+                    }
+                }
+            } else if (rootEl.isJsonArray()) {
+                arr = rootEl.getAsJsonArray();
+            }
+
+            if (arr != null) {
+                for (JsonElement el : arr) {
+                    if (el == null || !el.isJsonObject()) continue;
+                    EpgProgram p = parseProgramFromJson(el.getAsJsonObject(), sdf);
+                    if (p != null) {
+                        list.add(p);
+                    }
+                }
+            }
+        } catch (Exception ignored) {}
+        return list;
+    }
+
     public static void fetchFullChannelTimeline(final String serverUrl, final String username, final String password, final String streamId, final boolean hasArchive, final EpgCallback callback) {
         if (streamId == null || streamId.isEmpty() || serverUrl == null) {
             if (callback != null) callback.onError("Paramètres EPG manquants");
@@ -814,43 +853,81 @@ public class XtreamClient {
                 try {
                     String catchupUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_simple_data_table&stream_id=" + streamId;
                     String jsonStr = fetchUrl(catchupUrl);
-                    if (jsonStr != null && !jsonStr.trim().isEmpty()) {
-                        JsonObject root = JsonParser.parseString(jsonStr).getAsJsonObject();
-                        if (root.has("epg_listings") && root.get("epg_listings").isJsonArray()) {
-                            JsonArray arr = root.getAsJsonArray("epg_listings");
-                            // Keep at most the 30 most recent past programs for fast parsing and zero memory bloat
-                            int startJson = Math.max(0, arr.size() - 30);
-                            for (int k = startJson; k < arr.size(); k++) {
-                                JsonElement el = arr.get(k);
-                                if (!el.isJsonObject()) continue;
-                                JsonObject obj = el.getAsJsonObject();
-                                EpgProgram p = parseProgramFromJson(obj, sdf);
-                                if (p != null) {
-                                    String key = p.startTimestamp > 0 ? String.valueOf(p.startTimestamp) : p.title + "_" + p.start;
-                                    merged.put(key, p);
-                                }
+                    List<EpgProgram> pastList = parseEpgListingsFromJson(jsonStr, sdf);
+                    for (EpgProgram p : pastList) {
+                        p.hasArchive = true;
+                        String key = p.startTimestamp > 0 ? String.valueOf(p.startTimestamp) : p.title + "_" + p.start;
+                        merged.put(key, p);
+                    }
+                } catch (Exception ignored) {}
+
+                // 2. Fallback: If no past programs from get_simple_data_table, try full get_epg
+                if (merged.isEmpty()) {
+                    try {
+                        String epgUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_epg&stream_id=" + streamId;
+                        String jsonStr = fetchUrl(epgUrl);
+                        List<EpgProgram> fullList = parseEpgListingsFromJson(jsonStr, sdf);
+                        for (EpgProgram p : fullList) {
+                            if (p.stopTimestamp > 0 && p.stopTimestamp < nowSec && hasArchive) {
+                                p.hasArchive = true;
                             }
+                            String key = p.startTimestamp > 0 ? String.valueOf(p.startTimestamp) : p.title + "_" + p.start;
+                            merged.put(key, p);
+                        }
+                    } catch (Exception ignored) {}
+                }
+
+                // 3. Fetch short EPG for current and future listings
+                try {
+                    String shortUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_short_epg&stream_id=" + streamId + "&limit=20";
+                    String jsonStr = fetchUrl(shortUrl);
+                    List<EpgProgram> shortList = parseEpgListingsFromJson(jsonStr, sdf);
+                    for (EpgProgram p : shortList) {
+                        String key = p.startTimestamp > 0 ? String.valueOf(p.startTimestamp) : p.title + "_" + p.start;
+                        if (!merged.containsKey(key)) {
+                            merged.put(key, p);
                         }
                     }
                 } catch (Exception ignored) {}
 
-                // 2. Fetch short EPG for current and future listings
-                try {
-                    String shortUrl = server + "/player_api.php?username=" + encUser + "&password=" + encPass + "&action=get_short_epg&stream_id=" + streamId + "&limit=20";
-                    String jsonStr = fetchUrl(shortUrl);
-                    JsonObject root = JsonParser.parseString(jsonStr).getAsJsonObject();
-                    if (root.has("epg_listings") && root.get("epg_listings").isJsonArray()) {
-                        for (JsonElement el : root.getAsJsonArray("epg_listings")) {
-                            if (!el.isJsonObject()) continue;
-                            JsonObject obj = el.getAsJsonObject();
-                            EpgProgram p = parseProgramFromJson(obj, sdf);
-                            if (p != null) {
-                                String key = p.startTimestamp > 0 ? String.valueOf(p.startTimestamp) : p.title + "_" + p.start;
-                                merged.put(key, p);
-                            }
+                // 4. If channel has catchup/archive enabled, ensure past programs exist even if provider EPG lacks descriptions
+                if (hasArchive) {
+                    boolean hasPast = false;
+                    for (EpgProgram p : merged.values()) {
+                        if (p.stopTimestamp > 0 && p.stopTimestamp < nowSec) {
+                            hasPast = true;
+                            p.hasArchive = true;
                         }
                     }
-                } catch (Exception ignored) {}
+                    if (!hasPast) {
+                        // Generate 24 hourly replay blocks for the last 24 hours so user can always rewind!
+                        long curProgStart = nowSec - (nowSec % 3600);
+                        SimpleDateFormat sdfSlot = new SimpleDateFormat("HH:mm", Locale.getDefault());
+                        SimpleDateFormat sdfDay = new SimpleDateFormat("EEE dd/MM", Locale.FRENCH);
+                        SimpleDateFormat sdfFull = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
+                        for (int h = 1; h <= 24; h++) {
+                            long slotStart = curProgStart - (h * 3600L);
+                            long slotEnd = slotStart + 3600L;
+                            EpgProgram sp = new EpgProgram();
+                            sp.id = "catchup_" + streamId + "_" + slotStart;
+                            sp.startTimestamp = slotStart;
+                            sp.stopTimestamp = slotEnd;
+                            sp.startMs = slotStart * 1000L;
+                            sp.stopMs = slotEnd * 1000L;
+                            sp.durationMinutes = 60;
+                            sp.hasArchive = true;
+                            Date dStart = new Date(sp.startMs);
+                            Date dEnd = new Date(sp.stopMs);
+                            String timeStr = sdfSlot.format(dStart) + " - " + sdfSlot.format(dEnd);
+                            String dayStr = sdfDay.format(dStart);
+                            sp.title = "Replay (" + dayStr + " " + timeStr + ")";
+                            sp.desc = "Session de rediffusion (" + timeStr + ")";
+                            sp.start = sdfFull.format(dStart);
+                            sp.stop = sdfFull.format(dEnd);
+                            merged.put(String.valueOf(sp.startTimestamp), sp);
+                        }
+                    }
+                }
 
                 List<EpgProgram> list = new ArrayList<>(merged.values());
                 java.util.Collections.sort(list, (a, b) -> Long.compare(a.startTimestamp, b.startTimestamp));
@@ -898,6 +975,10 @@ public class XtreamClient {
             p.start = getOptString(obj, "start", "");
             p.stop = obj.has("end") ? getOptString(obj, "end", "") : getOptString(obj, "stop", "");
 
+            if (obj.has("has_archive") && !obj.get("has_archive").isJsonNull()) {
+                p.hasArchive = getOptInt(obj, "has_archive", 0) == 1;
+            }
+
             if (obj.has("start_timestamp") && !obj.get("start_timestamp").isJsonNull()) {
                 try {
                     String s = obj.get("start_timestamp").getAsString().trim();
@@ -913,7 +994,13 @@ public class XtreamClient {
                         SimpleDateFormat sdfShort = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US);
                         Date d = sdfShort.parse(p.start);
                         if (d != null) p.startTimestamp = d.getTime() / 1000L;
-                    } catch (Exception ignored) {}
+                    } catch (Exception e2) {
+                        try {
+                            SimpleDateFormat sdfIso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
+                            Date d = sdfIso.parse(p.start);
+                            if (d != null) p.startTimestamp = d.getTime() / 1000L;
+                        } catch (Exception ignored) {}
+                    }
                 }
             }
 
@@ -932,9 +1019,18 @@ public class XtreamClient {
                         SimpleDateFormat sdfShort = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US);
                         Date d = sdfShort.parse(p.stop);
                         if (d != null) p.stopTimestamp = d.getTime() / 1000L;
-                    } catch (Exception ignored) {}
+                    } catch (Exception e2) {
+                        try {
+                            SimpleDateFormat sdfIso = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US);
+                            Date d = sdfIso.parse(p.stop);
+                            if (d != null) p.stopTimestamp = d.getTime() / 1000L;
+                        } catch (Exception ignored) {}
+                    }
                 }
             }
+
+            if (p.startTimestamp > 100000000000L) p.startTimestamp /= 1000L;
+            if (p.stopTimestamp > 100000000000L) p.stopTimestamp /= 1000L;
 
             if (p.stopTimestamp > p.startTimestamp) {
                 p.durationMinutes = (int) ((p.stopTimestamp - p.startTimestamp) / 60);
