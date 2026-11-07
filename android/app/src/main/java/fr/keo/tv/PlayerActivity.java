@@ -1237,7 +1237,6 @@ public class PlayerActivity extends AppCompatActivity {
                         bufferForPlaybackMs,
                         bufferForPlaybackAfterRebufferMs
                 )
-                .setPrioritizeTimeOverSizeThresholds(true)
                 .build();
 
         DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
@@ -1254,8 +1253,8 @@ public class PlayerActivity extends AppCompatActivity {
         player = new ExoPlayer.Builder(this)
                 .setLoadControl(loadControl)
                 .setMediaSourceFactory(mediaSourceFactory)
+                .setWakeMode(C.WAKE_MODE_NETWORK)
                 .build();
-        player.setWakeMode(C.WAKE_MODE_NETWORK);
         playerView.setPlayer(player);
 
         List<MediaItem> items = new ArrayList<>();
