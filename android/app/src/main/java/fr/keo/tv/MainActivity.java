@@ -1305,7 +1305,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // Asynchronously fetch short EPG for live channel with 300ms debounce
-        if ("live".equals(ch.streamType) || "replay".equals(ch.streamType)) {
+        if ("live".equals(ch.streamType) || "replay".equals(ch.streamType) || "live".equals(currentType) || "replay".equals(currentType)) {
             if (epgDebounceRunnable != null) {
                 mainHandler.removeCallbacks(epgDebounceRunnable);
             }
@@ -5343,12 +5343,6 @@ public class MainActivity extends AppCompatActivity {
                         holder.bindTimeline(item, progs, cur != null ? cur.title : item.name);
                     } else {
                         holder.bindTimeline(item, null, item.name);
-                        // Prefetch EPG for channels with archive/replay so timeline is ready instantly
-                        if (item.tvArchive == 1 || "replay".equals(currentType)) {
-                            if (!pendingEpgRequests.contains(item.id)) {
-                                fetchEpgForChannel(item);
-                            }
-                        }
                     }
 
                     final int pos = position;
@@ -5558,9 +5552,9 @@ public class MainActivity extends AppCompatActivity {
                     }
                     if (rawCurIdx == -1) rawCurIdx = 0;
 
-                    // Window: up to 35 past programs, current, and up to 21 future programs
-                    int startWindow = Math.max(0, rawCurIdx - 35);
-                    int endWindow = Math.min(progs.size(), rawCurIdx + 21);
+                    // Window: up to 10 past programs, current, and up to 6 future programs
+                    int startWindow = Math.max(0, rawCurIdx - 10);
+                    int endWindow = Math.min(progs.size(), rawCurIdx + 7);
                     for (int i = startWindow; i < endWindow; i++) {
                         cachedPrograms.add(progs.get(i));
                     }
@@ -5577,39 +5571,7 @@ public class MainActivity extends AppCompatActivity {
                     currentProgramIndex = 0;
                 }
 
-                // If channel supports Replay and has no past programs in cache, generate 24 hourly replay slots!
                 boolean channelHasReplay = (ch != null && ch.tvArchive == 1) || "replay".equals(currentType);
-                if (channelHasReplay && currentProgramIndex == 0) {
-                    long curProgStart = (!cachedPrograms.isEmpty() && cachedPrograms.get(0).startTimestamp > 0)
-                            ? cachedPrograms.get(0).startTimestamp : (nowSec - (nowSec % 3600));
-                    SimpleDateFormat sdfSlot = new SimpleDateFormat("HH:mm", Locale.getDefault());
-                    SimpleDateFormat sdfDay = new SimpleDateFormat("EEE dd/MM", Locale.FRENCH);
-                    SimpleDateFormat sdfFull = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
-                    List<XtreamClient.EpgProgram> syntheticPast = new ArrayList<>();
-                    for (int h = 24; h >= 1; h--) {
-                        long slotStart = curProgStart - (h * 3600L);
-                        long slotEnd = slotStart + 3600L;
-                        XtreamClient.EpgProgram sp = new XtreamClient.EpgProgram();
-                        sp.id = "catchup_" + (ch != null ? (ch.streamId != null ? ch.streamId : ch.id) : "") + "_" + slotStart;
-                        sp.startTimestamp = slotStart;
-                        sp.stopTimestamp = slotEnd;
-                        sp.startMs = slotStart * 1000L;
-                        sp.stopMs = slotEnd * 1000L;
-                        sp.durationMinutes = 60;
-                        sp.hasArchive = true;
-                        Date dStart = new Date(sp.startMs);
-                        Date dEnd = new Date(sp.stopMs);
-                        String timeStr = sdfSlot.format(dStart) + " - " + sdfSlot.format(dEnd);
-                        String dayStr = sdfDay.format(dStart);
-                        sp.title = "Replay (" + dayStr + " " + timeStr + ")";
-                        sp.desc = "Session de rediffusion (" + timeStr + ")";
-                        sp.start = sdfFull.format(dStart);
-                        sp.stop = sdfFull.format(dEnd);
-                        syntheticPast.add(sp);
-                    }
-                    cachedPrograms.addAll(0, syntheticPast);
-                    currentProgramIndex = syntheticPast.size();
-                }
 
                 LayoutInflater inflater = LayoutInflater.from(itemView.getContext());
                 for (int i = 0; i < cachedPrograms.size(); i++) {
@@ -5739,7 +5701,7 @@ public class MainActivity extends AppCompatActivity {
                     List<XtreamClient.EpgProgram> progs = epgProgramsCache.get(boundChannel.id);
                     if (progs != null && !progs.isEmpty() && cachedPrograms.size() <= 1) {
                         bindTimeline(boundChannel, progs, boundChannel.name);
-                    } else if (cachedPrograms.isEmpty() || (currentProgramIndex <= 0 && boundChannel.tvArchive == 1)) {
+                    } else if (cachedPrograms.size() <= 1) {
                         pendingActivatePast = true;
                         fetchEpgForChannel(boundChannel);
                         Toast.makeText(itemView.getContext(), "Chargement du Replay...", Toast.LENGTH_SHORT).show();
@@ -5758,17 +5720,13 @@ public class MainActivity extends AppCompatActivity {
             }
 
             public void activateTimelineFuture() {
-                if (cachedPrograms.isEmpty()) {
-                    if (boundChannel != null) {
-                        List<XtreamClient.EpgProgram> progs = epgProgramsCache.get(boundChannel.id);
-                        if (progs != null && !progs.isEmpty()) {
-                            bindTimeline(boundChannel, progs, boundChannel.name);
-                        } else {
-                            fetchEpgForChannel(boundChannel);
-                            Toast.makeText(itemView.getContext(), "Chargement du guide TV...", Toast.LENGTH_SHORT).show();
-                            return;
-                        }
-                    } else {
+                if (boundChannel != null) {
+                    List<XtreamClient.EpgProgram> progs = epgProgramsCache.get(boundChannel.id);
+                    if (progs != null && !progs.isEmpty() && cachedPrograms.size() <= 1) {
+                        bindTimeline(boundChannel, progs, boundChannel.name);
+                    } else if (cachedPrograms.size() <= 1) {
+                        fetchEpgForChannel(boundChannel);
+                        Toast.makeText(itemView.getContext(), "Chargement du guide TV...", Toast.LENGTH_SHORT).show();
                         return;
                     }
                 }

@@ -586,8 +586,8 @@ public class XtreamClient {
             conn.setRequestProperty("Accept-Encoding", "gzip");
             conn.setRequestProperty("Accept", "application/json, text/plain, */*");
             conn.setInstanceFollowRedirects(false);
-            conn.setConnectTimeout(20000);
-            conn.setReadTimeout(60000);
+            conn.setConnectTimeout(8000);
+            conn.setReadTimeout(12000);
 
             int code = conn.getResponseCode();
 
@@ -900,12 +900,12 @@ public class XtreamClient {
                         }
                     }
                     if (!hasPast) {
-                        // Generate 24 hourly replay blocks for the last 24 hours so user can always rewind!
+                        // Generate 8 hourly replay blocks for the last 8 hours so user can always rewind!
                         long curProgStart = nowSec - (nowSec % 3600);
                         SimpleDateFormat sdfSlot = new SimpleDateFormat("HH:mm", Locale.getDefault());
                         SimpleDateFormat sdfDay = new SimpleDateFormat("EEE dd/MM", Locale.FRENCH);
                         SimpleDateFormat sdfFull = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US);
-                        for (int h = 1; h <= 24; h++) {
+                        for (int h = 1; h <= 8; h++) {
                             long slotStart = curProgStart - (h * 3600L);
                             long slotEnd = slotStart + 3600L;
                             EpgProgram sp = new EpgProgram();
