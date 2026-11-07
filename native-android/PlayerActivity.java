@@ -41,6 +41,7 @@ import androidx.core.view.WindowInsetsControllerCompat;
 import androidx.media3.common.C;
 import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
+import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 import androidx.media3.common.TrackSelectionOverride;
@@ -53,6 +54,9 @@ import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy;
+import androidx.media3.extractor.DefaultExtractorsFactory;
+import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory;
+import androidx.media3.extractor.ts.TsExtractor;
 import androidx.media3.ui.AspectRatioFrameLayout;
 import androidx.media3.ui.PlayerView;
 
@@ -1199,7 +1203,11 @@ public class PlayerActivity extends AppCompatActivity {
                 )
                 .build();
 
-        DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(httpFactory)
+        DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory()
+                .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES | DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS)
+                .setTsExtractorMode(TsExtractor.MODE_SINGLE_PMT);
+
+        DefaultMediaSourceFactory mediaSourceFactory = new DefaultMediaSourceFactory(httpFactory, extractorsFactory)
                 .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(1));
 
         player = new ExoPlayer.Builder(this)
@@ -1721,10 +1729,19 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     private MediaItem buildItem(String url, String title) {
-        return new MediaItem.Builder()
+        MediaItem.Builder builder = new MediaItem.Builder()
                 .setUri(url)
-                .setMediaMetadata(new androidx.media3.common.MediaMetadata.Builder().setTitle(title).build())
-                .build();
+                .setMediaMetadata(new androidx.media3.common.MediaMetadata.Builder().setTitle(title).build());
+        if (url != null) {
+            if (url.contains(".m3u8")) {
+                builder.setMimeType(MimeTypes.APPLICATION_M3U8);
+            } else if (url.contains(".mpd")) {
+                builder.setMimeType(MimeTypes.APPLICATION_MPD);
+            } else if (url.contains(".ts") || url.contains("timeshift") || url.contains("/live/")) {
+                builder.setMimeType(MimeTypes.VIDEO_MP2T);
+            }
+        }
+        return builder.build();
     }
 
     private void updateTitle() {
@@ -2218,7 +2235,7 @@ public class PlayerActivity extends AppCompatActivity {
             }
 
             // 5. LIVE TV D-PAD NAVIGATION (Up/Down always zap channels seamlessly, STRICTLY when live)
-            if (isLive && !isReplayCascade) {
+            if (isLive && !isReplayCascade && !singleStreamMode) {
                 if (key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_CHANNEL_UP || key == KeyEvent.KEYCODE_PAGE_UP) {
                     zapNextChannel();
                     return true;
@@ -2230,7 +2247,7 @@ public class PlayerActivity extends AppCompatActivity {
             }
 
             // 6. VOD / SERIES / REPLAY NAVIGATION (Never zap channels!)
-            if (!isLive || isReplayCascade) {
+            if (!isLive || isReplayCascade || singleStreamMode) {
                 if (key == KeyEvent.KEYCODE_CHANNEL_UP || key == KeyEvent.KEYCODE_CHANNEL_DOWN ||
                         key == KeyEvent.KEYCODE_PAGE_UP || key == KeyEvent.KEYCODE_PAGE_DOWN) {
                     return true; // Strictly consume & ignore channel zapping keys
@@ -2378,9 +2395,12 @@ public class PlayerActivity extends AppCompatActivity {
             DefaultLoadControl lc = new DefaultLoadControl.Builder()
                     .setBufferDurationsMs(1500, 4000, 500, 1000)
                     .build();
+            DefaultExtractorsFactory preExtractorsFactory = new DefaultExtractorsFactory()
+                    .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES | DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS)
+                    .setTsExtractorMode(TsExtractor.MODE_SINGLE_PMT);
             final ExoPlayer pre = new ExoPlayer.Builder(this)
                     .setLoadControl(lc)
-                    .setMediaSourceFactory(new DefaultMediaSourceFactory(httpFactory)
+                    .setMediaSourceFactory(new DefaultMediaSourceFactory(httpFactory, preExtractorsFactory)
                             .setLoadErrorHandlingPolicy(new DefaultLoadErrorHandlingPolicy(1)))
                     .build();
 
@@ -2730,11 +2750,13 @@ public class PlayerActivity extends AppCompatActivity {
         root.addView(btnClose, closeLp);
 
         dialog.show();
-        if (selectedIndex >= 0 && selectedIndex < itemsContainer.getChildCount()) {
-            itemsContainer.getChildAt(selectedIndex).requestFocus();
-        } else if (itemsContainer.getChildCount() > 0) {
-            itemsContainer.getChildAt(0).requestFocus();
-        }
+        itemsContainer.post(() -> {
+            if (selectedIndex >= 0 && selectedIndex < itemsContainer.getChildCount()) {
+                itemsContainer.getChildAt(selectedIndex).requestFocus();
+            } else if (itemsContainer.getChildCount() > 0) {
+                itemsContainer.getChildAt(0).requestFocus();
+            }
+        });
     }
 
     private void showAudioTrackDialog() {
@@ -2767,6 +2789,10 @@ public class PlayerActivity extends AppCompatActivity {
         if (trackNames.isEmpty()) {
             Toast.makeText(this, "Aucune piste audio alternative", Toast.LENGTH_SHORT).show();
             return;
+        }
+
+        if (selectedIndex == -1 && !trackNames.isEmpty()) {
+            selectedIndex = 0;
         }
 
         showStyledTrackSelectionDialog("🔊 Pistes Audio", "Sélectionnez votre langue audio :", trackNames, selectedIndex, which -> {

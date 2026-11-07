@@ -137,6 +137,7 @@ public class MainActivity extends AppCompatActivity {
     private final Map<String, String> epgPastTitleCache = new ConcurrentHashMap<>();
     private final Map<String, List<XtreamClient.EpgProgram>> epgProgramsCache = new ConcurrentHashMap<>();
     private final Map<String, XtreamClient.EpgProgram> epgCurrentProgramCache = new ConcurrentHashMap<>();
+    private final Set<String> pendingEpgRequests = Collections.synchronizedSet(new HashSet<>());
     private Runnable epgDebounceRunnable;
 
     private CategoriesAdapter categoriesAdapter;
@@ -1243,13 +1244,9 @@ public class MainActivity extends AppCompatActivity {
                     if (isVodGridMode || "vod".equals(currentType) || "series".equals(currentType)) {
                         updateVodHeroBanner(targetCh, channelsAdapter.getSelectedPos(), channels.size());
                     } else {
-                        // Pre-cache EPG for first 10 channels of bouquet so they appear immediately
-                        int prefetchCount = Math.min(10, channels.size());
-                        for (int i = 0; i < prefetchCount; i++) {
-                            KeoDatabase.ChannelItem ch = channels.get(i);
-                            if (!epgProgramsCache.containsKey(ch.id)) {
-                                fetchEpgForChannel(ch);
-                            }
+                        // Prefetch EPG for the selected channel only to keep UI 100% fluid
+                        if (!epgProgramsCache.containsKey(targetCh.id)) {
+                            fetchEpgForChannel(targetCh);
                         }
                     }
                 } else {
@@ -1300,12 +1297,19 @@ public class MainActivity extends AppCompatActivity {
 
     private void fetchEpgForChannel(final KeoDatabase.ChannelItem ch) {
         if (ch == null || ch.streamId == null || ch.streamId.isEmpty()) return;
+        if (pendingEpgRequests.contains(ch.id)) return;
+        pendingEpgRequests.add(ch.id);
+
         KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
-        if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) return;
+        if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) {
+            pendingEpgRequests.remove(ch.id);
+            return;
+        }
 
         XtreamClient.fetchFullChannelTimeline(pl.serverUrl, pl.username, pl.password, ch.streamId, ch.tvArchive == 1, new XtreamClient.EpgCallback() {
             @Override
             public void onSuccess(List<XtreamClient.EpgProgram> programs, XtreamClient.EpgProgram current, XtreamClient.EpgProgram next) {
+                pendingEpgRequests.remove(ch.id);
                 if (isFinishing() || isDestroyed()) return;
                 if (programs != null && !programs.isEmpty()) {
                     epgProgramsCache.put(ch.id, programs);
@@ -1350,6 +1354,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onError(String error) {
+                pendingEpgRequests.remove(ch.id);
                 // Silently ignore background EPG failures
             }
         });
@@ -1534,12 +1539,8 @@ public class MainActivity extends AppCompatActivity {
                 focusRecyclerViewItem(recyclerChannels, targetPos);
             }
             return true;
-        } else {
-            lastBottomReachedTime = 0;
-            int nextPos = isVod ? Math.min(currentPos + span, totalCount - 1) : (currentPos + 1);
-            focusRecyclerViewItem(recyclerChannels, nextPos);
-            return true;
         }
+        return false;
     }
 
     private boolean handleCarouselUp(int currentPos, int totalCount, boolean isVod) {
@@ -1561,12 +1562,8 @@ public class MainActivity extends AppCompatActivity {
                 focusRecyclerViewItem(recyclerChannels, targetPos);
             }
             return true;
-        } else {
-            lastTopReachedTime = 0;
-            int prevPos = isVod ? (currentPos - span) : (currentPos - 1);
-            focusRecyclerViewItem(recyclerChannels, prevPos);
-            return true;
         }
+        return false;
     }
 
     private XtreamClient.EpgProgram getCurrentProgram(KeoDatabase.ChannelItem item) {
@@ -1645,11 +1642,8 @@ public class MainActivity extends AppCompatActivity {
                 focusRecyclerViewItem(recyclerCategories, 0);
             }
             return true;
-        } else {
-            lastCategoryBottomTime = 0;
-            focusRecyclerViewItem(recyclerCategories, currentPos + 1);
-            return true;
         }
+        return false;
     }
 
     private boolean handleCategoryCarouselUp(int currentPos, int totalCount) {
@@ -1666,11 +1660,8 @@ public class MainActivity extends AppCompatActivity {
                 focusRecyclerViewItem(recyclerCategories, totalCount - 1);
             }
             return true;
-        } else {
-            lastCategoryTopTime = 0;
-            focusRecyclerViewItem(recyclerCategories, currentPos - 1);
-            return true;
         }
+        return false;
     }
 
     private void launchPlayerFullscreen() {
@@ -2827,6 +2818,7 @@ public class MainActivity extends AppCompatActivity {
             long durationMins = (prog.stopMs - prog.startMs) / (60 * 1000);
             if (durationMins <= 0) durationMins = 60;
             long startSec = prog.startMs / 1000L;
+            long stopSec = prog.stopMs / 1000L;
 
             // Direct extraction from prog.start (YYYY-MM-DD HH:mm:ss) to preserve exact server clock!
             String startFormatted = "";
@@ -2837,6 +2829,7 @@ public class MainActivity extends AppCompatActivity {
                 SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd:HH-mm", Locale.US);
                 startFormatted = sdf.format(new Date(prog.startMs));
             }
+            String startFormattedDash = startFormatted.replace(":", "-");
 
             String encUser = URLEncoder.encode(user, "UTF-8");
             String encPass = URLEncoder.encode(pass, "UTF-8");
@@ -2844,23 +2837,24 @@ public class MainActivity extends AppCompatActivity {
             List<String> urls = new ArrayList<>();
             List<String> titles = new ArrayList<>();
 
-            // 1. Direct Xtream MPEG-TS format (Universal standard for Xtream Codes & XUI)
-            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormatted + "/" + cleanId + ".ts");
-            // 2. Xtream streaming PHP endpoint
-            urls.add(server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormatted + "&duration=" + durationMins);
-            // 3. Direct Xtream MPEG-TS with raw credentials (in case panel rejects URL-encoded chars)
+            // 1. Direct Xtream MPEG-TS format with raw credentials (most common for XC & XUI)
             urls.add(server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + startFormatted + "/" + cleanId + ".ts");
-            // 4. Xtream streaming PHP endpoint with raw credentials
+            // 2. Direct Xtream MPEG-TS format with encoded credentials
+            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormatted + "/" + cleanId + ".ts");
+            // 3. Xtream streaming PHP endpoint with raw credentials
             urls.add(server + "/streaming/timeshift.php?username=" + user + "&password=" + pass + "&stream=" + cleanId + "&start=" + startFormatted + "&duration=" + durationMins);
-            // 5. Encoded colon variant (%3A) for strict reverse proxies / Cloudflare / nginx
-            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormatted.replace(":", "%3A") + "/" + cleanId + ".ts");
-            // 6. Direct Xtream HLS format (.m3u8)
-            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startFormatted + "/" + cleanId + ".m3u8");
-            // 7. Unix timestamp epoch format (used by XUI.one, ZapX and newer panels)
-            urls.add(server + "/timeshift/" + encUser + "/" + encPass + "/" + durationMins + "/" + startSec + "/" + cleanId + ".ts");
-            urls.add(server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startSec + "&duration=" + durationMins);
-            // 8. Root timeshift.php fallback
-            urls.add(server + "/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormatted + "&duration=" + durationMins);
+            // 4. Xtream streaming PHP endpoint with encoded credentials
+            urls.add(server + "/streaming/timeshift.php?username=" + encUser + "&password=" + encPass + "&stream=" + cleanId + "&start=" + startFormatted + "&duration=" + durationMins);
+            // 5. Dash separator format (for reverse proxies rejecting colons in paths)
+            urls.add(server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + startFormattedDash + "/" + cleanId + ".ts");
+            // 6. Flussonic / XC HLS catchup format (m3u8 with utc/lutc parameters)
+            urls.add(server + "/live/" + user + "/" + pass + "/" + cleanId + ".m3u8?utc=" + startSec + "&lutc=" + stopSec);
+            // 7. Unix timestamp epoch format (used by XUI.one, ZapX)
+            urls.add(server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + startSec + "/" + cleanId + ".ts");
+            // 8. Direct Xtream HLS format (.m3u8)
+            urls.add(server + "/timeshift/" + user + "/" + pass + "/" + durationMins + "/" + startFormatted + "/" + cleanId + ".m3u8");
+            // 9. Root timeshift.php fallback
+            urls.add(server + "/timeshift.php?username=" + user + "&password=" + pass + "&stream=" + cleanId + "&start=" + startFormatted + "&duration=" + durationMins);
 
             for (int u = 0; u < urls.size(); u++) {
                 titles.add("[Replay] " + ch.name + " - " + prog.title);
@@ -3829,9 +3823,11 @@ public class MainActivity extends AppCompatActivity {
             root.addView(btnClose, closeLp);
 
             dialog.show();
-            if (listContainer.getChildCount() > 0) {
-                listContainer.getChildAt(0).requestFocus();
-            }
+            listContainer.post(() -> {
+                if (listContainer.getChildCount() > 0) {
+                    listContainer.getChildAt(0).requestFocus();
+                }
+            });
         } catch (Throwable t) {
             Log.e(TAG, "Failed to show settings dialog", t);
         }
@@ -4710,23 +4706,15 @@ public class MainActivity extends AppCompatActivity {
                                 } else {
                                     return true; // At catalog end, block escaping
                                 }
-                            } else {
-                                if (pos + 1 < total) {
-                                    focusRecyclerViewItem(recyclerChannels, pos + 1);
-                                    return true;
-                                } else {
-                                    return true;
-                                }
                             }
+                            return false; // Let GridLayoutManager navigate horizontally
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                             if ((pos % span) == 0) {
                                 // 1st item in row: exit back to bouquet list!
                                 exitVodBouquetGrid();
                                 return true;
-                            } else {
-                                focusRecyclerViewItem(recyclerChannels, pos - 1);
-                                return true;
                             }
+                            return false; // Let GridLayoutManager navigate horizontally
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                             return handleCarouselDown(pos, total, true);
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
@@ -4796,7 +4784,6 @@ public class MainActivity extends AppCompatActivity {
                         holder.bindTimeline(item, progs, cur != null ? cur.title : item.name);
                     } else {
                         holder.bindTimeline(item, null, item.name);
-                        fetchEpgForChannel(item);
                     }
 
                     final int pos = position;
@@ -4986,28 +4973,33 @@ public class MainActivity extends AppCompatActivity {
                 slotViews.clear();
                 cachedPrograms.clear();
 
-                if (progs != null && !progs.isEmpty()) {
-                    cachedPrograms.addAll(progs);
-                }
-
                 long nowSec = System.currentTimeMillis() / 1000L;
                 currentProgramIndex = -1;
 
-                if (!cachedPrograms.isEmpty()) {
+                if (progs != null && !progs.isEmpty()) {
+                    int rawCurIdx = -1;
                     long closestDiff = Long.MAX_VALUE;
-                    for (int i = 0; i < cachedPrograms.size(); i++) {
-                        XtreamClient.EpgProgram p = cachedPrograms.get(i);
+                    for (int i = 0; i < progs.size(); i++) {
+                        XtreamClient.EpgProgram p = progs.get(i);
                         if (nowSec >= p.startTimestamp && nowSec <= p.stopTimestamp) {
-                            currentProgramIndex = i;
+                            rawCurIdx = i;
                             break;
                         }
                         long diff = Math.abs(nowSec - p.startTimestamp);
                         if (diff < closestDiff) {
                             closestDiff = diff;
-                            currentProgramIndex = i;
+                            rawCurIdx = i;
                         }
                     }
-                    if (currentProgramIndex == -1) currentProgramIndex = 0;
+                    if (rawCurIdx == -1) rawCurIdx = 0;
+
+                    // Window: at most 10 past programs, current, and at most 10 future programs (max 21 cards)
+                    int startWindow = Math.max(0, rawCurIdx - 10);
+                    int endWindow = Math.min(progs.size(), rawCurIdx + 11);
+                    for (int i = startWindow; i < endWindow; i++) {
+                        cachedPrograms.add(progs.get(i));
+                    }
+                    currentProgramIndex = rawCurIdx - startWindow;
 
                     LayoutInflater inflater = LayoutInflater.from(itemView.getContext());
                     for (int i = 0; i < cachedPrograms.size(); i++) {

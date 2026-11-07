@@ -280,8 +280,6 @@
                     android:id="@+id/recycler_categories"
                     android:layout_width="match_parent"
                     android:layout_height="42dp"
-                    android:nextFocusUp="@+id/recycler_categories"
-                    android:nextFocusDown="@+id/recycler_categories"
                     android:scrollbars="none"
                     android:overScrollMode="always"
                     android:nestedScrollingEnabled="true" />
@@ -312,10 +310,7 @@
                     android:id="@+id/recycler_channels"
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:nextFocusUp="@+id/recycler_channels"
-                    android:nextFocusDown="@+id/recycler_channels"
                     android:nextFocusLeft="@+id/recycler_categories"
-                    android:nextFocusRight="@+id/recycler_channels"
                     android:scrollbars="vertical"
                     android:overScrollMode="always"
                     android:nestedScrollingEnabled="true" />

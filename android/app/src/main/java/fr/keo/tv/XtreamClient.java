@@ -6,6 +6,7 @@ import android.os.Looper;
 import android.util.Base64;
 import android.util.Log;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -39,6 +40,7 @@ public class XtreamClient {
 
     private static final String TAG = "XtreamClient";
     private static final String USER_AGENT = "IPTVSmartersPro/3.1.5 (Linux; Android 12)";
+    private static final ExecutorService TIMELINE_EXECUTOR = Executors.newFixedThreadPool(2);
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
@@ -797,7 +799,7 @@ public class XtreamClient {
             return;
         }
 
-        Executors.newSingleThreadExecutor().execute(() -> {
+        TIMELINE_EXECUTOR.execute(() -> {
             try {
                 String encUser = URLEncoder.encode(username != null ? username : "", "UTF-8");
                 String encPass = URLEncoder.encode(password != null ? password : "", "UTF-8");
@@ -815,7 +817,11 @@ public class XtreamClient {
                         String jsonStr = fetchUrl(catchupUrl);
                         JsonObject root = JsonParser.parseString(jsonStr).getAsJsonObject();
                         if (root.has("epg_listings") && root.get("epg_listings").isJsonArray()) {
-                            for (JsonElement el : root.getAsJsonArray("epg_listings")) {
+                            JsonArray arr = root.getAsJsonArray("epg_listings");
+                            // Keep at most the 25 most recent past programs for fast parsing and zero memory bloat
+                            int startJson = Math.max(0, arr.size() - 25);
+                            for (int k = startJson; k < arr.size(); k++) {
+                                JsonElement el = arr.get(k);
                                 if (!el.isJsonObject()) continue;
                                 JsonObject obj = el.getAsJsonObject();
                                 EpgProgram p = parseProgramFromJson(obj, sdf);
