@@ -54,6 +54,10 @@
                     android:lineSpacingExtra="1dp"
                     android:background="@drawable/bg_nav_item_selector"
                     android:layout_marginBottom="5dp"
+                    android:nextFocusUp="@+id/btn_nav_live"
+                    android:nextFocusLeft="@+id/btn_nav_live"
+                    android:nextFocusRight="@+id/recycler_categories"
+                    android:nextFocusDown="@+id/btn_nav_replay"
                     android:focusable="true" />
 
                 <Button
@@ -67,6 +71,10 @@
                     android:lineSpacingExtra="1dp"
                     android:background="@drawable/bg_nav_item_selector"
                     android:layout_marginBottom="5dp"
+                    android:nextFocusUp="@+id/btn_nav_live"
+                    android:nextFocusLeft="@+id/btn_nav_replay"
+                    android:nextFocusRight="@+id/recycler_categories"
+                    android:nextFocusDown="@+id/btn_nav_vod"
                     android:focusable="true" />
 
                 <Button
@@ -80,6 +88,10 @@
                     android:lineSpacingExtra="1dp"
                     android:background="@drawable/bg_nav_item_selector"
                     android:layout_marginBottom="5dp"
+                    android:nextFocusUp="@+id/btn_nav_replay"
+                    android:nextFocusLeft="@+id/btn_nav_vod"
+                    android:nextFocusRight="@+id/recycler_categories"
+                    android:nextFocusDown="@+id/btn_nav_series"
                     android:focusable="true" />
 
                 <Button
@@ -93,6 +105,10 @@
                     android:lineSpacingExtra="1dp"
                     android:background="@drawable/bg_nav_item_selector"
                     android:layout_marginBottom="5dp"
+                    android:nextFocusUp="@+id/btn_nav_vod"
+                    android:nextFocusLeft="@+id/btn_nav_series"
+                    android:nextFocusRight="@+id/recycler_categories"
+                    android:nextFocusDown="@+id/btn_nav_favs"
                     android:focusable="true" />
 
                 <Button
@@ -106,6 +122,10 @@
                     android:lineSpacingExtra="1dp"
                     android:background="@drawable/bg_nav_item_selector"
                     android:layout_marginBottom="5dp"
+                    android:nextFocusUp="@+id/btn_nav_series"
+                    android:nextFocusLeft="@+id/btn_nav_favs"
+                    android:nextFocusRight="@+id/recycler_categories"
+                    android:nextFocusDown="@+id/btn_nav_search"
                     android:focusable="true" />
 
                 <Button
@@ -119,6 +139,10 @@
                     android:lineSpacingExtra="1dp"
                     android:background="@drawable/bg_nav_item_selector"
                     android:layout_marginBottom="5dp"
+                    android:nextFocusUp="@+id/btn_nav_favs"
+                    android:nextFocusLeft="@+id/btn_nav_search"
+                    android:nextFocusRight="@+id/recycler_categories"
+                    android:nextFocusDown="@+id/btn_nav_settings"
                     android:focusable="true" />
 
                 <!-- Utility Buttons -->
@@ -133,6 +157,10 @@
                     android:lineSpacingExtra="1dp"
                     android:background="@drawable/bg_nav_item_selector"
                     android:layout_marginBottom="5dp"
+                    android:nextFocusUp="@+id/btn_nav_search"
+                    android:nextFocusLeft="@+id/btn_nav_settings"
+                    android:nextFocusRight="@+id/recycler_categories"
+                    android:nextFocusDown="@+id/btn_nav_sync"
                     android:focusable="true" />
 
                 <Button
@@ -145,6 +173,10 @@
                     android:textStyle="bold"
                     android:lineSpacingExtra="1dp"
                     android:background="@drawable/bg_nav_item_selector"
+                    android:nextFocusUp="@+id/btn_nav_settings"
+                    android:nextFocusLeft="@+id/btn_nav_sync"
+                    android:nextFocusRight="@+id/recycler_categories"
+                    android:nextFocusDown="@+id/btn_nav_sync"
                     android:focusable="true" />
 
             </LinearLayout>
@@ -335,6 +367,8 @@
                         android:descendantFocusability="afterDescendants"
                         android:nextFocusLeft="@+id/sidebar"
                         android:nextFocusRight="@+id/recycler_channels"
+                        android:nextFocusUp="@+id/recycler_categories"
+                        android:nextFocusDown="@+id/recycler_categories"
                         android:scrollbars="vertical"
                         android:overScrollMode="always"
                         android:nestedScrollingEnabled="true" />
@@ -731,6 +765,9 @@
                         android:focusable="false"
                         android:descendantFocusability="afterDescendants"
                         android:nextFocusLeft="@+id/recycler_categories"
+                        android:nextFocusRight="@+id/recycler_channels"
+                        android:nextFocusUp="@+id/recycler_channels"
+                        android:nextFocusDown="@+id/recycler_channels"
                         android:scrollbars="vertical"
                         android:overScrollMode="always"
                         android:nestedScrollingEnabled="true"

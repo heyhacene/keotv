@@ -391,15 +391,19 @@ public class MainActivity extends AppCompatActivity {
         if (btnNavSettings != null) btnNavSettings.setOnClickListener(v -> showSettingsDialog());
         if (btnNavSync != null) btnNavSync.setOnClickListener(v -> showCloudSyncDialog());
 
-        // Sidebar D-Pad right handler: navigates from sidebar into categories or search
+        // Sidebar D-Pad handler: navigates from sidebar into categories or search; blocks leaking left
         View.OnKeyListener navRightListener = (v, keyCode, event) -> {
-            if (event.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                if ("search".equals(currentType) && etGlobalSearch != null) {
-                    etGlobalSearch.requestFocus();
-                } else {
-                    focusCategoriesList();
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    if ("search".equals(currentType) && etGlobalSearch != null) {
+                        etGlobalSearch.requestFocus();
+                    } else {
+                        focusCategoriesList();
+                    }
+                    return true;
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    return true; // Block escaping left from sidebar
                 }
-                return true;
             }
             return false;
         };
@@ -860,26 +864,36 @@ public class MainActivity extends AppCompatActivity {
         if (count == 0) return;
 
         final int targetPos = Math.max(0, Math.min(position, count - 1));
-        rv.scrollToPosition(targetPos);
 
+        // Fast-path: if the view is already attached and visible, focus synchronously and immediately!
+        View directView = lm.findViewByPosition(targetPos);
+        if (directView != null) {
+            directView.requestFocus();
+            return;
+        }
+
+        // View is off-screen: scroll and request focus once laid out
+        rv.scrollToPosition(targetPos);
         rv.post(() -> {
-            RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(targetPos);
-            if (vh != null && vh.itemView != null) {
-                vh.itemView.requestFocus();
+            View view = lm.findViewByPosition(targetPos);
+            if (view != null) {
+                view.requestFocus();
             } else {
-                View view = lm.findViewByPosition(targetPos);
-                if (view != null) {
-                    view.requestFocus();
+                RecyclerView.ViewHolder vh = rv.findViewHolderForAdapterPosition(targetPos);
+                if (vh != null && vh.itemView != null) {
+                    vh.itemView.requestFocus();
                 } else {
                     rv.postDelayed(() -> {
-                        RecyclerView.ViewHolder vh2 = rv.findViewHolderForAdapterPosition(targetPos);
-                        if (vh2 != null && vh2.itemView != null) {
-                            vh2.itemView.requestFocus();
+                        View view2 = lm.findViewByPosition(targetPos);
+                        if (view2 != null) {
+                            view2.requestFocus();
                         } else {
-                            View view2 = lm.findViewByPosition(targetPos);
-                            if (view2 != null) view2.requestFocus();
+                            RecyclerView.ViewHolder vh2 = rv.findViewHolderForAdapterPosition(targetPos);
+                            if (vh2 != null && vh2.itemView != null) {
+                                vh2.itemView.requestFocus();
+                            }
                         }
-                    }, 50);
+                    }, 30);
                 }
             }
         });
@@ -1364,11 +1378,15 @@ public class MainActivity extends AppCompatActivity {
                         if (vh instanceof ChannelsAdapter.ViewHolder) {
                             ChannelsAdapter.ViewHolder cvh = (ChannelsAdapter.ViewHolder) vh;
                             if (!cvh.isVod) {
-                                boolean wasWaiting = cvh.pendingActivatePast;
+                                boolean wasWaitingPast = cvh.pendingActivatePast;
+                                boolean wasWaitingFuture = cvh.pendingActivateFuture;
                                 cvh.bindTimeline(ch, programs, current != null ? current.title : ch.name);
-                                if (wasWaiting) {
+                                if (wasWaitingPast) {
                                     cvh.pendingActivatePast = false;
                                     cvh.activateTimelinePast();
+                                } else if (wasWaitingFuture) {
+                                    cvh.pendingActivateFuture = false;
+                                    cvh.activateTimelineFuture();
                                 }
                             }
                         }
@@ -1551,20 +1569,25 @@ public class MainActivity extends AppCompatActivity {
         int span = isVod ? (findViewById(R.id.sidebar) != null ? 7 : 3) : 1;
         int lastRowStart = isVod ? ((totalCount - 1) - ((totalCount - 1) % span)) : (totalCount - 1);
 
-        if (currentPos >= lastRowStart) {
-            long now = System.currentTimeMillis();
-            if (lastBottomReachedTime == 0 || (now - lastBottomReachedTime > 1500)) {
-                lastBottomReachedTime = now;
-                return true; // Pause at bottom boundary
-            }
-            if (now - lastBottomReachedTime >= CAROUSEL_PAUSE_MS) {
-                lastBottomReachedTime = 0;
-                int targetPos = isVod ? Math.min(currentPos % span, totalCount - 1) : 0;
-                focusRecyclerViewItem(recyclerChannels, targetPos);
-            }
-            return true;
+        if (currentPos < lastRowStart) {
+            int nextPos = Math.min(currentPos + span, totalCount - 1);
+            lastBottomReachedTime = 0;
+            focusRecyclerViewItem(recyclerChannels, nextPos);
+            return true; // Strictly consume! Focus must NEVER leak out of channels!
         }
-        return false;
+
+        // At bottom boundary: pause before wrapping around to top
+        long now = System.currentTimeMillis();
+        if (lastBottomReachedTime == 0 || (now - lastBottomReachedTime > 1500)) {
+            lastBottomReachedTime = now;
+            return true; // Pause at bottom boundary
+        }
+        if (now - lastBottomReachedTime >= CAROUSEL_PAUSE_MS) {
+            lastBottomReachedTime = 0;
+            int targetPos = isVod ? Math.min(currentPos % span, totalCount - 1) : 0;
+            focusRecyclerViewItem(recyclerChannels, targetPos);
+        }
+        return true;
     }
 
     private boolean handleCarouselUp(int currentPos, int totalCount, boolean isVod) {
@@ -1573,21 +1596,26 @@ public class MainActivity extends AppCompatActivity {
 
         int span = isVod ? (findViewById(R.id.sidebar) != null ? 7 : 3) : 1;
 
-        if (currentPos < span) {
-            long now = System.currentTimeMillis();
-            if (lastTopReachedTime == 0 || (now - lastTopReachedTime > 1500)) {
-                lastTopReachedTime = now;
-                return true; // Pause at top boundary
-            }
-            if (now - lastTopReachedTime >= CAROUSEL_PAUSE_MS) {
-                lastTopReachedTime = 0;
-                int lastRowStart = isVod ? ((totalCount - 1) - ((totalCount - 1) % span)) : (totalCount - 1);
-                int targetPos = isVod ? Math.min(lastRowStart + (currentPos % span), totalCount - 1) : (totalCount - 1);
-                focusRecyclerViewItem(recyclerChannels, targetPos);
-            }
-            return true;
+        if (currentPos >= span) {
+            int prevPos = Math.max(0, currentPos - span);
+            lastTopReachedTime = 0;
+            focusRecyclerViewItem(recyclerChannels, prevPos);
+            return true; // Strictly consume! Focus must NEVER leak out of channels!
         }
-        return false;
+
+        // At top boundary: pause before wrapping around to bottom
+        long now = System.currentTimeMillis();
+        if (lastTopReachedTime == 0 || (now - lastTopReachedTime > 1500)) {
+            lastTopReachedTime = now;
+            return true; // Pause at top boundary
+        }
+        if (now - lastTopReachedTime >= CAROUSEL_PAUSE_MS) {
+            lastTopReachedTime = 0;
+            int lastRowStart = isVod ? ((totalCount - 1) - ((totalCount - 1) % span)) : (totalCount - 1);
+            int targetPos = isVod ? Math.min(lastRowStart + (currentPos % span), totalCount - 1) : (totalCount - 1);
+            focusRecyclerViewItem(recyclerChannels, targetPos);
+        }
+        return true;
     }
 
     private XtreamClient.EpgProgram getCurrentProgram(KeoDatabase.ChannelItem item) {
@@ -1655,37 +1683,47 @@ public class MainActivity extends AppCompatActivity {
     private boolean handleCategoryCarouselDown(int currentPos, int totalCount) {
         if (totalCount <= 0) return true;
         lastCategoryTopTime = 0;
-        if (currentPos >= totalCount - 1) {
-            long now = System.currentTimeMillis();
-            if (lastCategoryBottomTime == 0 || (now - lastCategoryBottomTime > 1500)) {
-                lastCategoryBottomTime = now;
-                return true; // Pause at bottom boundary
-            }
-            if (now - lastCategoryBottomTime >= CAROUSEL_PAUSE_MS) {
-                lastCategoryBottomTime = 0;
-                focusRecyclerViewItem(recyclerCategories, 0);
-            }
-            return true;
+
+        if (currentPos < totalCount - 1) {
+            lastCategoryBottomTime = 0;
+            focusRecyclerViewItem(recyclerCategories, currentPos + 1);
+            return true; // Strictly consume! Focus stays firmly in bouquets!
         }
-        return false;
+
+        // At bottom boundary: pause before wrapping around to top
+        long now = System.currentTimeMillis();
+        if (lastCategoryBottomTime == 0 || (now - lastCategoryBottomTime > 1500)) {
+            lastCategoryBottomTime = now;
+            return true; // Pause at bottom boundary
+        }
+        if (now - lastCategoryBottomTime >= CAROUSEL_PAUSE_MS) {
+            lastCategoryBottomTime = 0;
+            focusRecyclerViewItem(recyclerCategories, 0);
+        }
+        return true;
     }
 
     private boolean handleCategoryCarouselUp(int currentPos, int totalCount) {
         if (totalCount <= 0) return true;
         lastCategoryBottomTime = 0;
-        if (currentPos <= 0) {
-            long now = System.currentTimeMillis();
-            if (lastCategoryTopTime == 0 || (now - lastCategoryTopTime > 1500)) {
-                lastCategoryTopTime = now;
-                return true; // Pause at top boundary
-            }
-            if (now - lastCategoryTopTime >= CAROUSEL_PAUSE_MS) {
-                lastCategoryTopTime = 0;
-                focusRecyclerViewItem(recyclerCategories, totalCount - 1);
-            }
-            return true;
+
+        if (currentPos > 0) {
+            lastCategoryTopTime = 0;
+            focusRecyclerViewItem(recyclerCategories, currentPos - 1);
+            return true; // Strictly consume! Focus stays firmly in bouquets!
         }
-        return false;
+
+        // At top boundary: pause before wrapping around to bottom
+        long now = System.currentTimeMillis();
+        if (lastCategoryTopTime == 0 || (now - lastCategoryTopTime > 1500)) {
+            lastCategoryTopTime = now;
+            return true; // Pause at top boundary
+        }
+        if (now - lastCategoryTopTime >= CAROUSEL_PAUSE_MS) {
+            lastCategoryTopTime = 0;
+            focusRecyclerViewItem(recyclerCategories, totalCount - 1);
+        }
+        return true;
     }
 
     private void launchPlayerFullscreen() {
@@ -5278,23 +5316,18 @@ public class MainActivity extends AppCompatActivity {
                         int total = items.size();
 
                         if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                            if ((pos % span) == (span - 1)) {
-                                // 7th item in the row: wrap to 1st item of next row!
-                                if (pos + 1 < total) {
-                                    focusRecyclerViewItem(recyclerChannels, pos + 1);
-                                    return true;
-                                } else {
-                                    return true; // At catalog end, block escaping
-                                }
+                            if (pos + 1 < total) {
+                                focusRecyclerViewItem(recyclerChannels, pos + 1);
                             }
-                            return false; // Let GridLayoutManager navigate horizontally
+                            return true; // Strictly consume! Never let focus escape
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                             if ((pos % span) == 0) {
                                 // 1st item in row: exit back to bouquet list!
                                 exitVodBouquetGrid();
-                                return true;
+                            } else if (pos - 1 >= 0) {
+                                focusRecyclerViewItem(recyclerChannels, pos - 1);
                             }
-                            return false; // Let GridLayoutManager navigate horizontally
+                            return true; // Strictly consume!
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                             return handleCarouselDown(pos, total, true);
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
@@ -5380,6 +5413,10 @@ public class MainActivity extends AppCompatActivity {
                                 holder.scrollToProgram(holder.currentProgramIndex, false);
                             }
                         } else {
+                            if (holder.leftLongPressRunnable != null) {
+                                holder.itemView.removeCallbacks(holder.leftLongPressRunnable);
+                            }
+                            holder.leftLongPressTriggered = false;
                             if (holder.isTimelineMode) {
                                 holder.deactivateTimeline();
                             }
@@ -5428,17 +5465,28 @@ public class MainActivity extends AppCompatActivity {
                                     holder.activateTimelineFuture();
                                     return true;
                                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                                    // DPAD_LEFT: Explore past programs (Replay) on timeline
-                                    if (holder.currentProgramIndex > 0) {
-                                        holder.activateTimelinePast();
-                                        return true;
-                                    } else if (item.tvArchive == 1 || "replay".equals(currentType)) {
-                                        holder.activateTimelinePast();
-                                        return true;
-                                    } else {
-                                        focusCategoriesList();
+                                    if (event.getRepeatCount() == 0) {
+                                        holder.leftLongPressTriggered = false;
+                                        if (holder.leftLongPressRunnable != null) {
+                                            holder.itemView.removeCallbacks(holder.leftLongPressRunnable);
+                                        }
+                                        holder.leftLongPressRunnable = () -> {
+                                            holder.leftLongPressTriggered = true;
+                                            holder.activateTimelinePast();
+                                        };
+                                        holder.itemView.postDelayed(holder.leftLongPressRunnable, 350);
+                                        return true; // Consume so focus doesn't immediately leave channel row
+                                    } else if (event.getRepeatCount() >= 1) {
+                                        if (!holder.leftLongPressTriggered) {
+                                            holder.leftLongPressTriggered = true;
+                                            if (holder.leftLongPressRunnable != null) {
+                                                holder.itemView.removeCallbacks(holder.leftLongPressRunnable);
+                                            }
+                                            holder.activateTimelinePast();
+                                        }
                                         return true;
                                     }
+                                    return true;
                                 }
                             } else {
                                 // TIMELINE EXPLORATION MODE (TiviMate horizontal ribbon navigation)
@@ -5458,7 +5506,17 @@ public class MainActivity extends AppCompatActivity {
                                 }
                             }
                         } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+                            if (!holder.isTimelineMode && keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                                if (holder.leftLongPressRunnable != null) {
+                                    holder.itemView.removeCallbacks(holder.leftLongPressRunnable);
+                                }
+                                if (!holder.leftLongPressTriggered) {
+                                    // Short tap: return to bouquets list!
+                                    focusCategoriesList();
+                                }
+                                holder.leftLongPressTriggered = false;
+                                return true;
+                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
                                 holder.itemView.performClick();
                                 return true;
                             }
@@ -5515,6 +5573,9 @@ public class MainActivity extends AppCompatActivity {
             int selectedTimelineIndex = -1;
             int currentProgramIndex = -1;
             boolean pendingActivatePast = false;
+            boolean pendingActivateFuture = false;
+            Runnable leftLongPressRunnable = null;
+            boolean leftLongPressTriggered = false;
             final List<XtreamClient.EpgProgram> cachedPrograms = new ArrayList<>();
             final List<View> slotViews = new ArrayList<>();
             KeoDatabase.ChannelItem boundChannel = null;
@@ -5746,6 +5807,7 @@ public class MainActivity extends AppCompatActivity {
                     if (progs != null && !progs.isEmpty() && cachedPrograms.size() <= 1) {
                         bindTimeline(boundChannel, progs, boundChannel.name);
                     } else if (cachedPrograms.size() <= 1) {
+                        pendingActivateFuture = true;
                         fetchEpgForChannel(boundChannel);
                         Toast.makeText(itemView.getContext(), "Chargement du guide TV...", Toast.LENGTH_SHORT).show();
                         return;
