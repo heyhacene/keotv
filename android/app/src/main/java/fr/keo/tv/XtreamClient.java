@@ -192,6 +192,7 @@ public class XtreamClient {
                         String catId = getOptString(obj, "category_id", "");
                         int num = getOptInt(obj, "num", liveChannels.size() + 1);
                         String logo = getOptString(obj, "stream_icon", "");
+                        if (logo.isEmpty()) logo = getOptString(obj, "logo", "");
                         int tvArchive = getOptInt(obj, "tv_archive", 0);
                         int tvArchiveDuration = getOptInt(obj, "tv_archive_duration", 0);
                         String epgChannelId = getOptString(obj, "epg_channel_id", "");
@@ -260,6 +261,8 @@ public class XtreamClient {
                             String catId = getOptString(obj, "category_id", "");
                             int num = getOptInt(obj, "num", vodMovies.size() + 1);
                             String logo = getOptString(obj, "stream_icon", "");
+                            if (logo.isEmpty()) logo = getOptString(obj, "cover", "");
+                            if (logo.isEmpty()) logo = getOptString(obj, "movie_image", "");
                             String ext = getOptString(obj, "container_extension", "mp4");
                             if (ext.isEmpty()) ext = "mp4";
 
@@ -366,6 +369,8 @@ public class XtreamClient {
                             String catId = getOptString(obj, "category_id", "");
                             int num = getOptInt(obj, "num", seriesList.size() + 1);
                             String logo = getOptString(obj, "cover", "");
+                            if (logo.isEmpty()) logo = getOptString(obj, "stream_icon", "");
+                            if (logo.isEmpty()) logo = getOptString(obj, "series_image", "");
 
                             if (seriesId.isEmpty() || isSeparatorChannel(name)) continue;
 

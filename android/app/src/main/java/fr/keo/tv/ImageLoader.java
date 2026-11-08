@@ -1,86 +1,88 @@
 package fr.keo.tv;
 
-import android.graphics.Bitmap;
-import android.graphics.BitmapFactory;
-import android.os.Handler;
-import android.os.Looper;
-import android.util.LruCache;
+import android.app.Activity;
+import android.content.Context;
 import android.widget.ImageView;
 
-import java.io.InputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import com.bumptech.glide.Glide;
+import com.bumptech.glide.load.engine.DiskCacheStrategy;
+import com.bumptech.glide.request.RequestOptions;
 
 public class ImageLoader {
-    private static final int MAX_CACHE_SIZE = Math.max(1024, (int) (Runtime.getRuntime().maxMemory() / 1024) / 8);
-    private static final LruCache<String, Bitmap> memoryCache = new LruCache<String, Bitmap>(MAX_CACHE_SIZE) {
-        @Override
-        protected int sizeOf(String key, Bitmap bitmap) {
-            return bitmap.getByteCount() / 1024;
-        }
-    };
-
-    private static final ExecutorService executor = Executors.newFixedThreadPool(4);
-    private static final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     public static void load(String urlStr, ImageView imageView) {
-        load(urlStr, imageView, 0);
+        if (imageView != null) {
+            load(imageView.getContext(), urlStr, imageView, R.drawable.bg_poster_placeholder);
+        }
     }
 
-    public static void load(android.content.Context context, String urlStr, ImageView imageView) {
-        load(urlStr, imageView, 0);
+    public static void load(Context context, String urlStr, ImageView imageView) {
+        load(context, urlStr, imageView, R.drawable.bg_poster_placeholder);
     }
 
-    public static void load(android.content.Context context, String urlStr, ImageView imageView, int placeholderRes) {
-        load(urlStr, imageView, placeholderRes);
+    public static void load(String urlStr, ImageView imageView, int placeholderRes) {
+        if (imageView != null) {
+            load(imageView.getContext(), urlStr, imageView, placeholderRes);
+        }
     }
 
-    public static void load(final String urlStr, final ImageView imageView, final int placeholderRes) {
+    public static void load(Context context, String urlStr, ImageView imageView, int placeholderRes) {
         if (imageView == null) return;
+        if (context == null) {
+            context = imageView.getContext();
+        }
+        if (context == null) return;
+
+        if (context instanceof Activity) {
+            Activity a = (Activity) context;
+            if (a.isDestroyed() || a.isFinishing()) return;
+        }
+
+        int placeholder = placeholderRes != 0 ? placeholderRes : R.drawable.bg_poster_placeholder;
+
         if (urlStr == null || urlStr.trim().isEmpty()) {
-            if (placeholderRes != 0) imageView.setImageResource(placeholderRes);
-            return;
-        }
-
-        final String cleanUrl = urlStr.trim();
-        Bitmap cached = memoryCache.get(cleanUrl);
-        if (cached != null) {
-            imageView.setImageBitmap(cached);
-            return;
-        }
-
-        if (placeholderRes != 0) {
-            imageView.setImageResource(placeholderRes);
-        }
-
-        imageView.setTag(cleanUrl);
-
-        executor.execute(() -> {
             try {
-                URL url = new URL(cleanUrl);
-                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-                conn.setConnectTimeout(8000);
-                conn.setReadTimeout(10000);
-                conn.setRequestProperty("User-Agent", "IPTVSmartersPro/3.1.5 (Linux; Android 12)");
-                conn.connect();
+                imageView.setImageResource(placeholder);
+            } catch (Throwable ignored) {}
+            return;
+        }
 
-                if (conn.getResponseCode() == 200) {
-                    InputStream in = conn.getInputStream();
-                    final Bitmap bmp = BitmapFactory.decodeStream(in);
-                    in.close();
+        String cleanUrl = urlStr.trim();
+        if (cleanUrl.startsWith("//")) {
+            cleanUrl = "https:" + cleanUrl;
+        }
+        if (cleanUrl.contains(" ")) {
+            cleanUrl = cleanUrl.replace(" ", "%20");
+        }
 
-                    if (bmp != null) {
-                        memoryCache.put(cleanUrl, bmp);
-                        mainHandler.post(() -> {
-                            if (cleanUrl.equals(imageView.getTag())) {
-                                imageView.setImageBitmap(bmp);
-                            }
-                        });
-                    }
-                }
-            } catch (Exception ignored) {}
-        });
+        try {
+            RequestOptions options = new RequestOptions()
+                    .placeholder(placeholder)
+                    .error(placeholder)
+                    .diskCacheStrategy(DiskCacheStrategy.ALL);
+
+            Glide.with(context)
+                    .load(cleanUrl)
+                    .apply(options)
+                    .into(imageView);
+        } catch (Throwable t) {
+            try {
+                imageView.setImageResource(placeholder);
+            } catch (Throwable ignored) {}
+        }
+    }
+
+    public static void clear(ImageView imageView) {
+        if (imageView == null) return;
+        try {
+            Context ctx = imageView.getContext();
+            if (ctx instanceof Activity) {
+                Activity a = (Activity) ctx;
+                if (a.isDestroyed() || a.isFinishing()) return;
+            }
+            if (ctx != null) {
+                Glide.with(ctx).clear(imageView);
+            }
+        } catch (Throwable ignored) {}
     }
 }

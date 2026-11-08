@@ -5260,9 +5260,9 @@ public class MainActivity extends AppCompatActivity {
                 }
                 if (holder.ivPoster != null) {
                     if (item.logo != null && !item.logo.isEmpty()) {
-                        ImageLoader.load(holder.itemView.getContext(), item.logo, holder.ivPoster);
+                        ImageLoader.load(holder.itemView.getContext(), item.logo, holder.ivPoster, R.drawable.bg_poster_placeholder);
                     } else {
-                        holder.ivPoster.setImageResource(R.drawable.ic_launcher_background);
+                        holder.ivPoster.setImageResource(R.drawable.bg_poster_placeholder);
                     }
                 }
 
@@ -5557,6 +5557,16 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public int getItemCount() {
             return items.size();
+        }
+
+        @Override
+        public void onViewRecycled(@NonNull ViewHolder holder) {
+            super.onViewRecycled(holder);
+            if (holder.isVod && holder.ivPoster != null) {
+                ImageLoader.clear(holder.ivPoster);
+            } else if (holder.ivLogo != null) {
+                ImageLoader.clear(holder.ivLogo);
+            }
         }
 
         class ViewHolder extends RecyclerView.ViewHolder {
