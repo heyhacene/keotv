@@ -965,11 +965,11 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 if (item == null || item.id == null || item.id.isEmpty()) continue;
                 ContentValues cv = new ContentValues();
                 if (asActor) {
-                    String existingCast = item.movieCast != null ? item.movieCast : "";
+                    String existingCast = item.cast != null ? item.cast : "";
                     if (!existingCast.toLowerCase(java.util.Locale.ROOT).contains(cleanPerson.toLowerCase(java.util.Locale.ROOT))) {
                         String updatedCast = existingCast.isEmpty() ? cleanPerson : (existingCast + ", " + cleanPerson);
                         cv.put("movie_cast", updatedCast);
-                        item.movieCast = updatedCast;
+                        item.cast = updatedCast;
                     }
                     insActor.bindString(1, item.id);
                     insActor.bindString(2, cleanPerson);
