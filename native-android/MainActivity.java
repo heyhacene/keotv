@@ -357,9 +357,17 @@ public class MainActivity extends AppCompatActivity {
         }
 
         View.OnKeyListener heroActionKeyListener = (v, keyCode, ev) -> {
-            if (ev.getAction() == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                focusChannelsList();
-                return true;
+            if (ev.getAction() == KeyEvent.ACTION_DOWN) {
+                if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    focusChannelsList();
+                    return true;
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    return true;
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && v == btnVodSearch) {
+                    return true;
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v == btnVodBack) {
+                    return true;
+                }
             }
             return false;
         };
@@ -381,6 +389,34 @@ public class MainActivity extends AppCompatActivity {
 
         View btnLogin = findViewById(R.id.btn_header_login);
         if (btnLogin != null) btnLogin.setOnClickListener(v -> showLoginDialog());
+
+        View.OnKeyListener headerBtnKeyListener = (v, keyCode, ev) -> {
+            if (ev.getAction() == KeyEvent.ACTION_DOWN) {
+                if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    if ("search".equals(currentType) && etGlobalSearch != null && etGlobalSearch.getVisibility() == View.VISIBLE) {
+                        etGlobalSearch.requestFocus();
+                    } else if (layoutLiveHeader != null && layoutLiveHeader.getVisibility() == View.VISIBLE && etSearch != null && etSearch.getVisibility() == View.VISIBLE) {
+                        etSearch.requestFocus();
+                    } else if (channelsAdapter != null && channelsAdapter.getItemCount() > 0 && recyclerChannels != null && recyclerChannels.getVisibility() == View.VISIBLE) {
+                        focusChannelsList();
+                    } else {
+                        focusCategoriesList();
+                    }
+                    return true;
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    return true;
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && v == btnSync) {
+                    focusActiveSidebarButton();
+                    return true;
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT && v == btnLogin) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        if (btnSync != null) btnSync.setOnKeyListener(headerBtnKeyListener);
+        if (btnUpdate != null) btnUpdate.setOnKeyListener(headerBtnKeyListener);
+        if (btnLogin != null) btnLogin.setOnKeyListener(headerBtnKeyListener);
 
         // Sidebar Navigation click listeners
         if (btnNavLive != null) btnNavLive.setOnClickListener(v -> switchSection("live"));
@@ -404,6 +440,8 @@ public class MainActivity extends AppCompatActivity {
                     return true;
                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                     return true; // Block escaping left from sidebar
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP && v == btnNavLive) {
+                    if (focusHeaderBar()) return true;
                 }
             }
             return false;
@@ -448,6 +486,8 @@ public class MainActivity extends AppCompatActivity {
                     if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                         focusSearchFilterOrInput();
                         return true;
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                        if (focusHeaderBar()) return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
                         if (btnSearchClear != null) {
                             btnSearchClear.requestFocus();
@@ -475,6 +515,8 @@ public class MainActivity extends AppCompatActivity {
                             etGlobalSearch.requestFocus();
                             return true;
                         }
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                        if (focusHeaderBar()) return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                         focusSearchFilterOrInput();
                         return true;
@@ -562,6 +604,9 @@ public class MainActivity extends AppCompatActivity {
                         focusCategoriesList();
                         return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                        if (focusHeaderBar()) {
+                            return true;
+                        }
                         if (channelsAdapter != null && channelsAdapter.getItemCount() > 0) {
                             focusRecyclerViewItem(recyclerChannels, channelsAdapter.getItemCount() - 1);
                         }
@@ -659,6 +704,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void switchToSearch(String query) {
+        switchToSearch(query, null);
+    }
+
+    private void switchToSearch(String query, KeoDatabase.ChannelItem sourceItemToIndex) {
         switchSection("search");
         globalSearchFilter = "all";
         updateSearchFilterTabs();
@@ -670,7 +719,7 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         isProgrammaticSearch = false;
-        performGlobalSearch(query != null ? query : "", "all");
+        performGlobalSearch(query != null ? query : "", "all", sourceItemToIndex);
     }
 
     private void updateSidebarHighlights() {
@@ -698,6 +747,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void performGlobalSearch(String query, String filter) {
+        performGlobalSearch(query, filter, null);
+    }
+
+    private void performGlobalSearch(String query, String filter, final KeoDatabase.ChannelItem sourceItemToIndex) {
         final String q = query != null ? query.trim() : "";
         if (pendingTmdbSearchRunnable != null) {
             searchHandler.removeCallbacks(pendingTmdbSearchRunnable);
@@ -715,8 +768,21 @@ public class MainActivity extends AppCompatActivity {
         }
 
         new Thread(() -> {
+            if (sourceItemToIndex != null && sourceItemToIndex.id != null) {
+                try {
+                    db.updateChannelMetadata(
+                            sourceItemToIndex.id,
+                            sourceItemToIndex.cast,
+                            sourceItemToIndex.director,
+                            sourceItemToIndex.plot,
+                            sourceItemToIndex.genre,
+                            sourceItemToIndex.releaseDate,
+                            sourceItemToIndex.rating
+                    );
+                } catch (Exception ignored) {}
+            }
+
             final String streamTypeFilter = "all".equals(filter) ? null : filter;
-            // 1. Instant local search (direct name, cast, director, plot, actor table)
             final List<KeoDatabase.ChannelItem> results = db.searchChannels(q, streamTypeFilter);
             final List<KeoDatabase.ChannelItem> currentResults = new ArrayList<>(results);
 
@@ -729,13 +795,11 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-            // 2. Online Actor Filmography Enrichment (TMDB)
-            // Query TMDB to see if 'q' is an actor or director to enrich films & series
             if (q.length() >= 3 && !"live".equals(streamTypeFilter)) {
                 pendingTmdbSearchRunnable = () -> new Thread(() -> {
                     enrichSearchResultsWithActorCredits(q, streamTypeFilter, currentResults);
                 }).start();
-                searchHandler.postDelayed(pendingTmdbSearchRunnable, 250);
+                searchHandler.postDelayed(pendingTmdbSearchRunnable, 180);
             }
         }).start();
     }
@@ -773,7 +837,6 @@ public class MainActivity extends AppCompatActivity {
             final String knownDept = bestPerson.has("known_for_department") ? bestPerson.get("known_for_department").getAsString() : "Acting";
             final boolean isDirector = "Directing".equalsIgnoreCase(knownDept);
 
-            // Fetch combined credits (both movies and series, cast + director crew)
             String creditsUrl = "https://api.themoviedb.org/3/person/" + personId + "/combined_credits?api_key=f090bb54758cabf231fb605d3e3e0468&language=fr-FR";
             String creditsJson = XtreamClient.fetchUrl(creditsUrl);
             JsonObject creditsObj = JsonParser.parseString(creditsJson).getAsJsonObject();
@@ -782,39 +845,59 @@ public class MainActivity extends AppCompatActivity {
             final java.util.Set<String> directorTitles = new java.util.HashSet<>();
             final java.util.Set<String> actorTitles = new java.util.HashSet<>();
 
-            // 1. Cast credits (Acting)
-            if (creditsObj.has("cast") && creditsObj.get("cast").isJsonArray()) {
-                JsonArray castArr = creditsObj.getAsJsonArray("cast");
-                for (int i = 0; i < castArr.size(); i++) {
-                    JsonObject c = castArr.get(i).getAsJsonObject();
+            if (creditsObj.has("crew") && creditsObj.get("crew").isJsonArray()) {
+                JsonArray crewArr = creditsObj.getAsJsonArray("crew");
+                List<JsonObject> dirCredits = new ArrayList<>();
+                for (int i = 0; i < crewArr.size(); i++) {
+                    JsonObject c = crewArr.get(i).getAsJsonObject();
+                    String job = c.has("job") && !c.get("job").isJsonNull() ? c.get("job").getAsString() : "";
+                    String dept = c.has("department") && !c.get("department").isJsonNull() ? c.get("department").getAsString() : "";
+                    if ("Director".equalsIgnoreCase(job) || "Directing".equalsIgnoreCase(dept)) {
+                        dirCredits.add(c);
+                    }
+                }
+                Collections.sort(dirCredits, (a, b) -> {
+                    int va = a.has("vote_count") && !a.get("vote_count").isJsonNull() ? a.get("vote_count").getAsInt() : 0;
+                    int vb = b.has("vote_count") && !b.get("vote_count").isJsonNull() ? b.get("vote_count").getAsInt() : 0;
+                    return Integer.compare(vb, va);
+                });
+                for (JsonObject c : dirCredits) {
                     List<String> cur = new ArrayList<>();
                     collectTitlesFromCredit(cur, c);
                     for (String t : cur) {
-                        actorTitles.add(t.toLowerCase());
-                        actorTitles.add(KeoDatabase.stripAccents(t).toLowerCase());
+                        directorTitles.add(t.toLowerCase(Locale.ROOT));
+                        directorTitles.add(KeoDatabase.stripAccents(t).toLowerCase(Locale.ROOT));
                         if (!titles.contains(t)) titles.add(t);
                     }
-                    if (titles.size() >= 200) break;
+                    if (titles.size() >= 160) break;
                 }
             }
 
-            // 2. Crew credits (Directing)
-            if (creditsObj.has("crew") && creditsObj.get("crew").isJsonArray()) {
-                JsonArray crewArr = creditsObj.getAsJsonArray("crew");
-                for (int i = 0; i < crewArr.size(); i++) {
-                    JsonObject c = crewArr.get(i).getAsJsonObject();
-                    String job = c.has("job") ? c.get("job").getAsString() : "";
-                    String dept = c.has("department") ? c.get("department").getAsString() : "";
-                    if ("Director".equalsIgnoreCase(job) || "Directing".equalsIgnoreCase(dept)) {
-                        List<String> cur = new ArrayList<>();
-                        collectTitlesFromCredit(cur, c);
-                        for (String t : cur) {
-                            directorTitles.add(t.toLowerCase());
-                            directorTitles.add(KeoDatabase.stripAccents(t).toLowerCase());
-                            if (!titles.contains(t)) titles.add(t);
-                        }
-                        if (titles.size() >= 200) break;
+            if (creditsObj.has("cast") && creditsObj.get("cast").isJsonArray()) {
+                JsonArray castArr = creditsObj.getAsJsonArray("cast");
+                List<JsonObject> castCredits = new ArrayList<>();
+                for (int i = 0; i < castArr.size(); i++) {
+                    JsonObject c = castArr.get(i).getAsJsonObject();
+                    String character = c.has("character") && !c.get("character").isJsonNull() ? c.get("character").getAsString().trim() : "";
+                    if (character.equalsIgnoreCase("Self") || character.startsWith("Self ") || character.equalsIgnoreCase("Himself") || character.equalsIgnoreCase("Herself")) {
+                        continue;
                     }
+                    castCredits.add(c);
+                }
+                Collections.sort(castCredits, (a, b) -> {
+                    int va = a.has("vote_count") && !a.get("vote_count").isJsonNull() ? a.get("vote_count").getAsInt() : 0;
+                    int vb = b.has("vote_count") && !b.get("vote_count").isJsonNull() ? b.get("vote_count").getAsInt() : 0;
+                    return Integer.compare(vb, va);
+                });
+                for (JsonObject c : castCredits) {
+                    List<String> cur = new ArrayList<>();
+                    collectTitlesFromCredit(cur, c);
+                    for (String t : cur) {
+                        actorTitles.add(t.toLowerCase(Locale.ROOT));
+                        actorTitles.add(KeoDatabase.stripAccents(t).toLowerCase(Locale.ROOT));
+                        if (!titles.contains(t)) titles.add(t);
+                    }
+                    if (titles.size() >= 220) break;
                 }
             }
 
@@ -830,47 +913,43 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
-            int addedCount = 0;
+            final List<KeoDatabase.ChannelItem> newlyAdded = new ArrayList<>();
+            List<KeoDatabase.ChannelItem> directedBatch = new ArrayList<>();
+            List<KeoDatabase.ChannelItem> actedBatch = new ArrayList<>();
+
             for (KeoDatabase.ChannelItem newItem : creditChannels) {
                 if (!existingIds.contains(newItem.id)) {
                     synchronized (currentResults) {
                         currentResults.add(newItem);
                         existingIds.add(newItem.id);
                     }
-                    addedCount++;
-                    try {
-                        String cleanNameLower = KeoDatabase.extractCleanTitle(newItem.name).toLowerCase();
-                        String cleanUnaccented = KeoDatabase.stripAccents(cleanNameLower);
-                        boolean isTitleDirected = isDirector || directorTitles.contains(cleanNameLower) || directorTitles.contains(cleanUnaccented);
-                        boolean isTitleActed = !isDirector || actorTitles.contains(cleanNameLower) || actorTitles.contains(cleanUnaccented);
-
-                        if (isTitleDirected) {
-                            String newDir = (newItem.director != null && !newItem.director.isEmpty())
-                                    ? (newItem.director.contains(personName) ? newItem.director : newItem.director + ", " + personName)
-                                    : personName;
-                            newItem.director = newDir;
-                        }
-                        if (isTitleActed) {
-                            String newCast = (newItem.cast != null && !newItem.cast.isEmpty())
-                                    ? (newItem.cast.contains(personName) ? newItem.cast : newItem.cast + ", " + personName)
-                                    : personName;
-                            newItem.cast = newCast;
-                        }
-                        db.updateChannelMetadata(newItem.id, newItem.cast, newItem.director, newItem.plot, newItem.genre, newItem.releaseDate, newItem.rating);
-                    } catch (Exception ignored) {}
+                    newlyAdded.add(newItem);
+                    String cleanNameLower = KeoDatabase.extractCleanTitle(newItem.name).toLowerCase(Locale.ROOT);
+                    String cleanUnaccented = KeoDatabase.stripAccents(cleanNameLower);
+                    boolean isTitleDirected = directorTitles.contains(cleanNameLower) || directorTitles.contains(cleanUnaccented) || (isDirector && !actorTitles.contains(cleanNameLower));
+                    boolean isTitleActed = actorTitles.contains(cleanNameLower) || actorTitles.contains(cleanUnaccented) || (!isDirector && !directorTitles.contains(cleanNameLower));
+                    if (isTitleDirected) directedBatch.add(newItem);
+                    if (isTitleActed) actedBatch.add(newItem);
                 }
             }
 
-            if (addedCount > 0) {
+            if (!directedBatch.isEmpty()) {
+                db.indexPersonForChannels(directedBatch, personName, true, false);
+            }
+            if (!actedBatch.isEmpty()) {
+                db.indexPersonForChannels(actedBatch, personName, false, true);
+            }
+
+            if (!newlyAdded.isEmpty()) {
                 final int totalCount = currentResults.size();
-                final int addedFromFilmography = addedCount;
-                final String roleLabel = isDirector ? "réalisateur" : "filmographie";
+                final int addedFromFilmography = newlyAdded.size();
+                final String roleLabel = (!directorTitles.isEmpty() && isDirector) ? "réalisateur" : "filmographie";
                 runOnUiThread(() -> {
                     if (tvSearchResultsCount != null) {
                         tvSearchResultsCount.setText(totalCount + " résultat(s) pour '" + personName + "' (dont " + addedFromFilmography + " via " + roleLabel + ")");
                     }
                     if (searchResultsAdapter != null) {
-                        searchResultsAdapter.setItems(new ArrayList<>(currentResults));
+                        searchResultsAdapter.appendItems(newlyAdded);
                     }
                 });
             }
@@ -1051,6 +1130,37 @@ public class MainActivity extends AppCompatActivity {
         else if ("favs".equals(currentType) && btnNavFavs != null) btnNavFavs.requestFocus();
         else if ("search".equals(currentType) && btnNavSearch != null) btnNavSearch.requestFocus();
         else if (btnNavLive != null) btnNavLive.requestFocus();
+    }
+
+    private boolean focusHeaderBar() {
+        if (isVodGridMode && layoutVodHero != null && layoutVodHero.getVisibility() == View.VISIBLE) {
+            if (btnVodSearch != null && btnVodSearch.getVisibility() == View.VISIBLE) {
+                btnVodSearch.requestFocus();
+                return true;
+            }
+            if (btnVodBack != null && btnVodBack.getVisibility() == View.VISIBLE) {
+                btnVodBack.requestFocus();
+                return true;
+            }
+        }
+        if (headerBar != null && headerBar.getVisibility() == View.VISIBLE) {
+            View btnSync = findViewById(R.id.btn_header_sync);
+            if (btnSync != null && btnSync.getVisibility() == View.VISIBLE) {
+                btnSync.requestFocus();
+                return true;
+            }
+            View btnUpdate = findViewById(R.id.btn_header_update);
+            if (btnUpdate != null && btnUpdate.getVisibility() == View.VISIBLE) {
+                btnUpdate.requestFocus();
+                return true;
+            }
+            View btnLogin = findViewById(R.id.btn_header_login);
+            if (btnLogin != null && btnLogin.getVisibility() == View.VISIBLE) {
+                btnLogin.requestFocus();
+                return true;
+            }
+        }
+        return false;
     }
 
     private void focusSearchFilterOrInput() {
@@ -1786,8 +1896,13 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // If in live channels mode and etSearch is visible and reachable, pressing UP from top row focuses etSearch!
-        if (!isVod && etSearch != null && etSearch.getVisibility() == View.VISIBLE) {
+        if (!isVod && layoutLiveHeader != null && layoutLiveHeader.getVisibility() == View.VISIBLE && etSearch != null && etSearch.getVisibility() == View.VISIBLE) {
             etSearch.requestFocus();
+            return true;
+        }
+
+        // Otherwise, pressing UP from the top row reaches the top header / VOD action buttons!
+        if (focusHeaderBar()) {
             return true;
         }
 
@@ -1901,6 +2016,10 @@ public class MainActivity extends AppCompatActivity {
             return true; // Strictly consume! Focus stays firmly in bouquets!
         }
 
+        if (focusHeaderBar()) {
+            return true;
+        }
+
         // At top boundary: pause before wrapping around to bottom
         long now = System.currentTimeMillis();
         if (lastCategoryTopTime == 0 || (now - lastCategoryTopTime > 1500)) {
@@ -1942,11 +2061,19 @@ public class MainActivity extends AppCompatActivity {
 
         for (int i = 0; i < currentList.size(); i++) {
             KeoDatabase.ChannelItem c = currentList.get(i);
-            urls.add(c.streamUrl);
-            titles.add(c.name);
-            if (c.id.equals(activeChannel.id)) {
-                startIndex = i;
+            if (c == null || c.isSeparator) continue;
+            if (c.streamUrl == null || c.streamUrl.trim().isEmpty()) continue;
+            if ("live".equals(activeChannel.streamType) && !"live".equals(c.streamType)) continue;
+            if (c.id != null && c.id.equals(activeChannel.id)) {
+                startIndex = urls.size();
             }
+            urls.add(c.streamUrl);
+            titles.add(c.name != null ? c.name : "");
+        }
+        if (urls.isEmpty()) {
+            urls.add(activeChannel.streamUrl);
+            titles.add(activeChannel.name != null ? activeChannel.name : "");
+            startIndex = 0;
         }
 
         PlayerActivity.pendingUrls = urls;
@@ -2068,10 +2195,7 @@ public class MainActivity extends AppCompatActivity {
 
             actorChip.setOnClickListener(v -> {
                 dialog.dismiss();
-                if (movieItem != null && movieItem.cast != null && !movieItem.cast.isEmpty()) {
-                    db.updateChannelMetadata(movieItem.id, movieItem.cast, movieItem.director, movieItem.plot, movieItem.genre, movieItem.releaseDate, movieItem.rating);
-                }
-                switchToSearch(actorName);
+                switchToSearch(actorName, movieItem);
             });
 
             layoutActorsContainer.addView(actorChip);
@@ -2139,10 +2263,7 @@ public class MainActivity extends AppCompatActivity {
                     btnMovieDirector.setVisibility(View.VISIBLE);
                     btnMovieDirector.setOnClickListener(v -> {
                         dialog.dismiss();
-                        if (movieItem.cast != null && !movieItem.cast.isEmpty()) {
-                            db.updateChannelMetadata(movieItem.id, movieItem.cast, movieItem.director, movieItem.plot, movieItem.genre, movieItem.releaseDate, movieItem.rating);
-                        }
-                        switchToSearch(movieItem.director);
+                        switchToSearch(movieItem.director, movieItem);
                     });
                     if (tvDirector != null) tvDirector.setVisibility(View.GONE);
                 } else if (tvDirector != null) {
@@ -2243,8 +2364,7 @@ public class MainActivity extends AppCompatActivity {
                                 final String fDirectorSearch = director;
                                 btnMovieDirector.setOnClickListener(v -> {
                                     dialog.dismiss();
-                                    db.updateChannelMetadata(movieItem.id, movieItem.cast, movieItem.director, movieItem.plot, movieItem.genre, movieItem.releaseDate, movieItem.rating);
-                                    switchToSearch(fDirectorSearch);
+                                    switchToSearch(fDirectorSearch, movieItem);
                                 });
                                 if (tvDirector != null) tvDirector.setVisibility(View.GONE);
                             } else if (tvDirector != null) {
@@ -2329,13 +2449,10 @@ public class MainActivity extends AppCompatActivity {
             if (btnSearchActor != null) {
                 btnSearchActor.setOnClickListener(v -> {
                     dialog.dismiss();
-                    if (movieItem != null && movieItem.cast != null && !movieItem.cast.isEmpty()) {
-                        db.updateChannelMetadata(movieItem.id, movieItem.cast, movieItem.director, movieItem.plot, movieItem.genre, movieItem.releaseDate, movieItem.rating);
-                    }
                     if (!firstActor[0].isEmpty()) {
-                        switchToSearch(firstActor[0]);
+                        switchToSearch(firstActor[0], movieItem);
                     } else {
-                        switchToSearch(tvTitle.getText().toString());
+                        switchToSearch(tvTitle.getText().toString(), movieItem);
                     }
                 });
             }
@@ -2413,10 +2530,7 @@ public class MainActivity extends AppCompatActivity {
                     btnSeriesDirector.setVisibility(View.VISIBLE);
                     btnSeriesDirector.setOnClickListener(v -> {
                         dialog.dismiss();
-                        if (seriesItem.cast != null && !seriesItem.cast.isEmpty()) {
-                            db.updateChannelMetadata(seriesItem.id, seriesItem.cast, seriesItem.director, seriesItem.plot, seriesItem.genre, seriesItem.releaseDate, seriesItem.rating);
-                        }
-                        switchToSearch(seriesItem.director);
+                        switchToSearch(seriesItem.director, seriesItem);
                     });
                     if (tvDirector != null) tvDirector.setVisibility(View.GONE);
                 } else if (tvDirector != null) {
@@ -2509,13 +2623,10 @@ public class MainActivity extends AppCompatActivity {
             if (btnSearchActor != null) {
                 btnSearchActor.setOnClickListener(v -> {
                     dialog.dismiss();
-                    if (seriesItem.cast != null && !seriesItem.cast.isEmpty()) {
-                        db.updateChannelMetadata(seriesItem.id, seriesItem.cast, seriesItem.director, seriesItem.plot, seriesItem.genre, seriesItem.releaseDate, seriesItem.rating);
-                    }
                     if (firstActor[0] != null && !firstActor[0].isEmpty()) {
-                        switchToSearch(firstActor[0]);
+                        switchToSearch(firstActor[0], seriesItem);
                     } else {
-                        switchToSearch(seriesItem.name);
+                        switchToSearch(seriesItem.name, seriesItem);
                     }
                 });
             }
@@ -2567,8 +2678,7 @@ public class MainActivity extends AppCompatActivity {
                                 final String fSeriesDir = director;
                                 btnSeriesDirector.setOnClickListener(v -> {
                                     dialog.dismiss();
-                                    db.updateChannelMetadata(seriesItem.id, seriesItem.cast, seriesItem.director, seriesItem.plot, seriesItem.genre, seriesItem.releaseDate, seriesItem.rating);
-                                    switchToSearch(fSeriesDir);
+                                    switchToSearch(fSeriesDir, seriesItem);
                                 });
                                 if (tvDirector != null) tvDirector.setVisibility(View.GONE);
                             } else if (tvDirector != null) {
@@ -5385,16 +5495,13 @@ public class MainActivity extends AppCompatActivity {
                         focusActiveSidebarButton();
                         return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                        if ("vod".equals(currentType) || "series".equals(currentType)) {
-                            enterVodBouquetGrid(true);
-                        } else {
-                            focusChannelsList();
+                        if (event.getRepeatCount() == 0) {
+                            if ("vod".equals(currentType) || "series".equals(currentType)) {
+                                enterVodBouquetGrid(true);
+                            } else {
+                                focusChannelsList();
+                            }
                         }
-                        return true;
-                    }
-                } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                    if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
-                        holder.itemView.performClick();
                         return true;
                     }
                 }
@@ -5456,6 +5563,13 @@ public class MainActivity extends AppCompatActivity {
             notifyDataSetChanged();
         }
 
+        public void appendItems(List<KeoDatabase.ChannelItem> moreItems) {
+            if (moreItems == null || moreItems.isEmpty()) return;
+            int startPos = items.size();
+            items.addAll(moreItems);
+            notifyItemRangeInserted(startPos, moreItems.size());
+        }
+
         public void notifyItemChangedById(String channelId) {
             for (int i = 0; i < items.size(); i++) {
                 if (items.get(i).id.equals(channelId)) {
@@ -5510,6 +5624,14 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onBindViewHolder(@NonNull ViewHolder holder, int position) {
             KeoDatabase.ChannelItem item = items.get(position);
+            holder.isTimelineMode = false;
+            holder.pendingActivatePast = false;
+            holder.pendingActivateFuture = false;
+            holder.leftLongPressTriggered = false;
+            if (holder.leftLongPressRunnable != null) {
+                holder.itemView.removeCallbacks(holder.leftLongPressRunnable);
+                holder.leftLongPressRunnable = null;
+            }
 
             if (holder.isVod) {
                 // --- VOD / SERIES POSTER CARD (TiviMate 7-Poster Grid) ---
@@ -5600,11 +5722,6 @@ public class MainActivity extends AppCompatActivity {
                             return handleCarouselDown(getTargetRecyclerView(), pos, total, true);
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
                             return handleCarouselUp(getTargetRecyclerView(), pos, total, true);
-                        }
-                    } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
-                            holder.itemView.performClick();
-                            return true;
                         }
                     }
                     return false;
@@ -5703,11 +5820,9 @@ public class MainActivity extends AppCompatActivity {
                                 } else {
                                     Toast.makeText(MainActivity.this, "Compte non configuré pour le replay", Toast.LENGTH_SHORT).show();
                                 }
-                            } else if (p != null && p.startTimestamp > nowSec) {
-                                // Future program
-                                Toast.makeText(MainActivity.this, "Programme à venir : " + p.title + " (" + p.getFormattedTime() + ")", Toast.LENGTH_SHORT).show();
                             } else {
-                                // Current program
+                                // Current or future program -> deactivate timeline and launch live channel!
+                                holder.deactivateTimeline();
                                 selectChannel(item);
                                 launchPlayerFullscreen();
                             }
@@ -5732,8 +5847,10 @@ public class MainActivity extends AppCompatActivity {
                                     if ("search".equals(currentType) || getTargetRecyclerView() == recyclerSearchResults) {
                                         return true;
                                     }
-                                    // DPAD_RIGHT: Explore future programs on timeline
-                                    holder.activateTimelineFuture();
+                                    if (event.getRepeatCount() == 0) {
+                                        // DPAD_RIGHT: Explore future programs on timeline
+                                        holder.activateTimelineFuture();
+                                    }
                                     return true;
                                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                                     if ("search".equals(currentType) || getTargetRecyclerView() == recyclerSearchResults) {
@@ -5794,9 +5911,6 @@ public class MainActivity extends AppCompatActivity {
                                 }
                                 holder.leftLongPressTriggered = false;
                                 return true;
-                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
-                                holder.itemView.performClick();
-                                return true;
                             }
                         }
                         return false;
@@ -5806,6 +5920,7 @@ public class MainActivity extends AppCompatActivity {
                     // Fallback when timeline not active (e.g. non-live list in live mode, or search results)
                     holder.itemView.setFocusable(true);
                     holder.itemView.setClickable(true);
+                    holder.itemView.setSelected(selectedPos == position);
                     if (holder.layoutEpgTimeline != null) holder.layoutEpgTimeline.setVisibility(View.GONE);
                     if (holder.tvEpg != null) {
                         holder.tvEpg.setVisibility(View.VISIBLE);
@@ -5838,11 +5953,6 @@ public class MainActivity extends AppCompatActivity {
                                 }
                                 return true;
                             } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                                return true;
-                            }
-                        } else if (event.getAction() == KeyEvent.ACTION_UP) {
-                            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
-                                holder.itemView.performClick();
                                 return true;
                             }
                         }
@@ -6074,6 +6184,7 @@ public class MainActivity extends AppCompatActivity {
             public void scrollToProgram(int index, boolean smooth) {
                 if (layoutEpgTimeline == null || index < 0 || index >= slotViews.size()) return;
                 layoutEpgTimeline.post(() -> {
+                    if (layoutEpgTimeline == null || index < 0 || index >= slotViews.size()) return;
                     View targetView = slotViews.get(index);
                     if (targetView != null) {
                         int scrollX = targetView.getLeft() - (layoutEpgTimeline.getWidth() / 3);

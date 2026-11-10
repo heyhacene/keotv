@@ -1254,12 +1254,30 @@ public class PlayerActivity extends AppCompatActivity {
         playerView.setPlayer(player);
 
         List<MediaItem> items = new ArrayList<>();
+        List<String> validUrls = new ArrayList<>();
+        List<String> validTitles = new ArrayList<>();
+        int mappedStart = 0;
         for (int i = 0; i < pendingUrls.size(); i++) {
-            String title = i < pendingTitles.size() ? pendingTitles.get(i) : "";
-            items.add(buildItem(pendingUrls.get(i), title));
+            String u = pendingUrls.get(i);
+            if (u == null || u.trim().isEmpty()) continue;
+            String title = i < pendingTitles.size() && pendingTitles.get(i) != null ? pendingTitles.get(i) : "";
+            if (i == pendingIndex) {
+                mappedStart = items.size();
+            }
+            validUrls.add(u);
+            validTitles.add(title);
+            items.add(buildItem(u, title));
         }
-        int start = Math.max(0, Math.min(pendingIndex, items.size() - 1));
-        String startUrl = (start >= 0 && start < pendingUrls.size()) ? pendingUrls.get(start) : "";
+        pendingUrls = validUrls;
+        pendingTitles = validTitles;
+        if (items.isEmpty()) {
+            android.widget.Toast.makeText(this, "Flux indisponible", android.widget.Toast.LENGTH_SHORT).show();
+            finish();
+            return;
+        }
+        int start = Math.max(0, Math.min(mappedStart, items.size() - 1));
+        pendingIndex = start;
+        String startUrl = pendingUrls.get(start);
 
         // Determine start/resume position for VOD Movies and Series Episodes (never for Live TV or Replay)
         long startPosMs = C.TIME_UNSET;

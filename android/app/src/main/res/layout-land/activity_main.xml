@@ -54,7 +54,7 @@
                     android:lineSpacingExtra="1dp"
                     android:background="@drawable/bg_nav_item_selector"
                     android:layout_marginBottom="5dp"
-                    android:nextFocusUp="@+id/btn_nav_live"
+                    android:nextFocusUp="@+id/btn_header_sync"
                     android:nextFocusLeft="@+id/btn_nav_live"
                     android:nextFocusRight="@+id/recycler_categories"
                     android:nextFocusDown="@+id/btn_nav_replay"
@@ -292,6 +292,9 @@
                 android:paddingStart="12dp"
                 android:paddingEnd="12dp"
                 android:layout_marginEnd="8dp"
+                android:nextFocusUp="@+id/btn_header_sync"
+                android:nextFocusLeft="@+id/btn_nav_live"
+                android:nextFocusRight="@+id/btn_header_update"
                 android:focusable="true" />
 
             <Button
@@ -306,6 +309,9 @@
                 android:paddingStart="10dp"
                 android:paddingEnd="10dp"
                 android:layout_marginEnd="8dp"
+                android:nextFocusUp="@+id/btn_header_update"
+                android:nextFocusLeft="@+id/btn_header_sync"
+                android:nextFocusRight="@+id/btn_header_login"
                 android:focusable="true" />
 
             <Button
@@ -319,6 +325,9 @@
                 android:background="@drawable/bg_button_selector"
                 android:paddingStart="12dp"
                 android:paddingEnd="12dp"
+                android:nextFocusUp="@+id/btn_header_login"
+                android:nextFocusLeft="@+id/btn_header_update"
+                android:nextFocusRight="@+id/btn_header_login"
                 android:focusable="true" />
 
         </LinearLayout>
@@ -475,7 +484,7 @@
                                 android:nextFocusDown="@+id/recycler_channels"
                                 android:nextFocusLeft="@+id/recycler_categories"
                                 android:nextFocusRight="@+id/et_search"
-                                android:nextFocusUp="@+id/recycler_channels" />
+                                android:nextFocusUp="@+id/btn_header_sync" />
 
                         </LinearLayout>
 
@@ -814,6 +823,7 @@
                         android:singleLine="true"
                         android:imeOptions="actionSearch"
                         android:focusable="true"
+                        android:nextFocusUp="@+id/btn_header_sync"
                         android:nextFocusLeft="@+id/sidebar"
                         android:nextFocusRight="@+id/btn_search_clear"
                         android:nextFocusDown="@+id/btn_search_filter_all" />
@@ -830,6 +840,7 @@
                         android:paddingStart="16dp"
                         android:paddingEnd="16dp"
                         android:focusable="true"
+                        android:nextFocusUp="@+id/btn_header_sync"
                         android:nextFocusLeft="@+id/et_global_search"
                         android:nextFocusRight="@+id/btn_search_clear"
                         android:nextFocusDown="@+id/btn_search_filter_all" />

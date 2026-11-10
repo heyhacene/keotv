@@ -781,6 +781,8 @@ public class KeoDatabase extends SQLiteOpenHelper {
     public static String extractCleanTitle(String rawName) {
         if (rawName == null) return "";
         String s = rawName.trim();
+        s = s.replaceAll("^(\\|[^|]{1,15})+\\|\\s*", "");
+        s = s.replaceAll("^(\\[[^\\]]{1,15}\\]\\s*)+", "");
         if (s.startsWith("|")) {
             int lastPipe = s.lastIndexOf('|', Math.min(25, s.length() - 1));
             if (lastPipe >= 0 && lastPipe < s.length() - 1) {
@@ -793,12 +795,16 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 s = s.substring(lastBracket + 1).trim();
             }
         }
-        s = s.replaceAll("^[A-Za-z]{2,6}\\s*[:\\-]\\s*", "");
-        s = s.replaceAll("(?i)\\s*\\[(VF|VO|VOSTFR|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|HEVC|1080P|720P)\\]", "");
-        s = s.replaceAll("(?i)\\s*\\((VF|VO|VOSTFR|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|HEVC|1080P|720P)\\)", "");
+        s = s.replaceAll("(?i)^(FR|VF|VO|VOSTFR|VOST|MULTI|TRUEFRENCH|EN|AR|ES|DE|IT|PT|NL|TR|RU|4K|UHD|FHD|HD|SD|HEVC)\\s*[:\\-|]+\\s*", "");
+        s = s.replaceAll("^[A-Za-z]{2,4}\\s*[:\\-]\\s+", "");
+        s = s.replaceAll("(?i)\\s*\\[(VF|VO|VOSTFR|VOST|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|SD|HEVC|1080P|720P)\\]", "");
+        s = s.replaceAll("(?i)\\s*\\((VF|VO|VOSTFR|VOST|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|SD|HEVC|1080P|720P)\\)", "");
+        s = s.replaceAll("(?i)\\s*\\|(VF|VO|VOSTFR|VOST|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|SD|HEVC|1080P|720P)\\|?", "");
         s = s.replaceAll("\\s*\\((19|20)\\d{2}\\)", "");
         s = s.replaceAll("\\s*\\[(19|20)\\d{2}\\]", "");
-        s = s.replaceAll("(?i)\\s*\\b(4K|UHD|FHD|HD|HEVC|1080p|720p)\\b", "");
+        s = s.replaceAll("(?i)\\s+[-|]?\\s*(19|20)\\d{2}\\s*$", "");
+        s = s.replaceAll("(?i)\\s*\\b(VOSTFR|TRUEFRENCH|MULTI|4K|UHD|FHD|HD|HEVC|1080p|720p)\\b", "");
+        s = s.replaceAll("(?i)\\s+[-|]\\s*(VF|VO|VOST|FR|EN)\\s*$", "");
         return s.trim();
     }
 
@@ -878,26 +884,38 @@ public class KeoDatabase extends SQLiteOpenHelper {
         if (titles == null || titles.isEmpty()) return list;
         SQLiteDatabase db = getReadableDatabase();
 
-        List<String> cleanTitles = new ArrayList<>();
+        List<String> sqlTitles = new ArrayList<>();
+        java.util.Set<String> exactTargets = new java.util.HashSet<>();
+        List<String> prefixTargets = new ArrayList<>();
+
         for (String t : titles) {
             if (t == null) continue;
-            String s = t.trim();
-            if (s.length() < 3) continue;
+            String s = extractCleanTitle(t).trim();
+            if (s.length() < 2) continue;
             if (s.matches("^\\d+$")) continue;
-            if (!cleanTitles.contains(s)) {
-                cleanTitles.add(s);
-                if (cleanTitles.size() >= 150) break;
+            String lower = s.toLowerCase(java.util.Locale.ROOT);
+            String unacc = stripAccents(lower);
+            exactTargets.add(lower);
+            exactTargets.add(unacc);
+            if (unacc.length() >= 6 && !prefixTargets.contains(unacc)) {
+                prefixTargets.add(unacc);
+            }
+            if (s.length() >= 3 && !sqlTitles.contains(lower) && sqlTitles.size() < 120) {
+                sqlTitles.add(lower);
+                if (!unacc.equals(lower) && sqlTitles.size() < 120) {
+                    sqlTitles.add(unacc);
+                }
             }
         }
-        if (cleanTitles.isEmpty()) return list;
+        if (sqlTitles.isEmpty()) return list;
 
         StringBuilder sb = new StringBuilder();
         sb.append("SELECT DISTINCT ").append(CHANNEL_COLUMNS).append(" FROM channels WHERE is_separator = 0 AND (");
         List<String> args = new ArrayList<>();
-        for (int i = 0; i < cleanTitles.size(); i++) {
+        for (int i = 0; i < sqlTitles.size(); i++) {
             if (i > 0) sb.append(" OR ");
             sb.append("name LIKE ?");
-            args.add("%" + cleanTitles.get(i) + "%");
+            args.add("%" + sqlTitles.get(i) + "%");
         }
         sb.append(")");
 
@@ -905,13 +923,28 @@ public class KeoDatabase extends SQLiteOpenHelper {
             sb.append(" AND stream_type = ?");
             args.add(streamType);
         }
-        sb.append(" ORDER BY name ASC LIMIT 150");
+        sb.append(" ORDER BY name ASC LIMIT 600");
 
         Cursor c = null;
         try {
             c = db.rawQuery(sb.toString(), args.toArray(new String[0]));
             while (c != null && c.moveToNext()) {
-                list.add(cursorToChannel(c));
+                ChannelItem cand = cursorToChannel(c);
+                if (cand == null || cand.name == null) continue;
+                String candClean = extractCleanTitle(cand.name).toLowerCase(java.util.Locale.ROOT);
+                String candUnacc = stripAccents(candClean);
+                boolean matched = exactTargets.contains(candClean) || exactTargets.contains(candUnacc);
+                if (!matched && candUnacc.length() >= 6) {
+                    for (String pt : prefixTargets) {
+                        if (candUnacc.startsWith(pt + ":") || candUnacc.startsWith(pt + " -") || candUnacc.startsWith(pt + " (")) {
+                            matched = true;
+                            break;
+                        }
+                    }
+                }
+                if (matched) {
+                    list.add(cand);
+                }
             }
         } catch (Throwable t) {
             android.util.Log.e("KeoDatabase", "searchChannelsByTitles error: " + t.getMessage());
@@ -919,6 +952,48 @@ public class KeoDatabase extends SQLiteOpenHelper {
             if (c != null) try { c.close(); } catch (Exception ignored) {}
         }
         return list;
+    }
+
+    public void indexPersonForChannels(List<ChannelItem> items, String personName, boolean asDirector, boolean asActor) {
+        if (items == null || items.isEmpty() || personName == null || personName.trim().isEmpty()) return;
+        String cleanPerson = personName.trim();
+        SQLiteDatabase db = getWritableDatabase();
+        db.beginTransaction();
+        try {
+            SQLiteStatement insActor = db.compileStatement("INSERT OR IGNORE INTO movie_actors (channel_id, actor_name, stream_type) VALUES (?, ?, ?)");
+            for (ChannelItem item : items) {
+                if (item == null || item.id == null || item.id.isEmpty()) continue;
+                ContentValues cv = new ContentValues();
+                if (asActor) {
+                    String existingCast = item.movieCast != null ? item.movieCast : "";
+                    if (!existingCast.toLowerCase(java.util.Locale.ROOT).contains(cleanPerson.toLowerCase(java.util.Locale.ROOT))) {
+                        String updatedCast = existingCast.isEmpty() ? cleanPerson : (existingCast + ", " + cleanPerson);
+                        cv.put("movie_cast", updatedCast);
+                        item.movieCast = updatedCast;
+                    }
+                    insActor.bindString(1, item.id);
+                    insActor.bindString(2, cleanPerson);
+                    insActor.bindString(3, item.streamType != null ? item.streamType : "vod");
+                    insActor.executeInsert();
+                }
+                if (asDirector) {
+                    String existingDir = item.director != null ? item.director : "";
+                    if (!existingDir.toLowerCase(java.util.Locale.ROOT).contains(cleanPerson.toLowerCase(java.util.Locale.ROOT))) {
+                        String updatedDir = existingDir.isEmpty() ? cleanPerson : (existingDir + ", " + cleanPerson);
+                        cv.put("director", updatedDir);
+                        item.director = updatedDir;
+                    }
+                }
+                if (cv.size() > 0) {
+                    db.update("channels", cv, "id = ?", new String[]{item.id});
+                }
+            }
+            db.setTransactionSuccessful();
+        } catch (Exception e) {
+            android.util.Log.w("KeoDatabase", "indexPersonForChannels error: " + e.getMessage());
+        } finally {
+            db.endTransaction();
+        }
     }
 
     public void saveActorsForChannel(SQLiteDatabase db, String channelId, String cast, String streamType) {
@@ -947,7 +1022,6 @@ public class KeoDatabase extends SQLiteOpenHelper {
     public void updateChannelMetadata(String id, String cast, String director, String plot, String genre, String releaseDate, String rating) {
         if (id == null || id.isEmpty()) return;
         SQLiteDatabase db = getWritableDatabase();
-        ensureColumnsExist(db);
         db.beginTransaction();
         try {
             ContentValues cv = new ContentValues();
@@ -982,15 +1056,21 @@ public class KeoDatabase extends SQLiteOpenHelper {
             if (rawName != null && !rawName.trim().isEmpty()) {
                 String cleanTitle = extractCleanTitle(rawName);
                 if (cleanTitle != null && cleanTitle.length() >= 3) {
+                    String cleanUnacc = stripAccents(cleanTitle).toLowerCase(java.util.Locale.ROOT);
                     Cursor siblingCursor = null;
                     try {
                         siblingCursor = db.rawQuery(
-                            "SELECT id FROM channels WHERE stream_type = ? AND name LIKE ? AND id != ?",
+                            "SELECT id, name FROM channels WHERE stream_type = ? AND name LIKE ? AND id != ?",
                             new String[]{st, "%" + cleanTitle + "%", id}
                         );
                         List<String> siblingIds = new ArrayList<>();
                         while (siblingCursor != null && siblingCursor.moveToNext()) {
-                            siblingIds.add(siblingCursor.getString(0));
+                            String sibId = siblingCursor.getString(0);
+                            String sibName = siblingCursor.getString(1);
+                            String sibClean = stripAccents(extractCleanTitle(sibName)).toLowerCase(java.util.Locale.ROOT);
+                            if (sibClean.equals(cleanUnacc)) {
+                                siblingIds.add(sibId);
+                            }
                         }
                         if (!siblingIds.isEmpty()) {
                             for (String sibId : siblingIds) {
