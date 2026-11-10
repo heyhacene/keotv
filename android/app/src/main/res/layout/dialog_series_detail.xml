@@ -18,9 +18,9 @@
         <ImageView
             android:id="@+id/iv_series_cover"
             android:layout_width="100dp"
-            android:layout_height="145dp"
-            android:scaleType="centerCrop"
-            android:background="#1E293B"
+            android:layout_height="150dp"
+            android:scaleType="fitCenter"
+            android:background="#0B1120"
             android:layout_marginEnd="14dp" />
 
         <LinearLayout
@@ -108,6 +108,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="55dp"
                 android:layout_marginTop="4dp"
+                android:focusable="false"
                 android:scrollbars="vertical">
 
                 <TextView
@@ -125,12 +126,12 @@
 
     </LinearLayout>
 
-    <!-- Actor chips row inside header details -->
+    <!-- Director & Actor chips row inside header details -->
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="4dp"
-        android:text="ACTEURS (cliquez pour voir ses films &amp; séries) :"
+        android:text="RÉALISATEUR &amp; ACTEURS (cliquez pour voir leurs films &amp; séries) :"
         android:textColor="#38BDF8"
         android:textSize="10.5sp"
         android:textStyle="bold"

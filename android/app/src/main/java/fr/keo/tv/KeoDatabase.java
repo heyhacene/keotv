@@ -19,7 +19,7 @@ import java.util.Set;
 public class KeoDatabase extends SQLiteOpenHelper {
 
     private static final String DB_NAME = "keotv_native.db";
-    private static final int DB_VERSION = 5;
+    private static final int DB_VERSION = 6;
     private static KeoDatabase instance;
 
     public static synchronized KeoDatabase getInstance(Context context) {
@@ -74,6 +74,21 @@ public class KeoDatabase extends SQLiteOpenHelper {
                     + "PRIMARY KEY (channel_id, actor_name))");
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_actor_name ON movie_actors(actor_name)");
             db.execSQL("CREATE INDEX IF NOT EXISTS idx_actor_channel ON movie_actors(channel_id)");
+            db.execSQL("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)");
+            Cursor sc = null;
+            boolean alreadyCleaned = false;
+            try {
+                sc = db.rawQuery("SELECT value FROM settings WHERE key = 'clean_polluted_actors_v6'", null);
+                alreadyCleaned = (sc != null && sc.moveToFirst());
+            } finally {
+                if (sc != null) try { sc.close(); } catch (Exception ignored) {}
+            }
+            if (!alreadyCleaned) {
+                db.execSQL("DELETE FROM movie_actors WHERE channel_id IN (SELECT id FROM channels WHERE plot IS NULL OR plot = '')");
+                db.execSQL("UPDATE channels SET movie_cast = NULL, director = NULL WHERE (plot IS NULL OR plot = '')");
+                db.execSQL("INSERT OR REPLACE INTO settings (key, value) VALUES ('clean_polluted_actors_v6', '1')");
+                invalidateVodCatalogCache();
+            }
         } catch (Exception e) {
             android.util.Log.w("KeoDatabase", "ensureColumnsExist movie_actors failed: " + e.getMessage());
         }
@@ -796,14 +811,40 @@ public class KeoDatabase extends SQLiteOpenHelper {
     private static final java.util.regex.Pattern PAT_ROMAN_VIII = java.util.regex.Pattern.compile("\\bviii\\b");
     private static final java.util.regex.Pattern PAT_MULTI_SPACE = java.util.regex.Pattern.compile("\\s+");
     private static final java.util.regex.Pattern PAT_DIA = java.util.regex.Pattern.compile("\\p{InCombiningDiacriticalMarks}+");
+    public static final java.util.regex.Pattern PAT_SUBTITLE_SPLIT = java.util.regex.Pattern.compile("\\s*:\\s*|\\s+[\\-–—]\\s+");
+    private static final java.util.regex.Pattern PAT_EXTRACT_YEAR_PAREN = java.util.regex.Pattern.compile("[(\\[](19[2-9]\\d|20[0-3]\\d)[)\\]]");
+    private static final java.util.regex.Pattern PAT_EXTRACT_YEAR_ANY = java.util.regex.Pattern.compile("\\b(19[2-9]\\d|20[0-3]\\d)\\b");
 
     private static final java.util.Set<String> GENERIC_FRANCHISE_STOPWORDS = new java.util.HashSet<>(
             java.util.Arrays.asList(
                     "amour", "monde", "secret", "histoire", "famille", "police", "maison", "femme",
                     "homme", "enfant", "ombre", "retour", "dernier", "derniere", "aventure", "voyage",
-                    "affaire", "crime", "guerre", "destin", "vengeance", "justice", "verite", "silence"
+                    "affaire", "crime", "guerre", "destin", "vengeance", "justice", "verite", "silence",
+                    "paradise", "friends", "alive", "dreams", "robots", "insomnia", "boulevard"
             )
     );
+
+    public static int extractYear(String rawName, String releaseDate) {
+        if (rawName != null && !rawName.isEmpty()) {
+            java.util.regex.Matcher m = PAT_EXTRACT_YEAR_PAREN.matcher(rawName);
+            int lastYear = 0;
+            while (m.find()) {
+                try {
+                    lastYear = Integer.parseInt(m.group(1));
+                } catch (Exception ignored) {}
+            }
+            if (lastYear > 0) return lastYear;
+        }
+        if (releaseDate != null && !releaseDate.isEmpty()) {
+            java.util.regex.Matcher m = PAT_EXTRACT_YEAR_ANY.matcher(releaseDate);
+            if (m.find()) {
+                try {
+                    return Integer.parseInt(m.group(1));
+                } catch (Exception ignored) {}
+            }
+        }
+        return 0;
+    }
 
     public static class VodCatalogEntry {
         public final String id;
@@ -817,9 +858,10 @@ public class KeoDatabase extends SQLiteOpenHelper {
         public final String normSub;
         public String castNorm;
         public String directorNorm;
+        public int year;
         public final int langPriority;
 
-        public VodCatalogEntry(String id, String streamType, String rawName, String cast, String director) {
+        public VodCatalogEntry(String id, String streamType, String rawName, String cast, String director, String releaseDate) {
             this.id = id != null ? id : "";
             this.streamType = streamType != null ? streamType : "vod";
             this.rawName = rawName != null ? rawName : "";
@@ -829,7 +871,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
             String b = "";
             String s = "";
-            String[] parts = this.cleanTitle.split("[:\\-–—]");
+            String[] parts = PAT_SUBTITLE_SPLIT.split(this.cleanTitle);
             if (parts.length > 1) {
                 b = normalizeTitleForMatch(parts[0]);
                 s = normalizeTitleForMatch(parts[1]);
@@ -839,6 +881,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
             this.normSub = s;
             this.castNorm = (cast != null && !cast.isEmpty()) ? stripAccents(cast).toLowerCase(java.util.Locale.ROOT) : "";
             this.directorNorm = (director != null && !director.isEmpty()) ? stripAccents(director).toLowerCase(java.util.Locale.ROOT) : "";
+            this.year = extractYear(this.rawName, releaseDate);
             String upper = this.rawName.toUpperCase(java.util.Locale.ROOT);
             this.langPriority = (upper.contains("FR") || upper.contains("VF") || upper.contains("VO") || upper.contains("MULTI")) ? 0 : 1;
         }
@@ -866,7 +909,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
             Cursor c = null;
             try {
                 c = db.rawQuery(
-                        "SELECT id, stream_type, name, movie_cast, director FROM channels WHERE is_separator = 0 AND stream_type IN ('vod', 'series')",
+                        "SELECT id, stream_type, name, movie_cast, director, release_date FROM channels WHERE is_separator = 0 AND stream_type IN ('vod', 'series')",
                         null
                 );
                 while (c != null && c.moveToNext()) {
@@ -875,8 +918,9 @@ public class KeoDatabase extends SQLiteOpenHelper {
                     String name = c.getString(2);
                     String cast = c.getString(3);
                     String dir = c.getString(4);
+                    String rel = c.getString(5);
                     if (id == null || name == null) continue;
-                    VodCatalogEntry entry = new VodCatalogEntry(id, st, name, cast, dir);
+                    VodCatalogEntry entry = new VodCatalogEntry(id, st, name, cast, dir, rel);
                     if (!entry.normFull.isEmpty()) {
                         built.add(entry);
                         byId.put(id, entry);
@@ -895,7 +939,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
                         String st = c.getString(1);
                         String name = c.getString(2);
                         if (id == null || name == null) continue;
-                        VodCatalogEntry entry = new VodCatalogEntry(id, st, name, "", "");
+                        VodCatalogEntry entry = new VodCatalogEntry(id, st, name, "", "", "");
                         if (!entry.normFull.isEmpty()) {
                             built.add(entry);
                             byId.put(id, entry);
@@ -1061,16 +1105,18 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
     public static String stripLeadingArticle(String norm) {
         if (norm == null || norm.isEmpty()) return "";
+        String rem = norm;
         if (norm.startsWith("les ") || norm.startsWith("the ") || norm.startsWith("des ") || norm.startsWith("une ")) {
-            return norm.substring(4).trim();
+            rem = norm.substring(4).trim();
+        } else if (norm.startsWith("le ") || norm.startsWith("la ") || norm.startsWith("un ")) {
+            rem = norm.substring(3).trim();
+        } else if (norm.startsWith("l ") || norm.startsWith("d ")) {
+            rem = norm.substring(2).trim();
         }
-        if (norm.startsWith("le ") || norm.startsWith("la ") || norm.startsWith("un ")) {
-            return norm.substring(3).trim();
+        if (rem.length() < 6 || GENERIC_FRANCHISE_STOPWORDS.contains(rem)) {
+            return norm;
         }
-        if (norm.startsWith("l ") || norm.startsWith("d ")) {
-            return norm.substring(2).trim();
-        }
-        return norm;
+        return rem;
     }
 
     private static boolean containsWholeWordOrPrefix(String textNorm, String word, boolean requireWholeWord) {
@@ -1095,9 +1141,20 @@ public class KeoDatabase extends SQLiteOpenHelper {
         if (metaNorm == null || metaNorm.isEmpty() || words == null || words.length == 0) return false;
         for (String w : words) {
             if (w.isEmpty()) continue;
-            // Require whole word match for short words (< 5 chars) so "Syl" or "Dan" doesn't match random names
-            boolean requireWhole = w.length() < 5;
+            // Require whole word match when multi-word or < 6 chars so "Robin" never matches "Robinson"
+            boolean requireWhole = (words.length > 1) || (w.length() < 6);
             if (!containsWholeWordOrPrefix(metaNorm, w, requireWhole)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean containsAllWholeWords(String metaNorm, String[] words) {
+        if (metaNorm == null || metaNorm.isEmpty() || words == null || words.length == 0) return false;
+        for (String w : words) {
+            if (w.isEmpty()) continue;
+            if (!containsWholeWordOrPrefix(metaNorm, w, true)) {
                 return false;
             }
         }
@@ -1282,27 +1339,20 @@ public class KeoDatabase extends SQLiteOpenHelper {
         if (fullPersonName == null || fullPersonName.trim().isEmpty()) return list;
         String cleanPerson = stripAccents(fullPersonName).toLowerCase(java.util.Locale.ROOT).trim();
         String[] nameTokens = cleanPerson.split("\\s+");
-        String lastName = nameTokens.length > 1 ? nameTokens[nameTokens.length - 1] : cleanPerson;
-        boolean canMatchSurnameAlone = lastName.length() >= 6;
 
         Set<String> actorChannelIds = new HashSet<>();
         SQLiteDatabase db = getReadableDatabase();
         Cursor ac = null;
         try {
-            if (canMatchSurnameAlone) {
-                ac = db.rawQuery("SELECT channel_id, actor_name FROM movie_actors WHERE actor_name LIKE ? OR actor_name LIKE ?",
-                        new String[]{"%" + cleanPerson + "%", "%" + lastName + "%"});
-            } else {
-                ac = db.rawQuery("SELECT channel_id, actor_name FROM movie_actors WHERE actor_name LIKE ?",
-                        new String[]{"%" + cleanPerson + "%"});
-            }
+            String firstToken = nameTokens[0];
+            ac = db.rawQuery("SELECT channel_id, actor_name FROM movie_actors WHERE actor_name LIKE ? OR actor_name LIKE ?",
+                    new String[]{"%" + cleanPerson + "%", "%" + firstToken + "%"});
             while (ac != null && ac.moveToNext()) {
                 String cid = ac.getString(0);
                 String aName = ac.getString(1);
                 if (cid != null && aName != null) {
                     String aNorm = stripAccents(aName).toLowerCase(java.util.Locale.ROOT);
-                    if (containsAllWordsInMetadata(aNorm, nameTokens)
-                            || (canMatchSurnameAlone && containsWholeWordOrPrefix(aNorm, lastName, true))) {
+                    if (containsAllWholeWords(aNorm, nameTokens)) {
                         actorChannelIds.add(cid);
                     }
                 }
@@ -1319,16 +1369,9 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 if (!streamType.equalsIgnoreCase(e.streamType)) continue;
             }
             boolean isMatch = actorChannelIds.contains(e.id)
-                    || containsAllWordsInMetadata(e.castNorm, nameTokens)
-                    || containsAllWordsInMetadata(e.directorNorm, nameTokens)
-                    || containsAllWordsInMetadata(e.normFull, nameTokens);
-            if (!isMatch && canMatchSurnameAlone) {
-                if (containsWholeWordOrPrefix(e.castNorm, lastName, true)
-                        || containsWholeWordOrPrefix(e.directorNorm, lastName, true)
-                        || containsWholeWordOrPrefix(e.normFull, lastName, true)) {
-                    isMatch = true;
-                }
-            }
+                    || containsAllWholeWords(e.castNorm, nameTokens)
+                    || containsAllWholeWords(e.directorNorm, nameTokens)
+                    || containsAllWholeWords(e.normFull, nameTokens);
             if (isMatch) {
                 matched.add(e);
             }
@@ -1346,25 +1389,118 @@ public class KeoDatabase extends SQLiteOpenHelper {
         return fetchChannelsByIdsOrdered(ids);
     }
 
-    private static void addFranchiseRootAndSequels(Set<String> franchiseRoots, Set<String> exactTargets, String candidateRoot) {
+    private static void addYearToKey(Map<String, Set<Integer>> map, String key, int year) {
+        if (map == null || key == null || key.isEmpty() || year <= 0) return;
+        Set<Integer> set = map.get(key);
+        if (set == null) {
+            set = new HashSet<>(4);
+            map.put(key, set);
+        }
+        set.add(year);
+    }
+
+    public static void registerTitleYear(Map<String, Set<Integer>> map, String rawTitle, int year) {
+        if (map == null || rawTitle == null || year <= 0) return;
+        String cleaned = extractCleanTitle(rawTitle);
+        if (cleaned.length() < 2) return;
+        String normFull = normalizeTitleForMatch(cleaned);
+        if (normFull.length() < 2) return;
+
+        addYearToKey(map, normFull, year);
+        addYearToKey(map, normFull + " 1", year);
+        String rootFull = normFull.replaceAll("\\s+[1-9]$", "").trim();
+        if (rootFull.length() >= 4) {
+            addYearToKey(map, rootFull, year);
+        }
+
+        String noArt = stripLeadingArticle(normFull);
+        if (noArt.length() >= 4 && !noArt.equals(normFull)) {
+            addYearToKey(map, noArt, year);
+            addYearToKey(map, noArt + " 1", year);
+            String rootNoArt = noArt.replaceAll("\\s+[1-9]$", "").trim();
+            if (rootNoArt.length() >= 4) {
+                addYearToKey(map, rootNoArt, year);
+            }
+        }
+
+        String[] parts = PAT_SUBTITLE_SPLIT.split(cleaned);
+        if (parts.length > 1) {
+            String normBase = normalizeTitleForMatch(parts[0].trim());
+            String normSub = normalizeTitleForMatch(parts[1].trim());
+            if (normBase.length() >= 4) {
+                addYearToKey(map, normBase, year);
+                addYearToKey(map, normBase + " 1", year);
+                String baseRoot = normBase.replaceAll("\\s+[1-9]$", "").trim();
+                if (baseRoot.length() >= 4) {
+                    addYearToKey(map, baseRoot, year);
+                    if (normSub.length() >= 4) {
+                        addYearToKey(map, baseRoot + " " + normSub, year);
+                    }
+                }
+                String baseNoArt = stripLeadingArticle(normBase);
+                if (baseNoArt.length() >= 4) {
+                    addYearToKey(map, baseNoArt, year);
+                    addYearToKey(map, baseNoArt + " 1", year);
+                    String baseNoArtRoot = baseNoArt.replaceAll("\\s+[1-9]$", "").trim();
+                    if (baseNoArtRoot.length() >= 4) {
+                        addYearToKey(map, baseNoArtRoot, year);
+                    }
+                }
+            }
+        }
+    }
+
+    private static boolean isEntryYearCompatible(VodCatalogEntry e, String matchedKey, Map<String, Set<Integer>> normTitleYears) {
+        if (e == null || e.year <= 0 || normTitleYears == null || normTitleYears.isEmpty()) {
+            return true;
+        }
+        Set<Integer> allowed = null;
+        if (matchedKey != null) {
+            allowed = normTitleYears.get(matchedKey);
+        }
+        if ((allowed == null || allowed.isEmpty()) && !e.normFull.isEmpty()) {
+            allowed = normTitleYears.get(e.normFull);
+        }
+        if ((allowed == null || allowed.isEmpty()) && !e.normBase.isEmpty()) {
+            allowed = normTitleYears.get(e.normBase);
+        }
+        if (allowed == null || allowed.isEmpty()) {
+            return true;
+        }
+        boolean isSeries = "series".equalsIgnoreCase(e.streamType);
+        for (int y : allowed) {
+            if (y <= 0) return true;
+            if (isSeries) {
+                if (e.year >= y - 1) return true;
+            } else {
+                if (Math.abs(e.year - y) <= 2) return true;
+            }
+        }
+        return false;
+    }
+
+    private static void incrementRootCount(Map<String, Integer> rootCounts, String candidateRoot, Set<String> seenRootsInSameTitle) {
         if (candidateRoot == null) return;
-        String root = candidateRoot.replaceAll("\\s+([1-9]|i)$", "").trim();
+        String root = candidateRoot.replaceAll("\\s+[1-9]$", "").trim();
         if (root.length() >= 5 && !root.matches("^\\d+$") && !GENERIC_FRANCHISE_STOPWORDS.contains(root)) {
-            franchiseRoots.add(root);
-            exactTargets.add(root);
-            exactTargets.add(root + " i");
-            for (int n = 1; n <= 9; n++) {
-                exactTargets.add(root + " " + n);
+            if (seenRootsInSameTitle.add(root)) {
+                Integer cur = rootCounts.get(root);
+                rootCounts.put(root, cur == null ? 1 : (cur + 1));
             }
         }
     }
 
     public List<ChannelItem> searchChannelsByTitles(List<String> titles, String streamType) {
+        return searchChannelsByTitles(titles, null, streamType);
+    }
+
+    public List<ChannelItem> searchChannelsByTitles(List<String> titles, Map<String, Set<Integer>> normTitleYears, String streamType) {
         List<ChannelItem> list = new ArrayList<>();
         if (titles == null || titles.isEmpty()) return list;
 
         Set<String> exactTargets = new HashSet<>();
         Set<String> franchiseRoots = new HashSet<>();
+        Map<String, Integer> rootCounts = new HashMap<>();
 
         for (String t : titles) {
             if (t == null) continue;
@@ -1374,27 +1510,23 @@ public class KeoDatabase extends SQLiteOpenHelper {
             String normFull = normalizeTitleForMatch(cleaned);
             if (normFull.length() < 2 || normFull.matches("^\\d+$")) continue;
 
+            Set<String> seenRoots = new HashSet<>(4);
             exactTargets.add(normFull);
             exactTargets.add(normFull + " 1");
-            exactTargets.add(normFull + " i");
 
             String noArt = stripLeadingArticle(normFull);
-            if (noArt.length() >= 4) {
+            if (noArt.length() >= 6 && !noArt.equals(normFull)) {
                 exactTargets.add(noArt);
                 exactTargets.add(noArt + " 1");
-                exactTargets.add(noArt + " i");
             }
 
-            // If this title itself doesn't end in 2..9, it can serve as a franchise root (e.g. "rambo", "rocky", "creed", "expendables")
-            if (!normFull.matches(".*\\s+[2-9]$")) {
-                addFranchiseRootAndSequels(franchiseRoots, exactTargets, normFull);
-                if (noArt.length() >= 5) {
-                    addFranchiseRootAndSequels(franchiseRoots, exactTargets, noArt);
-                }
+            incrementRootCount(rootCounts, normFull, seenRoots);
+            if (noArt.length() >= 6 && !noArt.equals(normFull)) {
+                incrementRootCount(rootCounts, noArt, seenRoots);
             }
 
-            // If title has a subtitle separated by ':', ' - ', ' – ', extract base title and subtitle
-            String[] parts = cleaned.split("[:\\-–—]");
+            // Subtitle separated ONLY by ':' or whitespace-surrounded dash (' - ', ' – ', ' — ')
+            String[] parts = PAT_SUBTITLE_SPLIT.split(cleaned);
             if (parts.length > 1) {
                 String baseRaw = parts[0].trim();
                 String subRaw = parts[1].trim();
@@ -1403,22 +1535,34 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 if (normBase.length() >= 4 && !normBase.matches("^\\d+$")) {
                     exactTargets.add(normBase);
                     exactTargets.add(normBase + " 1");
-                    exactTargets.add(normBase + " i");
                     String baseNoArt = stripLeadingArticle(normBase);
-                    if (baseNoArt.length() >= 4) {
+                    if (baseNoArt.length() >= 6 && !baseNoArt.equals(normBase)) {
                         exactTargets.add(baseNoArt);
                         exactTargets.add(baseNoArt + " 1");
                     }
-                    addFranchiseRootAndSequels(franchiseRoots, exactTargets, normBase);
-                    if (baseNoArt.length() >= 5) {
-                        addFranchiseRootAndSequels(franchiseRoots, exactTargets, baseNoArt);
+                    incrementRootCount(rootCounts, normBase, seenRoots);
+                    if (baseNoArt.length() >= 6 && !baseNoArt.equals(normBase)) {
+                        incrementRootCount(rootCounts, baseNoArt, seenRoots);
                     }
                     if (normSub.length() >= 4) {
-                        String baseRoot = normBase.replaceAll("\\s+([1-9]|i)$", "").trim();
+                        String baseRoot = normBase.replaceAll("\\s+[1-9]$", "").trim();
                         if (baseRoot.length() >= 4) {
                             exactTargets.add(baseRoot + " " + normSub);
                         }
                     }
+                }
+            }
+        }
+
+        // Only promote a root to franchiseRoots if it appears in >= 2 titles/variants of this person OR has explicit sequel 2/3
+        for (Map.Entry<String, Integer> entry : rootCounts.entrySet()) {
+            String root = entry.getKey();
+            int count = entry.getValue();
+            if (count >= 3 || exactTargets.contains(root + " 2") || exactTargets.contains(root + " 3")) {
+                franchiseRoots.add(root);
+                exactTargets.add(root);
+                for (int n = 1; n <= 9; n++) {
+                    exactTargets.add(root + " " + n);
                 }
             }
         }
@@ -1434,22 +1578,28 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 if (!streamType.equalsIgnoreCase(e.streamType)) continue;
             }
 
-            boolean matched = exactTargets.contains(e.normFull) || exactTargets.contains(e.normNoArt);
+            String matchedKey = null;
+            if (exactTargets.contains(e.normFull)) {
+                matchedKey = e.normFull;
+            } else if (exactTargets.contains(e.normNoArt)) {
+                matchedKey = e.normNoArt;
+            }
 
             // Check base title before ':' or ' - ' (e.g. "|FR| Rambo 1 : First Blood", "|FR| Rambo 4 : John Rambo", "|FR| Rocky 6 : Rocky Balboa")
-            if (!matched && e.normBase.length() >= 4) {
+            if (matchedKey == null && e.normBase.length() >= 4) {
                 if (exactTargets.contains(e.normBase) || exactTargets.contains(e.normBaseNoArt)) {
-                    if (e.normBase.matches(".*\\s+([1-9]|i)$")
-                            || franchiseRoots.contains(e.normBase)
-                            || franchiseRoots.contains(e.normBaseNoArt)
+                    String baseRoot = e.normBase.replaceAll("\\s+[1-9]$", "").trim();
+                    String baseNoArtRoot = e.normBaseNoArt.replaceAll("\\s+[1-9]$", "").trim();
+                    if (franchiseRoots.contains(baseRoot)
+                            || franchiseRoots.contains(baseNoArtRoot)
                             || (!e.normSub.isEmpty() && exactTargets.contains(e.normSub))) {
-                        matched = true;
+                        matchedKey = exactTargets.contains(e.normBase) ? e.normBase : e.normBaseNoArt;
                     }
                 }
             }
 
-            // Check franchise prefix + sequel number or known subtitle when IPTV title omits ':' / '-' (e.g. "|FR| Rambo 1 First Blood", "|FR| Rambo First Blood")
-            if (!matched && e.normFull.length() >= 6) {
+            // Check franchise prefix + sequel number or known subtitle when IPTV title omits ':' / '-' (e.g. "|FR| Rambo 1 First Blood")
+            if (matchedKey == null && e.normFull.length() >= 6) {
                 for (String root : franchiseRoots) {
                     String candidate = null;
                     if (e.normFull.startsWith(root + " ")) {
@@ -1458,17 +1608,17 @@ public class KeoDatabase extends SQLiteOpenHelper {
                         candidate = e.normNoArt.substring(root.length() + 1).trim();
                     }
                     if (candidate != null && !candidate.isEmpty()) {
-                        if (candidate.matches("^([1-9]|i)(\\b.*|$)")
+                        if (candidate.matches("^[1-9](\\b.*|$)")
                                 || exactTargets.contains(candidate)
                                 || exactTargets.contains(stripLeadingArticle(candidate))) {
-                            matched = true;
+                            matchedKey = root;
                             break;
                         }
                     }
                 }
             }
 
-            if (matched) {
+            if (matchedKey != null && isEntryYearCompatible(e, matchedKey, normTitleYears)) {
                 matchedEntries.add(e);
             }
         }

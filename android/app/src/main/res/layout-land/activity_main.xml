@@ -557,20 +557,11 @@
                         android:orientation="vertical"
                         android:visibility="gone">
 
-                        <!-- Hero Top Banner (~175dp height) -->
+                        <!-- Hero Top Banner (~168dp height) -->
                         <FrameLayout
                             android:layout_width="match_parent"
-                            android:layout_height="175dp"
+                            android:layout_height="168dp"
                             android:background="#080C14">
-
-                            <!-- Movie Backdrop (Right side) -->
-                            <ImageView
-                                android:id="@+id/iv_vod_hero_backdrop"
-                                android:layout_width="match_parent"
-                                android:layout_height="match_parent"
-                                android:scaleType="centerCrop"
-                                android:layout_gravity="end"
-                                android:contentDescription="Backdrop" />
 
                             <!-- Gradient Overlay from left to right -->
                             <View
@@ -578,15 +569,26 @@
                                 android:layout_height="match_parent"
                                 android:background="@drawable/bg_hero_gradient" />
 
+                            <!-- Movie Poster Preview (Right side, uncropped fitCenter) -->
+                            <ImageView
+                                android:id="@+id/iv_vod_hero_backdrop"
+                                android:layout_width="112dp"
+                                android:layout_height="152dp"
+                                android:layout_marginEnd="14dp"
+                                android:scaleType="fitCenter"
+                                android:layout_gravity="end|center_vertical"
+                                android:background="#0D1526"
+                                android:contentDescription="Backdrop" />
+
                             <!-- Left Details Area -->
                             <LinearLayout
                                 android:layout_width="match_parent"
                                 android:layout_height="match_parent"
                                 android:orientation="vertical"
                                 android:paddingStart="16dp"
-                                android:paddingTop="12dp"
+                                android:paddingTop="10dp"
                                 android:paddingBottom="6dp"
-                                android:paddingEnd="130dp">
+                                android:paddingEnd="136dp">
 
                                 <!-- Title -->
                                 <TextView
@@ -700,14 +702,15 @@
 
                             </LinearLayout>
 
-                            <!-- Top Right Search & Back action buttons -->
+                            <!-- Top Right Search & Back action buttons (hidden in permanent 3-pane split layout so they never steal focus) -->
                             <LinearLayout
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_gravity="top|end"
                                 android:layout_margin="10dp"
                                 android:orientation="horizontal"
-                                android:gravity="center_vertical">
+                                android:gravity="center_vertical"
+                                android:visibility="gone">
 
                                 <Button
                                     android:id="@+id/btn_vod_search"
@@ -717,7 +720,8 @@
                                     android:textColor="#FFFFFF"
                                     android:textSize="12sp"
                                     android:background="@drawable/bg_button_selector"
-                                    android:focusable="true" />
+                                    android:focusable="false"
+                                    android:visibility="gone" />
 
                                 <Button
                                     android:id="@+id/btn_vod_back"
@@ -731,7 +735,8 @@
                                     android:layout_marginStart="8dp"
                                     android:paddingStart="8dp"
                                     android:paddingEnd="8dp"
-                                    android:focusable="true" />
+                                    android:focusable="false"
+                                    android:visibility="gone" />
 
                             </LinearLayout>
 

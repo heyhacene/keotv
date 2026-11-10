@@ -59,6 +59,7 @@ public class ImageLoader {
             RequestOptions options = new RequestOptions()
                     .placeholder(placeholder)
                     .error(placeholder)
+                    .fitCenter()
                     .diskCacheStrategy(DiskCacheStrategy.ALL);
 
             Glide.with(context)

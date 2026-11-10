@@ -9,13 +9,13 @@
     android:clickable="true"
     android:background="@drawable/bg_vod_poster_selector">
 
-    <!-- Poster Card with rounded corners -->
+    <!-- Poster Card with rounded corners (2:3 cinema aspect ratio in 5-col split view) -->
     <androidx.cardview.widget.CardView
         android:layout_width="match_parent"
-        android:layout_height="145dp"
+        android:layout_height="160dp"
         app:cardCornerRadius="6dp"
         app:cardElevation="0dp"
-        app:cardBackgroundColor="#131B2E">
+        app:cardBackgroundColor="#0B1120">
 
         <FrameLayout
             android:layout_width="match_parent"
@@ -25,7 +25,8 @@
                 android:id="@+id/iv_vod_poster"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:scaleType="centerCrop"
+                android:scaleType="fitCenter"
+                android:adjustViewBounds="true"
                 android:src="@drawable/bg_poster_placeholder"
                 android:contentDescription="Affiche" />
 

@@ -856,10 +856,19 @@ public class MainActivity extends AppCompatActivity {
         return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
     }
 
+    private final java.util.concurrent.atomic.AtomicInteger sectionLoadGeneration = new java.util.concurrent.atomic.AtomicInteger(0);
+    private final java.util.concurrent.atomic.AtomicInteger categoryLoadGeneration = new java.util.concurrent.atomic.AtomicInteger(0);
+    private volatile boolean wantFocusChannelsOnCategoryLoad = false;
+
     public void switchSection(String section) {
         stopContinuousBackspace();
         currentType = section;
         updateSidebarHighlights();
+        sectionLoadGeneration.incrementAndGet();
+        categoryLoadGeneration.incrementAndGet();
+        mainHandler.removeCallbacks(categoryDebounceRunnable);
+        pendingCategoryToLoad = null;
+        wantFocusChannelsOnCategoryLoad = false;
 
         if ("search".equals(section)) {
             exitVodBouquetGrid();
@@ -887,17 +896,32 @@ public class MainActivity extends AppCompatActivity {
 
         boolean isLandscapeSplit = findViewById(R.id.sidebar) != null;
         boolean isVod = "vod".equals(section) || "series".equals(section);
-        int spanCount = isLandscapeSplit ? 7 : 3;
+        int spanCount = isLandscapeSplit ? 5 : 3;
 
-        exitVodBouquetGrid();
+        isVodGridMode = false;
+        if (isLandscapeSplit) {
+            if (sidebar != null) sidebar.setVisibility(View.VISIBLE);
+            if (panelBouquets != null) panelBouquets.setVisibility(View.VISIBLE);
+            if (headerBar != null) headerBar.setVisibility(View.VISIBLE);
+        }
+
+        // Clear existing items BEFORE changing grid/list mode so Live TV channel logos never flash inside VOD cards
+        if (channelsAdapter != null) {
+            channelsAdapter.setItems(new ArrayList<>());
+        }
+        if (categoriesAdapter != null) {
+            categoriesAdapter.setItems(new ArrayList<>());
+        }
 
         if (recyclerChannels != null && channelsAdapter != null) {
             channelsAdapter.setVodGridMode(isVod, spanCount);
             if (isVod) {
                 recyclerChannels.setLayoutManager(new GridLayoutManager(this, spanCount));
                 if (layoutLiveHeader != null) layoutLiveHeader.setVisibility(View.GONE);
+                if (layoutVodHero != null) layoutVodHero.setVisibility(View.VISIBLE);
             } else {
                 recyclerChannels.setLayoutManager(new LinearLayoutManager(this));
+                if (layoutVodHero != null) layoutVodHero.setVisibility(View.GONE);
                 if (layoutLiveHeader != null) layoutLiveHeader.setVisibility(View.VISIBLE);
             }
         }
@@ -1031,11 +1055,15 @@ public class MainActivity extends AppCompatActivity {
 
             runOnUiThread(() -> {
                 if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
+                boolean resultsHadFocus = (recyclerSearchResults != null && recyclerSearchResults.hasFocus());
                 if (tvSearchResultsCount != null) {
                     tvSearchResultsCount.setText(currentResults.size() + " résultat(s) trouvé(s) pour '" + q + "'");
                 }
                 if (searchResultsAdapter != null) {
                     searchResultsAdapter.setItems(new ArrayList<>(currentResults));
+                    if (resultsHadFocus && !currentResults.isEmpty()) {
+                        focusRecyclerViewItem(recyclerSearchResults, 0);
+                    }
                 }
             });
 
@@ -1046,6 +1074,38 @@ public class MainActivity extends AppCompatActivity {
                 searchHandler.postDelayed(pendingTmdbSearchRunnable, forcePersonSearch ? 10L : 150L);
             }
         }).start();
+    }
+
+    private static int extractCreditYear(JsonObject c) {
+        if (c == null) return 0;
+        String dateStr = "";
+        if (c.has("release_date") && !c.get("release_date").isJsonNull()) {
+            dateStr = c.get("release_date").getAsString().trim();
+        } else if (c.has("first_air_date") && !c.get("first_air_date").isJsonNull()) {
+            dateStr = c.get("first_air_date").getAsString().trim();
+        }
+        if (dateStr.length() >= 4) {
+            try {
+                int y = Integer.parseInt(dateStr.substring(0, 4));
+                if (y >= 1920 && y <= 2035) return y;
+            } catch (Exception ignored) {}
+        }
+        return 0;
+    }
+
+    private static boolean hasExcludedGenre(JsonObject c, boolean allowDocumentary) {
+        if (c == null || !c.has("genre_ids") || !c.get("genre_ids").isJsonArray()) return false;
+        JsonArray gArr = c.getAsJsonArray("genre_ids");
+        for (int i = 0; i < gArr.size(); i++) {
+            try {
+                int gid = gArr.get(i).getAsInt();
+                // 10763 = News, 10767 = Talk Show, 10764 = Reality
+                if (gid == 10763 || gid == 10767 || gid == 10764) return true;
+                // 99 = Documentary
+                if (gid == 99 && !allowDocumentary) return true;
+            } catch (Exception ignored) {}
+        }
+        return false;
     }
 
     private static void sortSearchChannelItemsDeterministically(List<KeoDatabase.ChannelItem> items) {
@@ -1175,6 +1235,7 @@ public class MainActivity extends AppCompatActivity {
             int personId = bestPerson.get("id").getAsInt();
             final String personName = bestPerson.has("name") ? bestPerson.get("name").getAsString() : q;
             final String personNameNorm = KeoDatabase.stripAccents(personName).toLowerCase(Locale.ROOT).trim();
+            final boolean isExactPersonQuery = forcePersonSearch || personNameNorm.equals(qLower);
             final String[] personTokens = personNameNorm.split("\\s+");
             final String personSurname = personTokens.length > 1 ? personTokens[personTokens.length - 1] : personNameNorm;
             final String knownDept = bestPerson.has("known_for_department") ? bestPerson.get("known_for_department").getAsString() : "Acting";
@@ -1187,6 +1248,7 @@ public class MainActivity extends AppCompatActivity {
 
             List<String> titles = new ArrayList<>(600);
             Set<String> seenTitleStrings = new HashSet<>(600);
+            Map<String, Set<Integer>> normTitleYears = new HashMap<>(600);
             final java.util.Set<String> directorTitles = new java.util.HashSet<>();
             final java.util.Set<String> actorTitles = new java.util.HashSet<>();
 
@@ -1197,8 +1259,11 @@ public class MainActivity extends AppCompatActivity {
                     JsonObject c = crewArr.get(i).getAsJsonObject();
                     String job = c.has("job") && !c.get("job").isJsonNull() ? c.get("job").getAsString() : "";
                     String dept = c.has("department") && !c.get("department").isJsonNull() ? c.get("department").getAsString() : "";
-                    if ("Director".equalsIgnoreCase(job) || "Directing".equalsIgnoreCase(dept)) {
-                        dirCredits.add(c);
+                    int voteCount = c.has("vote_count") && !c.get("vote_count").isJsonNull() ? c.get("vote_count").getAsInt() : 0;
+                    if (("Director".equalsIgnoreCase(job) || "Directing".equalsIgnoreCase(dept)) && voteCount >= 5) {
+                        if (!hasExcludedGenre(c, true)) {
+                            dirCredits.add(c);
+                        }
                     }
                 }
                 Collections.sort(dirCredits, (a, b) -> {
@@ -1207,11 +1272,13 @@ public class MainActivity extends AppCompatActivity {
                     return Integer.compare(vb, va);
                 });
                 for (JsonObject c : dirCredits) {
+                    int creditYear = extractCreditYear(c);
                     List<String> cur = new ArrayList<>();
                     collectTitlesFromCredit(cur, c);
                     for (String t : cur) {
                         String norm = KeoDatabase.normalizeTitleForMatch(t);
                         if (!norm.isEmpty()) directorTitles.add(norm);
+                        if (creditYear > 0) KeoDatabase.registerTitleYear(normTitleYears, t, creditYear);
                         if (seenTitleStrings.add(t)) titles.add(t);
                     }
                 }
@@ -1228,20 +1295,33 @@ public class MainActivity extends AppCompatActivity {
                     int voteCount = c.has("vote_count") && !c.get("vote_count").isJsonNull() ? c.get("vote_count").getAsInt() : 0;
                     int episodeCount = c.has("episode_count") && !c.get("episode_count").isJsonNull() ? c.get("episode_count").getAsInt() : 99;
 
-                    if (charLower.contains("uncredited") || charLower.contains("archive footage")) {
+                    String tFr = c.has("title") && !c.get("title").isJsonNull() ? c.get("title").getAsString()
+                            : (c.has("name") && !c.get("name").isJsonNull() ? c.get("name").getAsString() : "");
+                    String tNorm = KeoDatabase.stripAccents(tFr).toLowerCase(Locale.ROOT);
+                    boolean hasPersonSurnameInTitle = personSurname.length() >= 4 && tNorm.contains(personSurname);
+
+                    if (charLower.contains("uncredited") || charLower.contains("non crédité") || charLower.contains("non credite")
+                            || charLower.contains("archive")) {
                         continue;
                     }
-                    // Skip 1-episode TV guest appearances (e.g. talk shows, Saturday Night Live)
-                    if ("tv".equalsIgnoreCase(mediaType) && episodeCount <= 1) {
+                    // Skip talk shows, news, reality, and documentaries (unless the documentary title is about the person)
+                    if (hasExcludedGenre(c, hasPersonSurnameInTitle)) {
                         continue;
                     }
-                    if (charLower.equals("self") || charLower.startsWith("self ") || charLower.equals("himself") || charLower.equals("herself")) {
-                        String tFr = c.has("title") && !c.get("title").isJsonNull() ? c.get("title").getAsString()
-                                : (c.has("name") && !c.get("name").isJsonNull() ? c.get("name").getAsString() : "");
-                        String tNorm = KeoDatabase.stripAccents(tFr).toLowerCase(Locale.ROOT);
-                        boolean hasPersonSurnameInTitle = personSurname.length() >= 4 && tNorm.contains(personSurname);
-                        boolean isMajorDocMovie = "movie".equalsIgnoreCase(mediaType) && voteCount >= 80;
-                        if (!hasPersonSurnameInTitle && !isMajorDocMovie) {
+                    // Skip TV guest appearances (< 5 episodes or < 20 votes)
+                    if ("tv".equalsIgnoreCase(mediaType) && (episodeCount < 5 || voteCount < 20)) {
+                        continue;
+                    }
+                    // Skip obscure movies/shorts with < 18 votes
+                    if ("movie".equalsIgnoreCase(mediaType) && voteCount < 18 && !hasPersonSurnameInTitle) {
+                        continue;
+                    }
+                    if (charLower.equals("self") || charLower.startsWith("self ") || charLower.startsWith("self-")
+                            || charLower.contains("himself") || charLower.contains("herself")
+                            || charLower.contains("lui-même") || charLower.contains("lui-meme")
+                            || charLower.contains("elle-même") || charLower.contains("elle-meme")
+                            || charLower.equals("host") || charLower.equals("guest")) {
+                        if (!hasPersonSurnameInTitle) {
                             continue;
                         }
                     }
@@ -1252,13 +1332,15 @@ public class MainActivity extends AppCompatActivity {
                     int vb = b.has("vote_count") && !b.get("vote_count").isJsonNull() ? b.get("vote_count").getAsInt() : 0;
                     return Integer.compare(vb, va);
                 });
-                // Process ALL legitimate acting credits (no 250-string cutoff!)
+                // Process ALL legitimate acting credits with year validation
                 for (JsonObject c : castCredits) {
+                    int creditYear = extractCreditYear(c);
                     List<String> cur = new ArrayList<>();
                     collectTitlesFromCredit(cur, c);
                     for (String t : cur) {
                         String norm = KeoDatabase.normalizeTitleForMatch(t);
                         if (!norm.isEmpty()) actorTitles.add(norm);
+                        if (creditYear > 0) KeoDatabase.registerTitleYear(normTitleYears, t, creditYear);
                         if (seenTitleStrings.add(t)) titles.add(t);
                     }
                 }
@@ -1267,21 +1349,24 @@ public class MainActivity extends AppCompatActivity {
             if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
 
             // Combine:
-            // 1) Local person search by resolved full personName + surname (so "Stallone" and "Sylvester Stallone" get identical DB matches)
-            // 2) Full in-memory catalog title search across all TMDB credits
+            // 1) Local person search by resolved full personName
+            // 2) Full in-memory catalog title + year search across all TMDB credits
             List<KeoDatabase.ChannelItem> personDbChannels = db.searchChannelsByPersonName(personName, streamTypeFilter);
             if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
             List<KeoDatabase.ChannelItem> creditChannels = titles.isEmpty()
                     ? new ArrayList<>()
-                    : db.searchChannelsByTitles(titles, streamTypeFilter);
+                    : db.searchChannelsByTitles(titles, normTitleYears, streamTypeFilter);
             if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
 
             java.util.Set<String> existingIds = new java.util.HashSet<>();
             final List<KeoDatabase.ChannelItem> mergedResults = new ArrayList<>();
-            synchronized (currentResults) {
-                for (KeoDatabase.ChannelItem item : currentResults) {
-                    if (item != null && item.id != null && existingIds.add(item.id)) {
-                        mergedResults.add(item);
+            // Only keep Step-1 results if this wasn't a specific person search (to discard partial title noise)
+            if (!isExactPersonQuery) {
+                synchronized (currentResults) {
+                    for (KeoDatabase.ChannelItem item : currentResults) {
+                        if (item != null && item.id != null && existingIds.add(item.id)) {
+                            mergedResults.add(item);
+                        }
                     }
                 }
             }
@@ -1326,11 +1411,28 @@ public class MainActivity extends AppCompatActivity {
                 final String roleLabel = (!directorTitles.isEmpty() && isDirector) ? "réalisateur" : "filmographie complète";
                 runOnUiThread(() -> {
                     if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
+                    boolean resultsHadFocus = (recyclerSearchResults != null && recyclerSearchResults.hasFocus());
+                    String prevFocusedId = (resultsHadFocus && activeChannel != null) ? activeChannel.id : null;
+                    int prevPos = searchResultsAdapter != null ? searchResultsAdapter.getSelectedPos() : 0;
+
                     if (tvSearchResultsCount != null) {
                         tvSearchResultsCount.setText(totalCount + " résultat(s) pour '" + personName + "' (" + roleLabel + ")");
                     }
                     if (searchResultsAdapter != null) {
                         searchResultsAdapter.setItems(new ArrayList<>(mergedResults));
+                        if (resultsHadFocus && !mergedResults.isEmpty()) {
+                            int targetIdx = Math.max(0, Math.min(prevPos, mergedResults.size() - 1));
+                            if (prevFocusedId != null) {
+                                for (int i = 0; i < mergedResults.size(); i++) {
+                                    if (prevFocusedId.equals(mergedResults.get(i).id)) {
+                                        targetIdx = i;
+                                        break;
+                                    }
+                                }
+                            }
+                            searchResultsAdapter.setSelectedPos(targetIdx);
+                            focusRecyclerViewItem(recyclerSearchResults, targetIdx);
+                        }
                     }
                 });
             }
@@ -1371,8 +1473,8 @@ public class MainActivity extends AppCompatActivity {
             list.add(unacc);
         }
 
-        // Also add base title before ':' or ' - ' (e.g. "Rambo II : La Mission" -> "Rambo II", "Rambo 2")
-        String[] parts = t.split("[:\\-–]");
+        // Only split subtitles on ':' or whitespace-surrounded dash (' - ', ' – ', ' — '), NEVER on hyphens inside words ("Camping-Car", "Au-delà")
+        String[] parts = KeoDatabase.PAT_SUBTITLE_SPLIT.split(t);
         if (parts.length > 1) {
             String base = parts[0].trim();
             if (base.length() >= 4 && !base.matches("^\\d+$") && !list.contains(base)) {
@@ -1395,7 +1497,7 @@ public class MainActivity extends AppCompatActivity {
         } else if (lower.startsWith("une ")) {
             stripped = t.substring(4).trim();
         }
-        if (stripped != null && stripped.length() >= 4 && !list.contains(stripped)) {
+        if (stripped != null && stripped.length() >= 6 && !list.contains(stripped)) {
             list.add(stripped);
         }
     }
@@ -1453,7 +1555,7 @@ public class MainActivity extends AppCompatActivity {
         recyclerCategories.setAdapter(categoriesAdapter);
 
         boolean isVod = "vod".equals(currentType) || "series".equals(currentType);
-        int spanCount = isLandscapeSplit ? 7 : 3;
+        int spanCount = isLandscapeSplit ? 5 : 3;
         if (isVod) {
             recyclerChannels.setLayoutManager(new GridLayoutManager(this, spanCount));
         } else {
@@ -1483,14 +1585,17 @@ public class MainActivity extends AppCompatActivity {
 
         final int targetPos = Math.max(0, Math.min(position, count - 1));
 
-        // Fast-path: if the view is already attached and visible, focus synchronously and immediately!
+        // Fast-path: if the view is already attached, visible, and no layout pass is pending from notifyDataSetChanged(), focus immediately!
         View directView = lm.findViewByPosition(targetPos);
-        if (directView != null) {
+        if (directView != null && !rv.isLayoutRequested()) {
             directView.requestFocus();
             return;
         }
+        if (directView != null) {
+            directView.requestFocus();
+        }
 
-        // View is off-screen: scroll and request focus once laid out
+        // View is off-screen or RecyclerView is re-laying out after setItems(): scroll and request focus once laid out
         rv.scrollToPosition(targetPos);
         rv.post(() -> {
             View view = lm.findViewByPosition(targetPos);
@@ -1527,16 +1632,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean focusHeaderBar() {
-        if (isVodGridMode && layoutVodHero != null && layoutVodHero.getVisibility() == View.VISIBLE) {
-            if (btnVodSearch != null && btnVodSearch.getVisibility() == View.VISIBLE) {
-                btnVodSearch.requestFocus();
-                return true;
-            }
-            if (btnVodBack != null && btnVodBack.getVisibility() == View.VISIBLE) {
-                btnVodBack.requestFocus();
-                return true;
-            }
-        }
         if (headerBar != null && headerBar.getVisibility() == View.VISIBLE) {
             View btnSync = findViewById(R.id.btn_header_sync);
             if (btnSync != null && btnSync.getVisibility() == View.VISIBLE) {
@@ -1586,29 +1681,16 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void enterVodBouquetGrid(boolean requestFocus) {
-        boolean isLandscapeSplit = findViewById(R.id.sidebar) != null;
-        isVodGridMode = true;
-
-        if (isLandscapeSplit) {
-            if (sidebar != null) sidebar.setVisibility(View.GONE);
-            if (panelBouquets != null) panelBouquets.setVisibility(View.GONE);
-            if (headerBar != null) headerBar.setVisibility(View.GONE);
-        }
+        // Keep the 3-pane layout 100% stable (never hide sidebar/panelBouquets/headerBar or trigger notifyDataSetChanged!)
+        isVodGridMode = false;
         if (layoutLiveHeader != null) layoutLiveHeader.setVisibility(View.GONE);
         if (layoutVodHero != null) layoutVodHero.setVisibility(View.VISIBLE);
-
-        int spanCount = isLandscapeSplit ? 7 : 3;
-        if (!(recyclerChannels.getLayoutManager() instanceof GridLayoutManager) ||
-                ((GridLayoutManager) recyclerChannels.getLayoutManager()).getSpanCount() != spanCount) {
-            recyclerChannels.setLayoutManager(new GridLayoutManager(this, spanCount));
-        }
-        channelsAdapter.setVodGridMode(true, spanCount);
 
         if (tvVodCategoryTitle != null && selectedCategory != null) {
             tvVodCategoryTitle.setText(selectedCategory.name.toUpperCase());
         }
 
-        if (channelsAdapter.getItemCount() > 0) {
+        if (channelsAdapter != null && channelsAdapter.getItemCount() > 0) {
             int pos = channelsAdapter.getSelectedPos();
             if (pos >= 0 && pos < channelsAdapter.getItemCount()) {
                 updateVodHeroBanner(channelsAdapter.getItems().get(pos), pos, channelsAdapter.getItemCount());
@@ -1616,7 +1698,17 @@ public class MainActivity extends AppCompatActivity {
         }
 
         if (requestFocus) {
-            focusChannelsList();
+            if (pendingCategoryToLoad != null) {
+                KeoDatabase.CategoryItem cat = pendingCategoryToLoad;
+                pendingCategoryToLoad = null;
+                mainHandler.removeCallbacks(categoryDebounceRunnable);
+                wantFocusChannelsOnCategoryLoad = true;
+                selectCategory(cat);
+            } else if (channelsAdapter != null && channelsAdapter.getItemCount() > 0) {
+                focusChannelsList();
+            } else {
+                wantFocusChannelsOnCategoryLoad = true;
+            }
         }
     }
 
@@ -1628,7 +1720,8 @@ public class MainActivity extends AppCompatActivity {
             if (panelBouquets != null) panelBouquets.setVisibility(View.VISIBLE);
             if (headerBar != null) headerBar.setVisibility(View.VISIBLE);
         }
-        if (layoutVodHero != null) layoutVodHero.setVisibility(View.GONE);
+        boolean isVod = "vod".equals(currentType) || "series".equals(currentType);
+        if (layoutVodHero != null) layoutVodHero.setVisibility(isVod ? View.VISIBLE : View.GONE);
         if ("live".equals(currentType) || "replay".equals(currentType)) {
             if (layoutLiveHeader != null) layoutLiveHeader.setVisibility(View.VISIBLE);
         }
@@ -1828,15 +1921,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void loadLocalData() {
+        final int mySecGen = sectionLoadGeneration.get();
+        final String loadType = currentType;
         new Thread(() -> {
+            if (mySecGen != sectionLoadGeneration.get()) return;
             final List<KeoDatabase.CategoryItem> cats;
             SharedPreferences prefs = getSharedPreferences("keotv_prefs", MODE_PRIVATE);
             boolean showFavs = prefs.getBoolean("pref_show_favorites_category", true);
             boolean showForYou = prefs.getBoolean("pref_show_for_you", true);
 
-            if ("replay".equals(currentType)) {
+            if ("replay".equals(loadType)) {
                 cats = db.getReplayCategories();
-            } else if ("favs".equals(currentType)) {
+            } else if ("favs".equals(loadType)) {
                 cats = new ArrayList<>();
                 int favAll = db.getFavoriteCount();
                 cats.add(new KeoDatabase.CategoryItem("grp_favs", "⭐ Tous les favoris", "favs", favAll, 0));
@@ -1847,13 +1943,13 @@ public class MainActivity extends AppCompatActivity {
                 int favSeries = db.getFavoriteCount("series");
                 if (favSeries > 0) cats.add(new KeoDatabase.CategoryItem("grp_favs_series", "🍿 Séries", "favs", favSeries, 3));
             } else {
-                cats = new ArrayList<>(db.getCategories(currentType, showFavs));
-                if (showForYou && "vod".equals(currentType)) {
+                cats = new ArrayList<>(db.getCategories(loadType, showFavs));
+                if (showForYou && "vod".equals(loadType)) {
                     int forYouCount = db.getForYouVodCount();
                     if (forYouCount > 0) {
                         cats.add(0, new KeoDatabase.CategoryItem("cat_vod_for_you", "✨ Pour vous", "vod", forYouCount, -1));
                     }
-                } else if (showForYou && "series".equals(currentType)) {
+                } else if (showForYou && "series".equals(loadType)) {
                     int forYouCount = db.getForYouSeriesCount();
                     if (forYouCount > 0) {
                         cats.add(0, new KeoDatabase.CategoryItem("cat_series_for_you", "✨ Pour vous", "series", forYouCount, -1));
@@ -1862,10 +1958,12 @@ public class MainActivity extends AppCompatActivity {
             }
 
             runOnUiThread(() -> {
+                if (mySecGen != sectionLoadGeneration.get() || isFinishing() || isDestroyed()) return;
                 View curFocus = getCurrentFocus();
-                boolean hadCatFocus = (recyclerCategories != null && recyclerCategories.hasFocus())
+                boolean sidebarHasFocus = (sidebar != null && sidebar.hasFocus());
+                boolean hadCatFocus = !sidebarHasFocus && ((recyclerCategories != null && recyclerCategories.hasFocus())
                         || curFocus == null
-                        || (panelSearch != null && panelSearch.getVisibility() != View.VISIBLE && panelSearch.hasFocus());
+                        || (panelSearch != null && panelSearch.getVisibility() != View.VISIBLE && panelSearch.hasFocus()));
                 categoriesAdapter.setItems(cats);
                 if (!cats.isEmpty()) {
                     KeoDatabase.CategoryItem targetCat = cats.get(0);
@@ -1900,10 +1998,13 @@ public class MainActivity extends AppCompatActivity {
     private void selectCategory(KeoDatabase.CategoryItem cat) {
         if (cat == null) return;
         selectedCategory = cat;
+        final int myCatGen = categoryLoadGeneration.incrementAndGet();
+        final String loadType = currentType;
         new Thread(() -> {
+            if (myCatGen != categoryLoadGeneration.get()) return;
             List<KeoDatabase.ChannelItem> channelsList = new ArrayList<>();
             try {
-                if ("replay".equals(currentType)) {
+                if ("replay".equals(loadType)) {
                     channelsList = db.getReplayChannelsByGroup(cat.id);
                 } else if ("cat_vod_for_you".equals(cat.id)) {
                     channelsList = db.getForYouVod(MainActivity.this, 60);
@@ -1926,7 +2027,9 @@ public class MainActivity extends AppCompatActivity {
 
             final List<KeoDatabase.ChannelItem> channels = (channelsList != null) ? channelsList : new ArrayList<>();
             runOnUiThread(() -> {
-                boolean hadChannelFocus = (recyclerChannels != null && recyclerChannels.hasFocus());
+                if (myCatGen != categoryLoadGeneration.get() || isFinishing() || isDestroyed()) return;
+                boolean hadChannelFocus = (recyclerChannels != null && recyclerChannels.hasFocus()) || wantFocusChannelsOnCategoryLoad;
+                wantFocusChannelsOnCategoryLoad = false;
                 channelsAdapter.setItems(channels);
                 lastBottomReachedTime = 0;
                 lastTopReachedTime = 0;
@@ -1950,7 +2053,7 @@ public class MainActivity extends AppCompatActivity {
                         restoredChannelId = null;
                     }
                     selectChannel(targetCh);
-                    if (isVodGridMode || "vod".equals(currentType) || "series".equals(currentType)) {
+                    if ("vod".equals(currentType) || "series".equals(currentType)) {
                         updateVodHeroBanner(targetCh, channelsAdapter.getSelectedPos(), channels.size());
                     } else {
                         // Prefetch EPG for the selected channel only to keep UI 100% fluid
@@ -1958,7 +2061,7 @@ public class MainActivity extends AppCompatActivity {
                             fetchEpgForChannel(targetCh);
                         }
                     }
-                    if (hadChannelFocus || isVodGridMode) {
+                    if (hadChannelFocus) {
                         focusChannelsList();
                     } else if (getCurrentFocus() == null) {
                         focusCategoriesList();
@@ -2254,9 +2357,17 @@ public class MainActivity extends AppCompatActivity {
         if (totalCount <= 0) return true;
         lastTopReachedTime = 0;
 
-        int span = isVod ? (findViewById(R.id.sidebar) != null ? 7 : 3) : 1;
-        int lastRowStart = isVod ? ((totalCount - 1) - ((totalCount - 1) % span)) : (totalCount - 1);
         RecyclerView targetRv = rv != null ? rv : recyclerChannels;
+        int span = 1;
+        if (isVod) {
+            RecyclerView.LayoutManager lm = targetRv != null ? targetRv.getLayoutManager() : null;
+            if (lm instanceof GridLayoutManager) {
+                span = ((GridLayoutManager) lm).getSpanCount();
+            } else {
+                span = (findViewById(R.id.sidebar) != null ? 5 : 3);
+            }
+        }
+        int lastRowStart = isVod ? ((totalCount - 1) - ((totalCount - 1) % span)) : (totalCount - 1);
 
         if (currentPos < lastRowStart) {
             int nextPos = Math.min(currentPos + span, totalCount - 1);
@@ -2292,8 +2403,16 @@ public class MainActivity extends AppCompatActivity {
         if (totalCount <= 0) return true;
         lastBottomReachedTime = 0;
 
-        int span = isVod ? (findViewById(R.id.sidebar) != null ? 7 : 3) : 1;
         RecyclerView targetRv = rv != null ? rv : recyclerChannels;
+        int span = 1;
+        if (isVod) {
+            RecyclerView.LayoutManager lm = targetRv != null ? targetRv.getLayoutManager() : null;
+            if (lm instanceof GridLayoutManager) {
+                span = ((GridLayoutManager) lm).getSpanCount();
+            } else {
+                span = (findViewById(R.id.sidebar) != null ? 5 : 3);
+            }
+        }
 
         if (currentPos >= span) {
             int prevPos = Math.max(0, currentPos - span);
@@ -2559,61 +2678,330 @@ public class MainActivity extends AppCompatActivity {
 
     // --- FICHE FILM (VOD MOVIE DETAIL DIALOG) ---
     private void populateActorChips(LinearLayout layoutActorsContainer, String castStr, AlertDialog dialog, KeoDatabase.ChannelItem movieItem, String[] firstActor) {
-        if (layoutActorsContainer == null || castStr == null || castStr.trim().isEmpty()) return;
+        populateActorChips(layoutActorsContainer, movieItem != null ? movieItem.director : "", castStr, dialog, movieItem, firstActor);
+    }
+
+    private void populateActorChips(LinearLayout layoutActorsContainer, String directorStr, String castStr, AlertDialog dialog, KeoDatabase.ChannelItem movieItem, String[] firstActor) {
+        if (layoutActorsContainer == null) return;
+        boolean hasDirector = (directorStr != null && !directorStr.trim().isEmpty());
+        boolean hasCast = (castStr != null && !castStr.trim().isEmpty());
+        if (!hasDirector && !hasCast) return;
+
         layoutActorsContainer.removeAllViews();
-        String[] actorList = castStr.split("[,;/]");
-        int addedCount = 0;
-        for (String rawActor : actorList) {
-            final String actorName = rawActor.trim();
-            if (actorName.isEmpty()) continue;
-            if (addedCount == 0 && firstActor != null && firstActor.length > 0) {
-                firstActor[0] = actorName;
+
+        // 1. Render clickable Director chip(s) first in distinct amber/gold badge style
+        if (hasDirector) {
+            String[] dirList = directorStr.split("[,;/]");
+            int dirAdded = 0;
+            for (String rawDir : dirList) {
+                final String dirName = rawDir.trim();
+                if (dirName.isEmpty()) continue;
+                dirAdded++;
+
+                Button dirChip = new Button(MainActivity.this);
+                dirChip.setText("🎬 Réal. : " + dirName);
+                dirChip.setTextColor(0xFFFDE68A);
+                dirChip.setTextSize(11.5f);
+                dirChip.setTypeface(Typeface.DEFAULT_BOLD);
+                dirChip.setAllCaps(false);
+                dirChip.setFocusable(true);
+                dirChip.setPadding(dpToPx(12), dpToPx(5), dpToPx(12), dpToPx(5));
+
+                GradientDrawable dirBg = new GradientDrawable();
+                dirBg.setColor(0x33F59E0B);
+                dirBg.setCornerRadius(dpToPx(14));
+                dirBg.setStroke(dpToPx(1), 0xFFF59E0B);
+                dirChip.setBackground(dirBg);
+
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, dpToPx(34));
+                lp.setMarginEnd(dpToPx(8));
+                dirChip.setLayoutParams(lp);
+
+                dirChip.setOnFocusChangeListener((v, hasFocus) -> {
+                    GradientDrawable bg = (GradientDrawable) dirChip.getBackground();
+                    if (hasFocus) {
+                        bg.setColor(0xFFD97706);
+                        bg.setStroke(dpToPx(2), Color.WHITE);
+                        dirChip.setTextColor(Color.WHITE);
+                        dirChip.setScaleX(1.05f);
+                        dirChip.setScaleY(1.05f);
+                    } else {
+                        bg.setColor(0x33F59E0B);
+                        bg.setStroke(dpToPx(1), 0xFFF59E0B);
+                        dirChip.setTextColor(0xFFFDE68A);
+                        dirChip.setScaleX(1.0f);
+                        dirChip.setScaleY(1.0f);
+                    }
+                });
+
+                dirChip.setOnClickListener(v -> {
+                    dialog.dismiss();
+                    switchToSearch(dirName, movieItem);
+                });
+
+                layoutActorsContainer.addView(dirChip);
+                if (dirAdded >= 3) break;
             }
-            addedCount++;
-
-            Button actorChip = new Button(MainActivity.this);
-            actorChip.setText("👤 " + actorName);
-            actorChip.setTextColor(0xFFE2E8F0);
-            actorChip.setTextSize(11.5f);
-            actorChip.setTypeface(Typeface.DEFAULT_BOLD);
-            actorChip.setAllCaps(false);
-            actorChip.setFocusable(true);
-            actorChip.setPadding(dpToPx(12), dpToPx(5), dpToPx(12), dpToPx(5));
-
-            GradientDrawable chipBg = new GradientDrawable();
-            chipBg.setColor(0x2B334155);
-            chipBg.setCornerRadius(dpToPx(14));
-            chipBg.setStroke(dpToPx(1), 0xFF475569);
-            actorChip.setBackground(chipBg);
-
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT, dpToPx(34));
-            lp.setMarginEnd(dpToPx(8));
-            actorChip.setLayoutParams(lp);
-
-            actorChip.setOnFocusChangeListener((v, hasFocus) -> {
-                GradientDrawable bg = (GradientDrawable) actorChip.getBackground();
-                if (hasFocus) {
-                    bg.setColor(0xFF0284C7);
-                    bg.setStroke(dpToPx(2), Color.WHITE);
-                    actorChip.setScaleX(1.05f);
-                    actorChip.setScaleY(1.05f);
-                } else {
-                    bg.setColor(0x2B334155);
-                    bg.setStroke(dpToPx(1), 0xFF475569);
-                    actorChip.setScaleX(1.0f);
-                    actorChip.setScaleY(1.0f);
-                }
-            });
-
-            actorChip.setOnClickListener(v -> {
-                dialog.dismiss();
-                switchToSearch(actorName, movieItem);
-            });
-
-            layoutActorsContainer.addView(actorChip);
-            if (addedCount >= 16) break;
         }
+
+        // 2. Render clickable Actor chips right after Director chip(s)
+        if (hasCast) {
+            String[] actorList = castStr.split("[,;/]");
+            int addedCount = 0;
+            for (String rawActor : actorList) {
+                final String actorName = rawActor.trim();
+                if (actorName.isEmpty()) continue;
+                if (addedCount == 0 && firstActor != null && firstActor.length > 0) {
+                    firstActor[0] = actorName;
+                }
+                addedCount++;
+
+                Button actorChip = new Button(MainActivity.this);
+                actorChip.setText("👤 " + actorName);
+                actorChip.setTextColor(0xFFE2E8F0);
+                actorChip.setTextSize(11.5f);
+                actorChip.setTypeface(Typeface.DEFAULT_BOLD);
+                actorChip.setAllCaps(false);
+                actorChip.setFocusable(true);
+                actorChip.setPadding(dpToPx(12), dpToPx(5), dpToPx(12), dpToPx(5));
+
+                GradientDrawable chipBg = new GradientDrawable();
+                chipBg.setColor(0x2B334155);
+                chipBg.setCornerRadius(dpToPx(14));
+                chipBg.setStroke(dpToPx(1), 0xFF475569);
+                actorChip.setBackground(chipBg);
+
+                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT, dpToPx(34));
+                lp.setMarginEnd(dpToPx(8));
+                actorChip.setLayoutParams(lp);
+
+                actorChip.setOnFocusChangeListener((v, hasFocus) -> {
+                    GradientDrawable bg = (GradientDrawable) actorChip.getBackground();
+                    if (hasFocus) {
+                        bg.setColor(0xFF0284C7);
+                        bg.setStroke(dpToPx(2), Color.WHITE);
+                        actorChip.setScaleX(1.05f);
+                        actorChip.setScaleY(1.05f);
+                    } else {
+                        bg.setColor(0x2B334155);
+                        bg.setStroke(dpToPx(1), 0xFF475569);
+                        actorChip.setScaleX(1.0f);
+                        actorChip.setScaleY(1.0f);
+                    }
+                });
+
+                actorChip.setOnClickListener(v -> {
+                    dialog.dismiss();
+                    switchToSearch(actorName, movieItem);
+                });
+
+                layoutActorsContainer.addView(actorChip);
+                if (addedCount >= 16) break;
+            }
+        }
+    }
+
+    private void bindDirectorHeaderButton(Button btnDir, TextView tvDir, final String directorStr, final AlertDialog dialog, final KeoDatabase.ChannelItem item) {
+        if (directorStr != null && !directorStr.trim().isEmpty()) {
+            String[] dirs = directorStr.split("[,;/]");
+            final String firstDir = dirs.length > 0 ? dirs[0].trim() : directorStr.trim();
+            if (btnDir != null) {
+                btnDir.setText("🎬 Réalisateur : " + directorStr.trim());
+                btnDir.setVisibility(View.VISIBLE);
+                btnDir.setOnClickListener(v -> {
+                    dialog.dismiss();
+                    switchToSearch(firstDir, item);
+                });
+                if (tvDir != null) tvDir.setVisibility(View.GONE);
+            } else if (tvDir != null) {
+                tvDir.setText("Réalisateur : " + directorStr.trim());
+                tvDir.setVisibility(View.VISIBLE);
+            }
+        } else {
+            if (btnDir != null) btnDir.setVisibility(View.GONE);
+            if (tvDir != null) tvDir.setVisibility(View.GONE);
+        }
+    }
+
+    private void enrichItemCreditsFromTmdb(final KeoDatabase.ChannelItem item, final AlertDialog dialog,
+                                           final Button btnDir, final TextView tvDir,
+                                           final LinearLayout layoutActorsContainer, final String[] firstActor) {
+        if (item == null || item.name == null) return;
+        boolean needDirector = (item.director == null || item.director.trim().isEmpty());
+        boolean needCast = (item.cast == null || item.cast.trim().isEmpty());
+        if (!needDirector && !needCast) return;
+
+        new Thread(() -> {
+            try {
+                String cleanTitle = KeoDatabase.extractCleanTitle(item.name);
+                if (cleanTitle.length() < 2) return;
+                int targetYear = KeoDatabase.extractYear(item.name, item.releaseDate);
+                boolean isSeries = "series".equalsIgnoreCase(item.streamType);
+                String encTitle = URLEncoder.encode(cleanTitle, "UTF-8");
+
+                int tmdbId = -1;
+                if (isSeries) {
+                    String searchUrl = "https://api.themoviedb.org/3/search/tv?api_key=f090bb54758cabf231fb605d3e3e0468&query=" + encTitle + "&language=fr-FR";
+                    String json = XtreamClient.fetchUrl(searchUrl);
+                    JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
+                    JsonArray arr = obj.has("results") && obj.get("results").isJsonArray() ? obj.getAsJsonArray("results") : null;
+                    if (arr != null && arr.size() > 0) {
+                        tmdbId = pickBestTmdbMatchId(arr, cleanTitle, targetYear);
+                    }
+                } else {
+                    String searchUrl = "https://api.themoviedb.org/3/search/movie?api_key=f090bb54758cabf231fb605d3e3e0468&query=" + encTitle + "&language=fr-FR"
+                            + (targetYear > 0 ? "&year=" + targetYear : "");
+                    String json = XtreamClient.fetchUrl(searchUrl);
+                    JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
+                    JsonArray arr = obj.has("results") && obj.get("results").isJsonArray() ? obj.getAsJsonArray("results") : null;
+                    if ((arr == null || arr.size() == 0) && targetYear > 0) {
+                        String fallbackUrl = "https://api.themoviedb.org/3/search/movie?api_key=f090bb54758cabf231fb605d3e3e0468&query=" + encTitle + "&language=fr-FR";
+                        json = XtreamClient.fetchUrl(fallbackUrl);
+                        obj = JsonParser.parseString(json).getAsJsonObject();
+                        arr = obj.has("results") && obj.get("results").isJsonArray() ? obj.getAsJsonArray("results") : null;
+                    }
+                    if (arr != null && arr.size() > 0) {
+                        tmdbId = pickBestTmdbMatchId(arr, cleanTitle, targetYear);
+                    }
+                }
+
+                if (tmdbId <= 0) return;
+
+                String foundDirector = "";
+                String foundCast = "";
+
+                if (isSeries) {
+                    String detailUrl = "https://api.themoviedb.org/3/tv/" + tmdbId + "?api_key=f090bb54758cabf231fb605d3e3e0468&append_to_response=credits&language=fr-FR";
+                    String detailJson = XtreamClient.fetchUrl(detailUrl);
+                    JsonObject detailObj = JsonParser.parseString(detailJson).getAsJsonObject();
+                    List<String> dirs = new ArrayList<>();
+                    if (detailObj.has("created_by") && detailObj.get("created_by").isJsonArray()) {
+                        JsonArray cb = detailObj.getAsJsonArray("created_by");
+                        for (int i = 0; i < Math.min(2, cb.size()); i++) {
+                            JsonObject p = cb.get(i).getAsJsonObject();
+                            if (p.has("name") && !p.get("name").isJsonNull()) {
+                                dirs.add(p.get("name").getAsString().trim());
+                            }
+                        }
+                    }
+                    if (detailObj.has("credits") && detailObj.get("credits").isJsonObject()) {
+                        JsonObject cred = detailObj.getAsJsonObject("credits");
+                        if (dirs.isEmpty() && cred.has("crew") && cred.get("crew").isJsonArray()) {
+                            JsonArray crew = cred.getAsJsonArray("crew");
+                            for (int i = 0; i < crew.size(); i++) {
+                                JsonObject c = crew.get(i).getAsJsonObject();
+                                String job = c.has("job") && !c.get("job").isJsonNull() ? c.get("job").getAsString() : "";
+                                if ("Director".equalsIgnoreCase(job) || "Series Director".equalsIgnoreCase(job)) {
+                                    String n = c.has("name") && !c.get("name").isJsonNull() ? c.get("name").getAsString().trim() : "";
+                                    if (!n.isEmpty() && !dirs.contains(n)) dirs.add(n);
+                                    if (dirs.size() >= 2) break;
+                                }
+                            }
+                        }
+                        if (cred.has("cast") && cred.get("cast").isJsonArray()) {
+                            JsonArray castArr = cred.getAsJsonArray("cast");
+                            List<String> actors = new ArrayList<>();
+                            for (int i = 0; i < Math.min(12, castArr.size()); i++) {
+                                JsonObject a = castArr.get(i).getAsJsonObject();
+                                if (a.has("name") && !a.get("name").isJsonNull()) {
+                                    actors.add(a.get("name").getAsString().trim());
+                                }
+                            }
+                            foundCast = android.text.TextUtils.join(", ", actors);
+                        }
+                    }
+                    foundDirector = android.text.TextUtils.join(", ", dirs);
+                } else {
+                    String credUrl = "https://api.themoviedb.org/3/movie/" + tmdbId + "/credits?api_key=f090bb54758cabf231fb605d3e3e0468&language=fr-FR";
+                    String credJson = XtreamClient.fetchUrl(credUrl);
+                    JsonObject credObj = JsonParser.parseString(credJson).getAsJsonObject();
+                    if (credObj.has("crew") && credObj.get("crew").isJsonArray()) {
+                        JsonArray crew = credObj.getAsJsonArray("crew");
+                        List<String> dirs = new ArrayList<>();
+                        for (int i = 0; i < crew.size(); i++) {
+                            JsonObject c = crew.get(i).getAsJsonObject();
+                            String job = c.has("job") && !c.get("job").isJsonNull() ? c.get("job").getAsString() : "";
+                            if ("Director".equalsIgnoreCase(job)) {
+                                String n = c.has("name") && !c.get("name").isJsonNull() ? c.get("name").getAsString().trim() : "";
+                                if (!n.isEmpty() && !dirs.contains(n)) dirs.add(n);
+                                if (dirs.size() >= 2) break;
+                            }
+                        }
+                        foundDirector = android.text.TextUtils.join(", ", dirs);
+                    }
+                    if (credObj.has("cast") && credObj.get("cast").isJsonArray()) {
+                        JsonArray castArr = credObj.getAsJsonArray("cast");
+                        List<String> actors = new ArrayList<>();
+                        for (int i = 0; i < Math.min(12, castArr.size()); i++) {
+                            JsonObject a = castArr.get(i).getAsJsonObject();
+                            if (a.has("name") && !a.get("name").isJsonNull()) {
+                                actors.add(a.get("name").getAsString().trim());
+                            }
+                        }
+                        foundCast = android.text.TextUtils.join(", ", actors);
+                    }
+                }
+
+                boolean updated = false;
+                if ((item.director == null || item.director.trim().isEmpty()) && !foundDirector.isEmpty()) {
+                    item.director = foundDirector;
+                    updated = true;
+                }
+                if ((item.cast == null || item.cast.trim().isEmpty()) && !foundCast.isEmpty()) {
+                    item.cast = foundCast;
+                    updated = true;
+                }
+                if (!updated) return;
+
+                db.updateChannelMetadata(item.id, item.cast, item.director, item.plot, item.genre, item.releaseDate, item.rating);
+
+                runOnUiThread(() -> {
+                    if (isFinishing() || isDestroyed() || dialog == null || !dialog.isShowing()) return;
+                    bindDirectorHeaderButton(btnDir, tvDir, item.director, dialog, item);
+                    populateActorChips(layoutActorsContainer, item.director, item.cast, dialog, item, firstActor);
+                });
+            } catch (Exception ignored) {}
+        }).start();
+    }
+
+    private static int pickBestTmdbMatchId(JsonArray results, String cleanTitle, int targetYear) {
+        String targetNorm = KeoDatabase.normalizeTitleForMatch(cleanTitle);
+        int bestId = -1;
+        int bestScore = Integer.MIN_VALUE;
+        for (int i = 0; i < Math.min(8, results.size()); i++) {
+            JsonObject r = results.get(i).getAsJsonObject();
+            if (!r.has("id") || r.get("id").isJsonNull()) continue;
+            int id = r.get("id").getAsInt();
+            String t1 = r.has("title") && !r.get("title").isJsonNull() ? r.get("title").getAsString()
+                    : (r.has("name") && !r.get("name").isJsonNull() ? r.get("name").getAsString() : "");
+            String t2 = r.has("original_title") && !r.get("original_title").isJsonNull() ? r.get("original_title").getAsString()
+                    : (r.has("original_name") && !r.get("original_name").isJsonNull() ? r.get("original_name").getAsString() : "");
+            String n1 = KeoDatabase.normalizeTitleForMatch(t1);
+            String n2 = KeoDatabase.normalizeTitleForMatch(t2);
+            int y = extractCreditYear(r);
+
+            int score = 0;
+            if (n1.equals(targetNorm) || n2.equals(targetNorm)) {
+                score += 500;
+            } else if (n1.startsWith(targetNorm) || n2.startsWith(targetNorm)) {
+                score += 200;
+            }
+            if (targetYear > 0 && y > 0) {
+                int diff = Math.abs(targetYear - y);
+                if (diff == 0) score += 400;
+                else if (diff <= 1) score += 250;
+                else if (diff <= 2) score += 100;
+                else score -= 300;
+            }
+            score -= (i * 15);
+            if (score > bestScore) {
+                bestScore = score;
+                bestId = id;
+            }
+        }
+        return bestId;
     }
 
     private void showMovieDetailDialog(final KeoDatabase.ChannelItem movieItem) {
@@ -2670,26 +3058,11 @@ public class MainActivity extends AppCompatActivity {
             if (movieItem.plot != null && !movieItem.plot.isEmpty()) {
                 tvPlot.setText(movieItem.plot);
             }
-            if (movieItem.director != null && !movieItem.director.isEmpty()) {
-                if (btnMovieDirector != null) {
-                    btnMovieDirector.setText("🎬 Réalisateur : " + movieItem.director);
-                    btnMovieDirector.setVisibility(View.VISIBLE);
-                    btnMovieDirector.setOnClickListener(v -> {
-                        dialog.dismiss();
-                        switchToSearch(movieItem.director, movieItem);
-                    });
-                    if (tvDirector != null) tvDirector.setVisibility(View.GONE);
-                } else if (tvDirector != null) {
-                    tvDirector.setText("Réalisateur : " + movieItem.director);
-                    tvDirector.setVisibility(View.VISIBLE);
-                }
-            } else {
-                if (btnMovieDirector != null) btnMovieDirector.setVisibility(View.GONE);
-                if (tvDirector != null) tvDirector.setVisibility(View.GONE);
+            bindDirectorHeaderButton(btnMovieDirector, tvDirector, movieItem.director, dialog, movieItem);
+            if ((movieItem.director != null && !movieItem.director.isEmpty()) || (movieItem.cast != null && !movieItem.cast.isEmpty())) {
+                populateActorChips(layoutActorsContainer, movieItem.director, movieItem.cast, dialog, movieItem, firstActor);
             }
-            if (movieItem.cast != null && !movieItem.cast.isEmpty()) {
-                populateActorChips(layoutActorsContainer, movieItem.cast, dialog, movieItem, firstActor);
-            }
+            enrichItemCreditsFromTmdb(movieItem, dialog, btnMovieDirector, tvDirector, layoutActorsContainer, firstActor);
 
             Runnable updatePlayButtons = () -> {
                 long pos = savedPosHolder[0];
@@ -2762,29 +3135,20 @@ public class MainActivity extends AppCompatActivity {
 
                         if (!cast.isEmpty()) {
                             movieItem.cast = cast;
-                            populateActorChips(layoutActorsContainer, cast, dialog, movieItem, firstActor);
                         }
-                        movieItem.director = director;
+                        if (!director.isEmpty()) {
+                            movieItem.director = director;
+                        }
                         movieItem.genre = genre;
                         movieItem.plot = plot;
                         movieItem.releaseDate = releaseDate;
                         movieItem.rating = rating;
 
-                        if (director != null && !director.isEmpty()) {
-                            if (btnMovieDirector != null) {
-                                btnMovieDirector.setText("🎬 Réalisateur : " + director);
-                                btnMovieDirector.setVisibility(View.VISIBLE);
-                                final String fDirectorSearch = director;
-                                btnMovieDirector.setOnClickListener(v -> {
-                                    dialog.dismiss();
-                                    switchToSearch(fDirectorSearch, movieItem);
-                                });
-                                if (tvDirector != null) tvDirector.setVisibility(View.GONE);
-                            } else if (tvDirector != null) {
-                                tvDirector.setText("Réalisateur : " + director);
-                                tvDirector.setVisibility(View.VISIBLE);
-                            }
+                        bindDirectorHeaderButton(btnMovieDirector, tvDirector, movieItem.director, dialog, movieItem);
+                        if ((movieItem.director != null && !movieItem.director.isEmpty()) || (movieItem.cast != null && !movieItem.cast.isEmpty())) {
+                            populateActorChips(layoutActorsContainer, movieItem.director, movieItem.cast, dialog, movieItem, firstActor);
                         }
+                        enrichItemCreditsFromTmdb(movieItem, dialog, btnMovieDirector, tvDirector, layoutActorsContainer, firstActor);
 
                         // Persist metadata asynchronously in database
                         final String fCast = movieItem.cast;
@@ -2937,30 +3301,15 @@ public class MainActivity extends AppCompatActivity {
             if (seriesItem.plot != null && !seriesItem.plot.isEmpty()) {
                 tvPlot.setText(seriesItem.plot);
             }
-            if (seriesItem.director != null && !seriesItem.director.isEmpty()) {
-                if (btnSeriesDirector != null) {
-                    btnSeriesDirector.setText("🎬 Réalisateur : " + seriesItem.director);
-                    btnSeriesDirector.setVisibility(View.VISIBLE);
-                    btnSeriesDirector.setOnClickListener(v -> {
-                        dialog.dismiss();
-                        switchToSearch(seriesItem.director, seriesItem);
-                    });
-                    if (tvDirector != null) tvDirector.setVisibility(View.GONE);
-                } else if (tvDirector != null) {
-                    tvDirector.setText("Réalisateur : " + seriesItem.director);
-                    tvDirector.setVisibility(View.VISIBLE);
-                }
-            } else {
-                if (btnSeriesDirector != null) btnSeriesDirector.setVisibility(View.GONE);
-                if (tvDirector != null) tvDirector.setVisibility(View.GONE);
-            }
+            bindDirectorHeaderButton(btnSeriesDirector, tvDirector, seriesItem.director, dialog, seriesItem);
             if (seriesItem.genre != null && !seriesItem.genre.isEmpty() && tvMeta != null) {
                 String meta = (seriesItem.releaseDate != null ? seriesItem.releaseDate + " • " : "") + seriesItem.genre;
                 tvMeta.setText(meta);
             }
-            if (seriesItem.cast != null && !seriesItem.cast.isEmpty()) {
-                populateActorChips(layoutActorsContainer, seriesItem.cast, dialog, seriesItem, firstActor);
+            if ((seriesItem.director != null && !seriesItem.director.isEmpty()) || (seriesItem.cast != null && !seriesItem.cast.isEmpty())) {
+                populateActorChips(layoutActorsContainer, seriesItem.director, seriesItem.cast, dialog, seriesItem, firstActor);
             }
+            enrichItemCreditsFromTmdb(seriesItem, dialog, btnSeriesDirector, tvDirector, layoutActorsContainer, firstActor);
 
             // Check saved series resume progress
             org.json.JSONObject savedProg = getSavedSeriesProgress(rawId);
@@ -3077,34 +3426,25 @@ public class MainActivity extends AppCompatActivity {
                         String releaseDate = info.has("releaseDate") && !info.get("releaseDate").isJsonNull() ? info.get("releaseDate").getAsString().trim() : (seriesItem.releaseDate != null ? seriesItem.releaseDate : "");
                         String rating = info.has("rating") && !info.get("rating").isJsonNull() ? info.get("rating").getAsString().trim() : (seriesItem.rating != null ? seriesItem.rating : "");
 
-                        seriesItem.cast = cast;
-                        seriesItem.director = director;
+                        if (!cast.isEmpty()) {
+                            seriesItem.cast = cast;
+                        }
+                        if (!director.isEmpty()) {
+                            seriesItem.director = director;
+                        }
                         seriesItem.genre = genre;
                         seriesItem.plot = plot;
                         seriesItem.releaseDate = releaseDate;
                         seriesItem.rating = rating;
 
-                        if (director != null && !director.isEmpty()) {
-                            if (btnSeriesDirector != null) {
-                                btnSeriesDirector.setText("🎬 Réalisateur : " + director);
-                                btnSeriesDirector.setVisibility(View.VISIBLE);
-                                final String fSeriesDir = director;
-                                btnSeriesDirector.setOnClickListener(v -> {
-                                    dialog.dismiss();
-                                    switchToSearch(fSeriesDir, seriesItem);
-                                });
-                                if (tvDirector != null) tvDirector.setVisibility(View.GONE);
-                            } else if (tvDirector != null) {
-                                tvDirector.setText("Réalisateur : " + director);
-                                tvDirector.setVisibility(View.VISIBLE);
-                            }
-                        }
+                        bindDirectorHeaderButton(btnSeriesDirector, tvDirector, seriesItem.director, dialog, seriesItem);
                         if (tvMeta != null && (!genre.isEmpty() || !releaseDate.isEmpty())) {
                             tvMeta.setText((!releaseDate.isEmpty() ? releaseDate + " • " : "") + genre);
                         }
-                        if (!cast.isEmpty()) {
-                            populateActorChips(layoutActorsContainer, cast, dialog, seriesItem, firstActor);
+                        if ((seriesItem.director != null && !seriesItem.director.isEmpty()) || (seriesItem.cast != null && !seriesItem.cast.isEmpty())) {
+                            populateActorChips(layoutActorsContainer, seriesItem.director, seriesItem.cast, dialog, seriesItem, firstActor);
                         }
+                        enrichItemCreditsFromTmdb(seriesItem, dialog, btnSeriesDirector, tvDirector, layoutActorsContainer, firstActor);
 
                         final String fCast = cast;
                         final String fDirector = director;
@@ -5843,8 +6183,10 @@ public class MainActivity extends AppCompatActivity {
         }
 
         public void setSelectedPos(int pos) {
+            int old = this.selectedPos;
             this.selectedPos = pos;
-            notifyDataSetChanged();
+            if (old >= 0 && old < items.size()) notifyItemChanged(old);
+            if (pos >= 0 && pos < items.size() && pos != old) notifyItemChanged(pos);
         }
 
         @NonNull
@@ -5876,11 +6218,10 @@ public class MainActivity extends AppCompatActivity {
                 int pos = holder.getBindingAdapterPosition();
                 if (pos != RecyclerView.NO_POSITION) {
                     selectedPos = pos;
+                    pendingCategoryToLoad = null;
                     mainHandler.removeCallbacks(categoryDebounceRunnable);
+                    wantFocusChannelsOnCategoryLoad = true;
                     selectCategory(item);
-                    if ("vod".equals(currentType) || "series".equals(currentType)) {
-                        enterVodBouquetGrid(true);
-                    }
                 }
             });
 
@@ -5909,10 +6250,16 @@ public class MainActivity extends AppCompatActivity {
                         return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
                         if (event.getRepeatCount() == 0) {
-                            if ("vod".equals(currentType) || "series".equals(currentType)) {
-                                enterVodBouquetGrid(true);
-                            } else {
+                            if (pendingCategoryToLoad != null) {
+                                KeoDatabase.CategoryItem catToLoad = pendingCategoryToLoad;
+                                pendingCategoryToLoad = null;
+                                mainHandler.removeCallbacks(categoryDebounceRunnable);
+                                wantFocusChannelsOnCategoryLoad = true;
+                                selectCategory(catToLoad);
+                            } else if (channelsAdapter != null && channelsAdapter.getItemCount() > 0) {
                                 focusChannelsList();
+                            } else {
+                                wantFocusChannelsOnCategoryLoad = true;
                             }
                         }
                         return true;
@@ -5944,7 +6291,7 @@ public class MainActivity extends AppCompatActivity {
         private final List<KeoDatabase.ChannelItem> items = new ArrayList<>();
         private int selectedPos = 0;
         private boolean isVodGrid = false;
-        private int gridSpanCount = 7;
+        private int gridSpanCount = 5;
         private RecyclerView attachedRecyclerView = null;
 
         @Override
@@ -5960,8 +6307,12 @@ public class MainActivity extends AppCompatActivity {
         }
 
         public void setVodGridMode(boolean enabled, int spanCount) {
+            int newSpan = spanCount > 0 ? spanCount : 5;
+            if (this.isVodGrid == enabled && this.gridSpanCount == newSpan) {
+                return;
+            }
             this.isVodGrid = enabled;
-            this.gridSpanCount = spanCount > 0 ? spanCount : 7;
+            this.gridSpanCount = newSpan;
             notifyDataSetChanged();
         }
 
@@ -6006,8 +6357,10 @@ public class MainActivity extends AppCompatActivity {
         }
 
         public void setSelectedPos(int pos) {
+            int old = this.selectedPos;
             this.selectedPos = pos;
-            notifyDataSetChanged();
+            if (old >= 0 && old < items.size()) notifyItemChanged(old);
+            if (pos >= 0 && pos < items.size() && pos != old) notifyItemChanged(pos);
         }
 
         public List<KeoDatabase.ChannelItem> getItems() {
@@ -6111,7 +6464,7 @@ public class MainActivity extends AppCompatActivity {
                         int pos = holder.getBindingAdapterPosition();
                         if (pos == RecyclerView.NO_POSITION) return false;
 
-                        int span = gridSpanCount > 0 ? gridSpanCount : 7;
+                        int span = gridSpanCount > 0 ? gridSpanCount : 5;
                         int total = items.size();
 
                         if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
@@ -6125,8 +6478,8 @@ public class MainActivity extends AppCompatActivity {
                                 return true;
                             }
                             if ((pos % span) == 0) {
-                                // 1st item in row: exit back to bouquet list!
-                                exitVodBouquetGrid();
+                                // 1st item in row: return directly to bouquet list!
+                                focusCategoriesList();
                             } else if (pos - 1 >= 0) {
                                 focusRecyclerViewItem(getTargetRecyclerView(), pos - 1);
                             }

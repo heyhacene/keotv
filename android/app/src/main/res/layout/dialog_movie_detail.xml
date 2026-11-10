@@ -16,9 +16,9 @@
         <ImageView
             android:id="@+id/iv_movie_poster"
             android:layout_width="105dp"
-            android:layout_height="150dp"
-            android:scaleType="centerCrop"
-            android:background="#1E293B"
+            android:layout_height="155dp"
+            android:scaleType="fitCenter"
+            android:background="#0B1120"
             android:layout_marginEnd="14dp" />
 
         <LinearLayout
@@ -145,6 +145,7 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:layout_marginTop="4dp"
+        android:focusable="false"
         android:scrollbars="vertical">
 
         <TextView
@@ -158,12 +159,12 @@
 
     </ScrollView>
 
-    <!-- Individual Actor Chips Header -->
+    <!-- Individual Director & Actor Chips Header -->
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="8dp"
-        android:text="ACTEURS (cliquez sur un acteur pour voir ses films) :"
+        android:text="RÉALISATEUR &amp; ACTEURS (cliquez pour voir tous leurs films) :"
         android:textColor="#38BDF8"
         android:textSize="10.5sp"
         android:textStyle="bold"
