@@ -117,7 +117,9 @@ public class MainActivity extends AppCompatActivity {
     private ChannelsAdapter searchResultsAdapter;
     private String globalSearchFilter = "all";
     private boolean isProgrammaticSearch = false;
+    private Runnable pendingInputSearchRunnable = null;
     private Runnable pendingTmdbSearchRunnable = null;
+    private final java.util.concurrent.atomic.AtomicInteger globalSearchGeneration = new java.util.concurrent.atomic.AtomicInteger(0);
     private final Handler searchHandler = new Handler(Looper.getMainLooper());
 
     // Recyclers
@@ -473,7 +475,29 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void onTextChanged(CharSequence s, int start, int before, int count) {
                     if (!isProgrammaticSearch) {
-                        performGlobalSearch(s != null ? s.toString() : "", globalSearchFilter);
+                        final String text = s != null ? s.toString().trim() : "";
+                        if (pendingInputSearchRunnable != null) {
+                            searchHandler.removeCallbacks(pendingInputSearchRunnable);
+                            pendingInputSearchRunnable = null;
+                        }
+                        if (pendingTmdbSearchRunnable != null) {
+                            searchHandler.removeCallbacks(pendingTmdbSearchRunnable);
+                            pendingTmdbSearchRunnable = null;
+                        }
+                        globalSearchGeneration.incrementAndGet();
+                        if (text.length() < 2) {
+                            if (tvSearchResultsCount != null) {
+                                tvSearchResultsCount.setText(text.isEmpty()
+                                        ? "Saisissez un texte pour rechercher dans tous les catalogues."
+                                        : "Saisissez au moins 2 caractères pour lancer la recherche.");
+                            }
+                            if (searchResultsAdapter != null) {
+                                searchResultsAdapter.setItems(new ArrayList<>());
+                            }
+                            return;
+                        }
+                        pendingInputSearchRunnable = () -> performGlobalSearch(text, globalSearchFilter);
+                        searchHandler.postDelayed(pendingInputSearchRunnable, 380);
                     }
                 }
 
@@ -504,8 +528,11 @@ public class MainActivity extends AppCompatActivity {
 
         if (btnSearchClear != null) {
             btnSearchClear.setOnClickListener(v -> {
+                isProgrammaticSearch = true;
                 if (etGlobalSearch != null) etGlobalSearch.setText("");
+                isProgrammaticSearch = false;
                 performGlobalSearch("", globalSearchFilter);
+                if (etGlobalSearch != null) etGlobalSearch.requestFocus();
             });
 
             btnSearchClear.setOnKeyListener((v, keyCode, event) -> {
@@ -660,6 +687,15 @@ public class MainActivity extends AppCompatActivity {
 
         if (panelSearch != null) panelSearch.setVisibility(View.GONE);
         if (layoutContentSplit != null) layoutContentSplit.setVisibility(View.VISIBLE);
+        if (pendingInputSearchRunnable != null) {
+            searchHandler.removeCallbacks(pendingInputSearchRunnable);
+            pendingInputSearchRunnable = null;
+        }
+        if (pendingTmdbSearchRunnable != null) {
+            searchHandler.removeCallbacks(pendingTmdbSearchRunnable);
+            pendingTmdbSearchRunnable = null;
+        }
+        globalSearchGeneration.incrementAndGet();
 
         boolean isLandscapeSplit = findViewById(R.id.sidebar) != null;
         boolean isVod = "vod".equals(section) || "series".equals(section);
@@ -751,15 +787,22 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void performGlobalSearch(String query, String filter, final KeoDatabase.ChannelItem sourceItemToIndex) {
-        final String q = query != null ? query.trim() : "";
+        final String q = query != null ? query.replace('\u00A0', ' ').trim() : "";
+        if (pendingInputSearchRunnable != null) {
+            searchHandler.removeCallbacks(pendingInputSearchRunnable);
+            pendingInputSearchRunnable = null;
+        }
         if (pendingTmdbSearchRunnable != null) {
             searchHandler.removeCallbacks(pendingTmdbSearchRunnable);
             pendingTmdbSearchRunnable = null;
         }
+        final int myGen = globalSearchGeneration.incrementAndGet();
 
-        if (q.isEmpty()) {
+        if (q.length() < 2) {
             if (tvSearchResultsCount != null) {
-                tvSearchResultsCount.setText("Saisissez un texte pour rechercher dans tous les catalogues.");
+                tvSearchResultsCount.setText(q.isEmpty()
+                        ? "Saisissez un texte pour rechercher dans tous les catalogues."
+                        : "Saisissez au moins 2 caractères pour lancer la recherche.");
             }
             if (searchResultsAdapter != null) {
                 searchResultsAdapter.setItems(new ArrayList<>());
@@ -767,7 +810,12 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
+        if (tvSearchResultsCount != null) {
+            tvSearchResultsCount.setText("Recherche en cours pour '" + q + "'...");
+        }
+
         new Thread(() -> {
+            if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
             if (sourceItemToIndex != null && sourceItemToIndex.id != null) {
                 try {
                     db.updateChannelMetadata(
@@ -782,11 +830,14 @@ public class MainActivity extends AppCompatActivity {
                 } catch (Exception ignored) {}
             }
 
+            if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
             final String streamTypeFilter = "all".equals(filter) ? null : filter;
             final List<KeoDatabase.ChannelItem> results = db.searchChannels(q, streamTypeFilter);
+            if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
             final List<KeoDatabase.ChannelItem> currentResults = new ArrayList<>(results);
 
             runOnUiThread(() -> {
+                if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
                 if (tvSearchResultsCount != null) {
                     tvSearchResultsCount.setText(currentResults.size() + " résultat(s) trouvé(s) pour '" + q + "'");
                 }
@@ -797,36 +848,61 @@ public class MainActivity extends AppCompatActivity {
 
             if (q.length() >= 3 && !"live".equals(streamTypeFilter)) {
                 pendingTmdbSearchRunnable = () -> new Thread(() -> {
-                    enrichSearchResultsWithActorCredits(q, streamTypeFilter, currentResults);
+                    enrichSearchResultsWithActorCredits(q, streamTypeFilter, currentResults, myGen);
                 }).start();
-                searchHandler.postDelayed(pendingTmdbSearchRunnable, 180);
+                searchHandler.postDelayed(pendingTmdbSearchRunnable, 150);
             }
         }).start();
     }
 
-    private void enrichSearchResultsWithActorCredits(String query, String streamTypeFilter, List<KeoDatabase.ChannelItem> currentResults) {
+    private void enrichSearchResultsWithActorCredits(String query, String streamTypeFilter, List<KeoDatabase.ChannelItem> currentResults, final int myGen) {
         if (query == null || query.trim().length() < 3) return;
-        final String q = query.trim();
+        if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
+        final String q = query.replace('\u00A0', ' ').trim();
         try {
             String enc = URLEncoder.encode(q, "UTF-8");
             String searchUrl = "https://api.themoviedb.org/3/search/person?api_key=f090bb54758cabf231fb605d3e3e0468&query=" + enc + "&language=fr-FR";
             String searchJson = XtreamClient.fetchUrl(searchUrl);
+            if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
             JsonObject searchObj = JsonParser.parseString(searchJson).getAsJsonObject();
             JsonArray results = searchObj.has("results") && searchObj.get("results").isJsonArray()
                     ? searchObj.getAsJsonArray("results") : null;
             if (results == null || results.size() == 0) return;
 
             JsonObject bestPerson = null;
-            for (int i = 0; i < Math.min(6, results.size()); i++) {
+            double bestScore = -1.0;
+            String qLower = KeoDatabase.stripAccents(q).toLowerCase(Locale.ROOT);
+            for (int i = 0; i < Math.min(10, results.size()); i++) {
                 JsonObject p = results.get(i).getAsJsonObject();
-                String name = p.has("name") ? p.get("name").getAsString() : "";
-                double pop = p.has("popularity") ? p.get("popularity").getAsDouble() : 0.0;
-                String dept = p.has("known_for_department") ? p.get("known_for_department").getAsString() : "";
-                if (name.equalsIgnoreCase(q)) {
-                    bestPerson = p;
-                    break;
+                String name = p.has("name") && !p.get("name").isJsonNull() ? p.get("name").getAsString() : "";
+                String nameNorm = KeoDatabase.stripAccents(name).toLowerCase(Locale.ROOT);
+                double pop = p.has("popularity") && !p.get("popularity").isJsonNull() ? p.get("popularity").getAsDouble() : 0.0;
+                String dept = p.has("known_for_department") && !p.get("known_for_department").isJsonNull() ? p.get("known_for_department").getAsString() : "";
+
+                int knownForVotes = 0;
+                if (p.has("known_for") && p.get("known_for").isJsonArray()) {
+                    JsonArray kf = p.getAsJsonArray("known_for");
+                    for (int k = 0; k < kf.size(); k++) {
+                        if (kf.get(k).isJsonObject()) {
+                            JsonObject kObj = kf.get(k).getAsJsonObject();
+                            if (kObj.has("vote_count") && !kObj.get("vote_count").isJsonNull()) {
+                                knownForVotes += kObj.get("vote_count").getAsInt();
+                            }
+                        }
+                    }
                 }
-                if (bestPerson == null && (dept.equalsIgnoreCase("Acting") || dept.equalsIgnoreCase("Directing") || pop > 1.2)) {
+
+                double score = knownForVotes + (pop * 15.0);
+                if (nameNorm.equals(qLower)) {
+                    score += 500000.0;
+                } else if (nameNorm.endsWith(" " + qLower) || nameNorm.startsWith(qLower + " ")) {
+                    score += 15000.0;
+                }
+                if ("Acting".equalsIgnoreCase(dept) || "Directing".equalsIgnoreCase(dept)) {
+                    score += 1000.0;
+                }
+                if (score > bestScore && (knownForVotes > 20 || pop > 1.0 || nameNorm.equals(qLower))) {
+                    bestScore = score;
                     bestPerson = p;
                 }
             }
@@ -839,6 +915,7 @@ public class MainActivity extends AppCompatActivity {
 
             String creditsUrl = "https://api.themoviedb.org/3/person/" + personId + "/combined_credits?api_key=f090bb54758cabf231fb605d3e3e0468&language=fr-FR";
             String creditsJson = XtreamClient.fetchUrl(creditsUrl);
+            if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
             JsonObject creditsObj = JsonParser.parseString(creditsJson).getAsJsonObject();
 
             List<String> titles = new ArrayList<>();
@@ -865,11 +942,11 @@ public class MainActivity extends AppCompatActivity {
                     List<String> cur = new ArrayList<>();
                     collectTitlesFromCredit(cur, c);
                     for (String t : cur) {
-                        directorTitles.add(t.toLowerCase(Locale.ROOT));
-                        directorTitles.add(KeoDatabase.stripAccents(t).toLowerCase(Locale.ROOT));
+                        String norm = KeoDatabase.normalizeTitleForMatch(t);
+                        if (!norm.isEmpty()) directorTitles.add(norm);
                         if (!titles.contains(t)) titles.add(t);
                     }
-                    if (titles.size() >= 160) break;
+                    if (titles.size() >= 180) break;
                 }
             }
 
@@ -879,7 +956,7 @@ public class MainActivity extends AppCompatActivity {
                 for (int i = 0; i < castArr.size(); i++) {
                     JsonObject c = castArr.get(i).getAsJsonObject();
                     String character = c.has("character") && !c.get("character").isJsonNull() ? c.get("character").getAsString().trim() : "";
-                    if (character.equalsIgnoreCase("Self") || character.startsWith("Self ") || character.equalsIgnoreCase("Himself") || character.equalsIgnoreCase("Herself")) {
+                    if (character.equalsIgnoreCase("Self") || character.startsWith("Self ") || character.equalsIgnoreCase("Himself") || character.equalsIgnoreCase("Herself") || character.contains("uncredited")) {
                         continue;
                     }
                     castCredits.add(c);
@@ -893,18 +970,18 @@ public class MainActivity extends AppCompatActivity {
                     List<String> cur = new ArrayList<>();
                     collectTitlesFromCredit(cur, c);
                     for (String t : cur) {
-                        actorTitles.add(t.toLowerCase(Locale.ROOT));
-                        actorTitles.add(KeoDatabase.stripAccents(t).toLowerCase(Locale.ROOT));
+                        String norm = KeoDatabase.normalizeTitleForMatch(t);
+                        if (!norm.isEmpty()) actorTitles.add(norm);
                         if (!titles.contains(t)) titles.add(t);
                     }
-                    if (titles.size() >= 220) break;
+                    if (titles.size() >= 250) break;
                 }
             }
 
-            if (titles.isEmpty()) return;
+            if (titles.isEmpty() || myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
 
             List<KeoDatabase.ChannelItem> creditChannels = db.searchChannelsByTitles(titles, streamTypeFilter);
-            if (creditChannels.isEmpty()) return;
+            if (creditChannels.isEmpty() || myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
 
             java.util.Set<String> existingIds = new java.util.HashSet<>();
             synchronized (currentResults) {
@@ -924,15 +1001,15 @@ public class MainActivity extends AppCompatActivity {
                         existingIds.add(newItem.id);
                     }
                     newlyAdded.add(newItem);
-                    String cleanNameLower = KeoDatabase.extractCleanTitle(newItem.name).toLowerCase(Locale.ROOT);
-                    String cleanUnaccented = KeoDatabase.stripAccents(cleanNameLower);
-                    boolean isTitleDirected = directorTitles.contains(cleanNameLower) || directorTitles.contains(cleanUnaccented) || (isDirector && !actorTitles.contains(cleanNameLower));
-                    boolean isTitleActed = actorTitles.contains(cleanNameLower) || actorTitles.contains(cleanUnaccented) || (!isDirector && !directorTitles.contains(cleanNameLower));
+                    String normItem = KeoDatabase.normalizeTitleForMatch(newItem.name);
+                    boolean isTitleDirected = directorTitles.contains(normItem) || (isDirector && !actorTitles.contains(normItem));
+                    boolean isTitleActed = actorTitles.contains(normItem) || (!isDirector && !directorTitles.contains(normItem));
                     if (isTitleDirected) directedBatch.add(newItem);
                     if (isTitleActed) actedBatch.add(newItem);
                 }
             }
 
+            if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
             if (!directedBatch.isEmpty()) {
                 db.indexPersonForChannels(directedBatch, personName, true, false);
             }
@@ -940,11 +1017,12 @@ public class MainActivity extends AppCompatActivity {
                 db.indexPersonForChannels(actedBatch, personName, false, true);
             }
 
-            if (!newlyAdded.isEmpty()) {
+            if (!newlyAdded.isEmpty() && myGen == globalSearchGeneration.get() && "search".equals(currentType)) {
                 final int totalCount = currentResults.size();
                 final int addedFromFilmography = newlyAdded.size();
                 final String roleLabel = (!directorTitles.isEmpty() && isDirector) ? "réalisateur" : "filmographie";
                 runOnUiThread(() -> {
+                    if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
                     if (tvSearchResultsCount != null) {
                         tvSearchResultsCount.setText(totalCount + " résultat(s) pour '" + personName + "' (dont " + addedFromFilmography + " via " + roleLabel + ")");
                     }
@@ -975,7 +1053,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void addTitleVariants(List<String> list, String title) {
         if (title == null) return;
-        String t = title.trim();
+        String t = title.replace('\u00A0', ' ').replace('\u202F', ' ').replace('\u2007', ' ').trim();
         if (t.length() < 3) return;
         if (t.matches("^\\d+$")) return;
         if (!list.contains(t)) list.add(t);
@@ -990,7 +1068,20 @@ public class MainActivity extends AppCompatActivity {
             list.add(unacc);
         }
 
-        String lower = t.toLowerCase();
+        // Also add base title before ':' or ' - ' (e.g. "Rambo II : La Mission" -> "Rambo II", "Rambo 2")
+        String[] parts = t.split("[:\\-–]");
+        if (parts.length > 1) {
+            String base = parts[0].trim();
+            if (base.length() >= 4 && !base.matches("^\\d+$") && !list.contains(base)) {
+                list.add(base);
+                String baseUnacc = KeoDatabase.stripAccents(base);
+                if (!baseUnacc.equals(base) && !list.contains(baseUnacc)) {
+                    list.add(baseUnacc);
+                }
+            }
+        }
+
+        String lower = t.toLowerCase(Locale.ROOT);
         String stripped = null;
         if (lower.startsWith("le ") || lower.startsWith("la ") || lower.startsWith("un ")) {
             stripped = t.substring(3).trim();
@@ -1468,6 +1559,10 @@ public class MainActivity extends AppCompatActivity {
             }
 
             runOnUiThread(() -> {
+                View curFocus = getCurrentFocus();
+                boolean hadCatFocus = (recyclerCategories != null && recyclerCategories.hasFocus())
+                        || curFocus == null
+                        || (panelSearch != null && panelSearch.getVisibility() != View.VISIBLE && panelSearch.hasFocus());
                 categoriesAdapter.setItems(cats);
                 if (!cats.isEmpty()) {
                     KeoDatabase.CategoryItem targetCat = cats.get(0);
@@ -1482,11 +1577,17 @@ public class MainActivity extends AppCompatActivity {
                         }
                         restoredCategoryId = null;
                     }
+                    if (hadCatFocus) {
+                        focusCategoriesList();
+                    }
                     selectCategory(targetCat);
                 } else {
                     channelsAdapter.setItems(new ArrayList<>());
                     if (tvChannelsHeader != null) {
                         tvChannelsHeader.setText("Aucun élément disponible dans cette section.");
+                    }
+                    if (hadCatFocus) {
+                        focusActiveSidebarButton();
                     }
                 }
             });
@@ -1522,6 +1623,7 @@ public class MainActivity extends AppCompatActivity {
 
             final List<KeoDatabase.ChannelItem> channels = (channelsList != null) ? channelsList : new ArrayList<>();
             runOnUiThread(() -> {
+                boolean hadChannelFocus = (recyclerChannels != null && recyclerChannels.hasFocus());
                 channelsAdapter.setItems(channels);
                 lastBottomReachedTime = 0;
                 lastTopReachedTime = 0;
@@ -1553,9 +1655,17 @@ public class MainActivity extends AppCompatActivity {
                             fetchEpgForChannel(targetCh);
                         }
                     }
+                    if (hadChannelFocus || isVodGridMode) {
+                        focusChannelsList();
+                    } else if (getCurrentFocus() == null) {
+                        focusCategoriesList();
+                    }
                 } else {
                     activeChannel = null;
                     if (tvVodCounter != null) tvVodCounter.setText("0 / 0");
+                    if (hadChannelFocus || getCurrentFocus() == null) {
+                        focusCategoriesList();
+                    }
                 }
             });
         }).start();
@@ -5765,7 +5875,8 @@ public class MainActivity extends AppCompatActivity {
                     holder.tvRes.setBackgroundColor(0xFF1E293B);
                 }
 
-                boolean isLiveOrReplay = "live".equals(item.streamType) || "replay".equals(currentType);
+                boolean isSearchList = (getTargetRecyclerView() == recyclerSearchResults) || "search".equals(currentType);
+                boolean isLiveOrReplay = !isSearchList && ("live".equals(item.streamType) || "replay".equals(currentType));
 
                 if (isLiveOrReplay && holder.layoutEpgTimeline != null) {
                     holder.layoutEpgTimeline.setVisibility(View.VISIBLE);
@@ -5924,7 +6035,11 @@ public class MainActivity extends AppCompatActivity {
                     if (holder.layoutEpgTimeline != null) holder.layoutEpgTimeline.setVisibility(View.GONE);
                     if (holder.tvEpg != null) {
                         holder.tvEpg.setVisibility(View.VISIBLE);
-                        holder.tvEpg.setText(item.groupName != null ? item.groupName : (item.streamType != null ? item.streamType.toUpperCase() : "Direct"));
+                        String typeLabel = "📺 DIRECT";
+                        if ("vod".equals(item.streamType)) typeLabel = "🎬 FILM";
+                        else if ("series".equals(item.streamType)) typeLabel = "🍿 SÉRIE";
+                        String grp = (item.groupName != null && !item.groupName.isEmpty()) ? (" • " + item.groupName) : "";
+                        holder.tvEpg.setText(typeLabel + grp);
                     }
                     holder.itemView.setOnFocusChangeListener((v, hasFocus) -> {
                         if (hasFocus) {
@@ -6333,8 +6448,15 @@ public class MainActivity extends AppCompatActivity {
                     if (etGlobalSearch != null) etGlobalSearch.requestFocus();
                     return true;
                 }
-                if (etGlobalSearch != null && etGlobalSearch.hasFocus() && etGlobalSearch.getText() != null && etGlobalSearch.getText().length() > 0) {
-                    etGlobalSearch.setText("");
+                if (etGlobalSearch != null && etGlobalSearch.hasFocus()) {
+                    if (etGlobalSearch.getText() != null && etGlobalSearch.getText().length() > 0) {
+                        isProgrammaticSearch = true;
+                        etGlobalSearch.setText("");
+                        isProgrammaticSearch = false;
+                        performGlobalSearch("", globalSearchFilter);
+                        return true;
+                    }
+                    focusActiveSidebarButton();
                     return true;
                 }
                 switchSection("live");

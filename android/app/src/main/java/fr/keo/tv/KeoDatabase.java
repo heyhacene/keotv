@@ -774,53 +774,94 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
     public static String stripAccents(String s) {
         if (s == null) return "";
-        String normalized = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD);
+        String cleaned = s.replace('\u00A0', ' ')
+                .replace('\u202F', ' ')
+                .replace('\u2007', ' ')
+                .replace('\u2060', ' ')
+                .replace("Œ", "OE")
+                .replace("œ", "oe")
+                .replace("Æ", "AE")
+                .replace("æ", "ae");
+        String normalized = java.text.Normalizer.normalize(cleaned, java.text.Normalizer.Form.NFD);
         return normalized.replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
     }
 
     public static String extractCleanTitle(String rawName) {
         if (rawName == null) return "";
-        String s = rawName.trim();
-        s = s.replaceAll("^(\\|[^|]{1,15})+\\|\\s*", "");
-        s = s.replaceAll("^(\\[[^\\]]{1,15}\\]\\s*)+", "");
+        String s = rawName.replace('\u00A0', ' ').replace('\u202F', ' ').replace('\u2007', ' ').trim();
+        s = s.replaceAll("^(\\|[^|]{1,18})+\\|\\s*", "");
+        s = s.replaceAll("^(\\[[^\\]]{1,18}\\]\\s*)+", "");
+        s = s.replaceAll("^(\\([^\\)]{1,12}\\)\\s*)+", "");
         if (s.startsWith("|")) {
-            int lastPipe = s.lastIndexOf('|', Math.min(25, s.length() - 1));
+            int lastPipe = s.lastIndexOf('|', Math.min(28, s.length() - 1));
             if (lastPipe >= 0 && lastPipe < s.length() - 1) {
                 s = s.substring(lastPipe + 1).trim();
             }
         }
         if (s.startsWith("[")) {
-            int lastBracket = s.lastIndexOf(']', Math.min(25, s.length() - 1));
+            int lastBracket = s.lastIndexOf(']', Math.min(28, s.length() - 1));
             if (lastBracket >= 0 && lastBracket < s.length() - 1) {
                 s = s.substring(lastBracket + 1).trim();
             }
         }
-        s = s.replaceAll("(?i)^(FR|VF|VO|VOSTFR|VOST|MULTI|TRUEFRENCH|EN|AR|ES|DE|IT|PT|NL|TR|RU|4K|UHD|FHD|HD|SD|HEVC)\\s*[:\\-|]+\\s*", "");
-        s = s.replaceAll("^[A-Za-z]{2,4}\\s*[:\\-]\\s+", "");
-        s = s.replaceAll("(?i)\\s*\\[(VF|VO|VOSTFR|VOST|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|SD|HEVC|1080P|720P)\\]", "");
-        s = s.replaceAll("(?i)\\s*\\((VF|VO|VOSTFR|VOST|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|SD|HEVC|1080P|720P)\\)", "");
-        s = s.replaceAll("(?i)\\s*\\|(VF|VO|VOSTFR|VOST|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|SD|HEVC|1080P|720P)\\|?", "");
+        s = s.replaceAll("(?i)^(FR|VF|VFF|VFQ|VO|VOSTFR|VOST|MULTI|TRUEFRENCH|EN|AR|ES|DE|IT|PT|NL|TR|RU|4K|UHD|FHD|HD|SD|HEVC)\\s*[:\\-|]+\\s*", "");
+        s = s.replaceAll("^[A-Za-z]{2,4}\\s*[:\\-|]\\s+", "");
+        s = s.replaceAll("(?i)\\s*\\[(VF|VFF|VFQ|VO|VOSTFR|VOST|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|SD|HEVC|1080P|720P)\\]", "");
+        s = s.replaceAll("(?i)\\s*\\((VF|VFF|VFQ|VO|VOSTFR|VOST|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|SD|HEVC|1080P|720P)\\)", "");
+        s = s.replaceAll("(?i)\\s*\\|(VF|VFF|VFQ|VO|VOSTFR|VOST|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|SD|HEVC|1080P|720P)\\|?", "");
         s = s.replaceAll("\\s*\\((19|20)\\d{2}\\)", "");
         s = s.replaceAll("\\s*\\[(19|20)\\d{2}\\]", "");
         s = s.replaceAll("(?i)\\s+[-|]?\\s*(19|20)\\d{2}\\s*$", "");
         s = s.replaceAll("(?i)\\s*\\b(VOSTFR|TRUEFRENCH|MULTI|4K|UHD|FHD|HD|HEVC|1080p|720p)\\b", "");
-        s = s.replaceAll("(?i)\\s+[-|]\\s*(VF|VO|VOST|FR|EN)\\s*$", "");
+        s = s.replaceAll("(?i)\\s+[-|]\\s*(VF|VFF|VFQ|VO|VOST|FR|EN)\\s*$", "");
         return s.trim();
+    }
+
+    public static String normalizeTitleForMatch(String raw) {
+        if (raw == null) return "";
+        String s = stripAccents(extractCleanTitle(raw)).toLowerCase(java.util.Locale.ROOT);
+        s = s.replace("&", " et ");
+        s = s.replaceAll("['’‘`´:\\-–—/.,!?\"()\\[\\]]+", " ");
+        s = s.replaceAll("\\bii\\b", "2")
+                .replaceAll("\\biii\\b", "3")
+                .replaceAll("\\biv\\b", "4")
+                .replaceAll("\\bvi\\b", "6")
+                .replaceAll("\\bvii\\b", "7")
+                .replaceAll("\\bviii\\b", "8")
+                .replaceAll("\\bv\\b", "5");
+        s = s.replaceAll("\\s+", " ").trim();
+        return s;
+    }
+
+    public static String stripLeadingArticle(String norm) {
+        if (norm == null) return "";
+        if (norm.startsWith("les ") || norm.startsWith("the ") || norm.startsWith("des ") || norm.startsWith("une ")) {
+            return norm.substring(4).trim();
+        }
+        if (norm.startsWith("le ") || norm.startsWith("la ") || norm.startsWith("un ")) {
+            return norm.substring(3).trim();
+        }
+        if (norm.startsWith("l ") || norm.startsWith("d ")) {
+            return norm.substring(2).trim();
+        }
+        return norm;
     }
 
     public List<ChannelItem> searchChannels(String query, String streamType) {
         List<ChannelItem> list = new ArrayList<>();
-        if (query == null || query.trim().isEmpty()) return list;
+        if (query == null) return list;
+        String trimmed = query.replace('\u00A0', ' ').trim();
+        if (trimmed.length() < 2) return list;
         SQLiteDatabase db = getReadableDatabase();
-        String trimmed = query.trim();
         String q = "%" + trimmed + "%";
-        String qClean = "%" + extractCleanTitle(trimmed) + "%";
+        String cleanTrimmed = extractCleanTitle(trimmed);
+        String qClean = "%" + (cleanTrimmed.length() >= 2 ? cleanTrimmed : trimmed) + "%";
         String qUnaccented = "%" + stripAccents(trimmed) + "%";
 
         Cursor c = null;
         try {
             String sql = "SELECT DISTINCT " + CHANNEL_COLUMNS
-                    + " FROM channels WHERE (name LIKE ? OR name LIKE ? OR name LIKE ? OR movie_cast LIKE ? OR movie_cast LIKE ? OR director LIKE ? OR director LIKE ? OR plot LIKE ? "
+                    + " FROM channels WHERE (name LIKE ? OR name LIKE ? OR name LIKE ? OR movie_cast LIKE ? OR movie_cast LIKE ? OR director LIKE ? OR director LIKE ? "
                     + " OR id IN (SELECT channel_id FROM movie_actors WHERE actor_name LIKE ? OR actor_name LIKE ?)) "
                     + " AND is_separator = 0";
 
@@ -833,7 +874,6 @@ public class KeoDatabase extends SQLiteOpenHelper {
             argsList.add(q);
             argsList.add(qUnaccented);
             argsList.add(q);
-            argsList.add(q);
             argsList.add(qUnaccented);
 
             if (streamType != null && !streamType.isEmpty() && !"all".equalsIgnoreCase(streamType)) {
@@ -841,10 +881,13 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 argsList.add(streamType);
             }
 
-            sql += " ORDER BY (CASE WHEN name LIKE ? THEN 0 WHEN movie_cast LIKE ? THEN 1 WHEN director LIKE ? THEN 2 ELSE 3 END), name ASC LIMIT 100";
-            argsList.add(q);
-            argsList.add(q);
-            argsList.add(q);
+            sql += " ORDER BY (CASE WHEN stream_type IN ('vod', 'series') THEN 0 ELSE 1 END), "
+                    + "(CASE WHEN movie_cast LIKE ? OR director LIKE ? THEN 0 WHEN name LIKE ? THEN 1 ELSE 2 END), "
+                    + "(CASE WHEN name LIKE '%FR%' OR name LIKE '%VF%' OR name LIKE '%VO%' OR name LIKE '%MULTI%' THEN 0 ELSE 1 END), "
+                    + "name ASC LIMIT 200";
+            argsList.add(qUnaccented);
+            argsList.add(qUnaccented);
+            argsList.add(qUnaccented);
 
             c = db.rawQuery(sql, argsList.toArray(new String[0]));
             while (c != null && c.moveToNext()) {
@@ -863,7 +906,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
                     sql += " AND stream_type = ?";
                     argsList.add(streamType);
                 }
-                sql += " ORDER BY num ASC, name ASC LIMIT 100";
+                sql += " ORDER BY num ASC, name ASC LIMIT 150";
                 c = db.rawQuery(sql, argsList.toArray(new String[0]));
                 while (c != null && c.moveToNext()) {
                     list.add(cursorToChannel(c));
@@ -879,51 +922,103 @@ public class KeoDatabase extends SQLiteOpenHelper {
         return list;
     }
 
+    private void addSqlKeywordIfDistinct(List<String> sqlKeywords, String rawCandidate) {
+        if (rawCandidate == null) return;
+        String clean = stripAccents(extractCleanTitle(rawCandidate)).toLowerCase(java.util.Locale.ROOT).trim();
+        clean = clean.replaceAll("\\s+(ii|iii|iv|v|vi|1|2|3|4|5|6)$", "").trim();
+        if (clean.length() < 4 || clean.matches("^\\d+$")) return;
+        for (int i = 0; i < sqlKeywords.size(); i++) {
+            String existing = sqlKeywords.get(i);
+            if (clean.contains(existing)) {
+                return; // Already covered by a shorter or equal keyword!
+            }
+            if (existing.contains(clean)) {
+                sqlKeywords.set(i, clean); // Replace longer keyword with more general base keyword!
+                return;
+            }
+        }
+        if (sqlKeywords.size() < 90) {
+            sqlKeywords.add(clean);
+        }
+    }
+
     public List<ChannelItem> searchChannelsByTitles(List<String> titles, String streamType) {
         List<ChannelItem> list = new ArrayList<>();
         if (titles == null || titles.isEmpty()) return list;
         SQLiteDatabase db = getReadableDatabase();
 
-        List<String> sqlTitles = new ArrayList<>();
+        List<String> sqlKeywords = new ArrayList<>();
         java.util.Set<String> exactTargets = new java.util.HashSet<>();
-        List<String> prefixTargets = new ArrayList<>();
+        java.util.Set<String> prefixTargets = new java.util.HashSet<>();
 
         for (String t : titles) {
             if (t == null) continue;
-            String s = extractCleanTitle(t).trim();
-            if (s.length() < 2) continue;
-            if (s.matches("^\\d+$")) continue;
-            String lower = s.toLowerCase(java.util.Locale.ROOT);
-            String unacc = stripAccents(lower);
-            exactTargets.add(lower);
-            exactTargets.add(unacc);
-            if (unacc.length() >= 6 && !prefixTargets.contains(unacc)) {
-                prefixTargets.add(unacc);
+            String cleaned = extractCleanTitle(t);
+            if (cleaned.length() < 2 || cleaned.matches("^\\d+$")) continue;
+
+            String normFull = normalizeTitleForMatch(cleaned);
+            if (normFull.length() < 2) continue;
+
+            exactTargets.add(normFull);
+            exactTargets.add(normFull + " 1");
+            exactTargets.add(normFull + " i");
+
+            String noArt = stripLeadingArticle(normFull);
+            if (noArt.length() >= 4) {
+                exactTargets.add(noArt);
+                exactTargets.add(noArt + " 1");
             }
-            if (s.length() >= 3 && !sqlTitles.contains(lower) && sqlTitles.size() < 120) {
-                sqlTitles.add(lower);
-                if (!unacc.equals(lower) && sqlTitles.size() < 120) {
-                    sqlTitles.add(unacc);
+
+            if (normFull.length() >= 5) {
+                prefixTargets.add(normFull);
+            }
+            if (noArt.length() >= 5) {
+                prefixTargets.add(noArt);
+            }
+
+            // If title has a subtitle separated by ':', ' - ', ' – ', extract base title before separator
+            String[] parts = cleaned.split("[:\\-–]");
+            if (parts.length > 1) {
+                String baseRaw = parts[0].trim();
+                String normBase = normalizeTitleForMatch(baseRaw);
+                if (normBase.length() >= 4 && !normBase.matches("^\\d+$")) {
+                    exactTargets.add(normBase);
+                    exactTargets.add(normBase + " 1");
+                    String baseNoNum = normBase.replaceAll("\\s+[1-9]$", "").trim();
+                    if (baseNoNum.length() >= 5) {
+                        prefixTargets.add(baseNoNum);
+                    }
+                    addSqlKeywordIfDistinct(sqlKeywords, baseRaw);
                 }
             }
+
+            addSqlKeywordIfDistinct(sqlKeywords, cleaned);
+            String noArtRaw = stripLeadingArticle(stripAccents(cleaned).toLowerCase(java.util.Locale.ROOT));
+            if (noArtRaw.length() >= 4) {
+                addSqlKeywordIfDistinct(sqlKeywords, noArtRaw);
+            }
         }
-        if (sqlTitles.isEmpty()) return list;
+        if (sqlKeywords.isEmpty()) return list;
 
         StringBuilder sb = new StringBuilder();
-        sb.append("SELECT DISTINCT ").append(CHANNEL_COLUMNS).append(" FROM channels WHERE is_separator = 0 AND (");
+        sb.append("SELECT DISTINCT ").append(CHANNEL_COLUMNS).append(" FROM channels WHERE is_separator = 0 ");
         List<String> args = new ArrayList<>();
-        for (int i = 0; i < sqlTitles.size(); i++) {
-            if (i > 0) sb.append(" OR ");
-            sb.append("name LIKE ?");
-            args.add("%" + sqlTitles.get(i) + "%");
-        }
-        sb.append(")");
 
         if (streamType != null && !streamType.isEmpty() && !"all".equalsIgnoreCase(streamType)) {
-            sb.append(" AND stream_type = ?");
+            sb.append(" AND stream_type = ? ");
             args.add(streamType);
+        } else {
+            sb.append(" AND stream_type IN ('vod', 'series') ");
         }
-        sb.append(" ORDER BY name ASC LIMIT 600");
+
+        sb.append(" AND (");
+        for (int i = 0; i < sqlKeywords.size(); i++) {
+            if (i > 0) sb.append(" OR ");
+            sb.append("name LIKE ?");
+            args.add("%" + sqlKeywords.get(i) + "%");
+        }
+        sb.append(")");
+        sb.append(" ORDER BY (CASE WHEN name LIKE '%FR%' OR name LIKE '%VF%' OR name LIKE '%VO%' OR name LIKE '%MULTI%' THEN 0 ELSE 1 END), name ASC LIMIT 2500");
 
         Cursor c = null;
         try {
@@ -931,17 +1026,35 @@ public class KeoDatabase extends SQLiteOpenHelper {
             while (c != null && c.moveToNext()) {
                 ChannelItem cand = cursorToChannel(c);
                 if (cand == null || cand.name == null) continue;
-                String candClean = extractCleanTitle(cand.name).toLowerCase(java.util.Locale.ROOT);
-                String candUnacc = stripAccents(candClean);
-                boolean matched = exactTargets.contains(candClean) || exactTargets.contains(candUnacc);
-                if (!matched && candUnacc.length() >= 6) {
-                    for (String pt : prefixTargets) {
-                        if (candUnacc.startsWith(pt + ":") || candUnacc.startsWith(pt + " -") || candUnacc.startsWith(pt + " (")) {
+                String candClean = extractCleanTitle(cand.name);
+                String candNorm = normalizeTitleForMatch(candClean);
+                if (candNorm.isEmpty()) continue;
+
+                String candNoArt = stripLeadingArticle(candNorm);
+                boolean matched = exactTargets.contains(candNorm) || exactTargets.contains(candNoArt);
+
+                if (!matched) {
+                    String[] candParts = candClean.split("[:\\-–]");
+                    if (candParts.length > 1) {
+                        String candBase = normalizeTitleForMatch(candParts[0]);
+                        if (candBase.length() >= 4 && (exactTargets.contains(candBase) || exactTargets.contains(stripLeadingArticle(candBase)))) {
                             matched = true;
-                            break;
                         }
                     }
                 }
+
+                if (!matched && candNorm.length() >= 5) {
+                    for (String pt : prefixTargets) {
+                        if (candNorm.startsWith(pt + " ")) {
+                            String rem = candNorm.substring(pt.length() + 1).trim();
+                            if (rem.matches("^[1-9](\\b.*|$)")) {
+                                matched = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
                 if (matched) {
                     list.add(cand);
                 }
