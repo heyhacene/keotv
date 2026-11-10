@@ -47,24 +47,29 @@ public class KeoDatabase extends SQLiteOpenHelper {
         }
     }
 
+    private volatile boolean schemaVerified = false;
+
     public synchronized void ensureColumnsExist(SQLiteDatabase db) {
-        if (db == null || db.isReadOnly()) return;
-        safeEnsureColumn(db, "channels", "is_fav", "INTEGER DEFAULT 0");
-        safeEnsureColumn(db, "channels", "resolution", "TEXT");
-        safeEnsureColumn(db, "channels", "is_separator", "INTEGER DEFAULT 0");
-        safeEnsureColumn(db, "channels", "logo", "TEXT");
-        safeEnsureColumn(db, "channels", "stream_id", "TEXT");
-        safeEnsureColumn(db, "channels", "tv_archive", "INTEGER DEFAULT 0");
-        safeEnsureColumn(db, "channels", "tv_archive_duration", "INTEGER DEFAULT 0");
-        safeEnsureColumn(db, "channels", "epg_channel_id", "TEXT");
-        safeEnsureColumn(db, "channels", "movie_cast", "TEXT");
-        safeEnsureColumn(db, "channels", "director", "TEXT");
-        safeEnsureColumn(db, "channels", "plot", "TEXT");
-        safeEnsureColumn(db, "channels", "genre", "TEXT");
-        safeEnsureColumn(db, "channels", "release_date", "TEXT");
-        safeEnsureColumn(db, "channels", "rating", "TEXT");
-        safeEnsureColumn(db, "categories", "is_adult", "INTEGER DEFAULT 0");
-        safeEnsureColumn(db, "categories", "is_hidden", "INTEGER DEFAULT 0");
+        if (db == null || db.isReadOnly() || schemaVerified) return;
+        Set<String> chCols = getTableColumnsLower(db, "channels");
+        ensureColIfMissing(db, chCols, "channels", "is_fav", "INTEGER DEFAULT 0");
+        ensureColIfMissing(db, chCols, "channels", "resolution", "TEXT");
+        ensureColIfMissing(db, chCols, "channels", "is_separator", "INTEGER DEFAULT 0");
+        ensureColIfMissing(db, chCols, "channels", "logo", "TEXT");
+        ensureColIfMissing(db, chCols, "channels", "stream_id", "TEXT");
+        ensureColIfMissing(db, chCols, "channels", "tv_archive", "INTEGER DEFAULT 0");
+        ensureColIfMissing(db, chCols, "channels", "tv_archive_duration", "INTEGER DEFAULT 0");
+        ensureColIfMissing(db, chCols, "channels", "epg_channel_id", "TEXT");
+        ensureColIfMissing(db, chCols, "channels", "movie_cast", "TEXT");
+        ensureColIfMissing(db, chCols, "channels", "director", "TEXT");
+        ensureColIfMissing(db, chCols, "channels", "plot", "TEXT");
+        ensureColIfMissing(db, chCols, "channels", "genre", "TEXT");
+        ensureColIfMissing(db, chCols, "channels", "release_date", "TEXT");
+        ensureColIfMissing(db, chCols, "channels", "rating", "TEXT");
+
+        Set<String> catCols = getTableColumnsLower(db, "categories");
+        ensureColIfMissing(db, catCols, "categories", "is_adult", "INTEGER DEFAULT 0");
+        ensureColIfMissing(db, catCols, "categories", "is_hidden", "INTEGER DEFAULT 0");
 
         try {
             db.execSQL("CREATE TABLE IF NOT EXISTS movie_actors ("
@@ -84,39 +89,46 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 if (sc != null) try { sc.close(); } catch (Exception ignored) {}
             }
             if (!alreadyCleaned) {
-                db.execSQL("DELETE FROM movie_actors WHERE channel_id IN (SELECT id FROM channels WHERE plot IS NULL OR plot = '')");
-                db.execSQL("UPDATE channels SET movie_cast = NULL, director = NULL WHERE (plot IS NULL OR plot = '')");
+                db.execSQL("DELETE FROM movie_actors WHERE channel_id IN (SELECT id FROM channels WHERE (plot IS NULL OR plot = '') AND movie_cast IS NOT NULL)");
+                db.execSQL("UPDATE channels SET movie_cast = NULL, director = NULL WHERE (plot IS NULL OR plot = '') AND (movie_cast IS NOT NULL OR director IS NOT NULL)");
                 db.execSQL("INSERT OR REPLACE INTO settings (key, value) VALUES ('clean_polluted_actors_v6', '1')");
                 invalidateVodCatalogCache();
             }
+            schemaVerified = true;
         } catch (Exception e) {
             android.util.Log.w("KeoDatabase", "ensureColumnsExist movie_actors failed: " + e.getMessage());
         }
     }
 
-    private void safeEnsureColumn(SQLiteDatabase db, String table, String column, String typeDef) {
+    private Set<String> getTableColumnsLower(SQLiteDatabase db, String table) {
+        Set<String> cols = new HashSet<>();
         Cursor c = null;
         try {
             c = db.rawQuery("PRAGMA table_info(" + table + ")", null);
-            boolean exists = false;
             if (c != null) {
                 int nameIdx = c.getColumnIndex("name");
                 while (c.moveToNext()) {
-                    if (nameIdx >= 0 && column.equalsIgnoreCase(c.getString(nameIdx))) {
-                        exists = true;
-                        break;
+                    if (nameIdx >= 0) {
+                        String n = c.getString(nameIdx);
+                        if (n != null) cols.add(n.toLowerCase(java.util.Locale.ROOT));
                     }
                 }
             }
-            if (!exists) {
-                db.execSQL("ALTER TABLE " + table + " ADD COLUMN `" + column + "` " + typeDef);
-            }
-        } catch (Exception e) {
-            android.util.Log.w("KeoDatabase", "safeEnsureColumn " + table + "." + column + " failed: " + e.getMessage());
+        } catch (Exception ignored) {
         } finally {
-            if (c != null) {
-                try { c.close(); } catch (Exception ignored) {}
-            }
+            if (c != null) try { c.close(); } catch (Exception ignored) {}
+        }
+        return cols;
+    }
+
+    private void ensureColIfMissing(SQLiteDatabase db, Set<String> existingLower, String table, String column, String typeDef) {
+        if (existingLower != null && existingLower.contains(column.toLowerCase(java.util.Locale.ROOT))) {
+            return;
+        }
+        try {
+            db.execSQL("ALTER TABLE " + table + " ADD COLUMN `" + column + "` " + typeDef);
+        } catch (Exception e) {
+            android.util.Log.w("KeoDatabase", "ensureColIfMissing " + table + "." + column + " failed: " + e.getMessage());
         }
     }
 
@@ -824,26 +836,71 @@ public class KeoDatabase extends SQLiteOpenHelper {
             )
     );
 
+    private static int parseFourDigitYear(String s, int offset) {
+        char c0 = s.charAt(offset);
+        if (c0 != '1' && c0 != '2') return 0;
+        char c1 = s.charAt(offset + 1);
+        if (c1 < '0' || c1 > '9') return 0;
+        char c2 = s.charAt(offset + 2);
+        if (c2 < '0' || c2 > '9') return 0;
+        char c3 = s.charAt(offset + 3);
+        if (c3 < '0' || c3 > '9') return 0;
+        return (c0 - '0') * 1000 + (c1 - '0') * 100 + (c2 - '0') * 10 + (c3 - '0');
+    }
+
     public static int extractYear(String rawName, String releaseDate) {
-        if (rawName != null && !rawName.isEmpty()) {
-            java.util.regex.Matcher m = PAT_EXTRACT_YEAR_PAREN.matcher(rawName);
-            int lastYear = 0;
-            while (m.find()) {
-                try {
-                    lastYear = Integer.parseInt(m.group(1));
-                } catch (Exception ignored) {}
+        if (rawName != null) {
+            int len = rawName.length();
+            for (int i = len - 6; i >= 0; i--) {
+                char open = rawName.charAt(i);
+                char close = rawName.charAt(i + 5);
+                if ((open == '(' && close == ')') || (open == '[' && close == ']')) {
+                    int y = parseFourDigitYear(rawName, i + 1);
+                    if (y >= 1920 && y <= 2039) return y;
+                }
             }
-            if (lastYear > 0) return lastYear;
         }
-        if (releaseDate != null && !releaseDate.isEmpty()) {
-            java.util.regex.Matcher m = PAT_EXTRACT_YEAR_ANY.matcher(releaseDate);
-            if (m.find()) {
-                try {
-                    return Integer.parseInt(m.group(1));
-                } catch (Exception ignored) {}
+        if (releaseDate != null) {
+            int len = releaseDate.length();
+            for (int i = 0; i <= len - 4; i++) {
+                int y = parseFourDigitYear(releaseDate, i);
+                if (y >= 1920 && y <= 2039) {
+                    boolean startOk = (i == 0) || !Character.isDigit(releaseDate.charAt(i - 1));
+                    boolean endOk = (i + 4 >= len) || !Character.isDigit(releaseDate.charAt(i + 4));
+                    if (startOk && endOk) return y;
+                }
             }
         }
         return 0;
+    }
+
+    public static String[] splitSubtitleFast(String cleanTitle) {
+        if (cleanTitle == null) return null;
+        int len = cleanTitle.length();
+        if (len < 5) return null;
+        int colonIdx = cleanTitle.indexOf(':');
+        int splitStart = -1;
+        int splitEnd = -1;
+        if (colonIdx > 0 && colonIdx < len - 1) {
+            splitStart = colonIdx;
+            splitEnd = colonIdx + 1;
+        } else {
+            for (int i = 1; i < len - 2; i++) {
+                char c = cleanTitle.charAt(i);
+                if ((c == '-' || c == '–' || c == '—')
+                        && cleanTitle.charAt(i - 1) == ' '
+                        && cleanTitle.charAt(i + 1) == ' ') {
+                    splitStart = i - 1;
+                    splitEnd = i + 2;
+                    break;
+                }
+            }
+        }
+        if (splitStart <= 0) return null;
+        String b = cleanTitle.substring(0, splitStart).trim();
+        String s = cleanTitle.substring(splitEnd).trim();
+        if (b.isEmpty() || s.isEmpty()) return null;
+        return new String[]{b, s};
     }
 
     public static class VodCatalogEntry {
@@ -866,35 +923,107 @@ public class KeoDatabase extends SQLiteOpenHelper {
             this.streamType = streamType != null ? streamType : "vod";
             this.rawName = rawName != null ? rawName : "";
             this.cleanTitle = extractCleanTitle(this.rawName);
-            this.normFull = normalizeTitleForMatch(this.cleanTitle);
+            this.normFull = normalizeCleanedTitle(this.cleanTitle);
             this.normNoArt = stripLeadingArticle(this.normFull);
 
             String b = "";
             String s = "";
-            String[] parts = PAT_SUBTITLE_SPLIT.split(this.cleanTitle);
-            if (parts.length > 1) {
-                b = normalizeTitleForMatch(parts[0]);
-                s = normalizeTitleForMatch(parts[1]);
+            String[] parts = splitSubtitleFast(this.cleanTitle);
+            if (parts != null) {
+                b = normalizeCleanedTitle(parts[0]);
+                s = normalizeCleanedTitle(parts[1]);
             }
             this.normBase = b;
-            this.normBaseNoArt = stripLeadingArticle(b);
+            this.normBaseNoArt = b.isEmpty() ? "" : stripLeadingArticle(b);
             this.normSub = s;
-            this.castNorm = (cast != null && !cast.isEmpty()) ? stripAccents(cast).toLowerCase(java.util.Locale.ROOT) : "";
-            this.directorNorm = (director != null && !director.isEmpty()) ? stripAccents(director).toLowerCase(java.util.Locale.ROOT) : "";
+            this.castNorm = (cast != null && !cast.isEmpty()) ? stripAccentsLowerFast(cast) : "";
+            this.directorNorm = (director != null && !director.isEmpty()) ? stripAccentsLowerFast(director) : "";
             this.year = extractYear(this.rawName, releaseDate);
-            String upper = this.rawName.toUpperCase(java.util.Locale.ROOT);
-            this.langPriority = (upper.contains("FR") || upper.contains("VF") || upper.contains("VO") || upper.contains("MULTI")) ? 0 : 1;
+            this.langPriority = hasPreferredLangTagFast(this.rawName) ? 0 : 1;
         }
+    }
+
+    private static boolean hasPreferredLangTagFast(String raw) {
+        if (raw == null) return false;
+        int limit = Math.min(raw.length(), 28);
+        for (int i = 0; i < limit - 1; i++) {
+            char c0 = raw.charAt(i);
+            char c1 = raw.charAt(i + 1);
+            if ((c0 == 'F' || c0 == 'f') && (c1 == 'R' || c1 == 'r')) return true;
+            if ((c0 == 'V' || c0 == 'v') && (c1 == 'F' || c1 == 'f' || c1 == 'O' || c1 == 'o')) return true;
+            if ((c0 == 'M' || c0 == 'm') && (c1 == 'U' || c1 == 'u')) return true;
+        }
+        return false;
     }
 
     private final Object catalogCacheLock = new Object();
     private volatile List<VodCatalogEntry> vodCatalogCache = null;
+    private volatile List<VodCatalogEntry> liveCatalogCache = null;
     private volatile Map<String, VodCatalogEntry> vodCatalogById = null;
+    private volatile Map<String, List<VodCatalogEntry>> vodByNormTitle = null;
+    private volatile Map<String, List<VodCatalogEntry>> vodByFirstWord = null;
+    private volatile boolean warmUpStarted = false;
 
     public void invalidateVodCatalogCache() {
         synchronized (catalogCacheLock) {
             vodCatalogCache = null;
+            liveCatalogCache = null;
             vodCatalogById = null;
+            vodByNormTitle = null;
+            vodByFirstWord = null;
+            warmUpStarted = false;
+        }
+    }
+
+    public void warmUpSearchIndexAsync() {
+        if (vodCatalogCache != null || warmUpStarted) return;
+        warmUpStarted = true;
+        Thread t = new Thread(() -> {
+            try {
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+                ensureVodCatalogIndex();
+            } catch (Throwable ignored) {}
+        }, "KeoSearchIndexWarmup");
+        t.setDaemon(true);
+        t.start();
+    }
+
+    private static void addEntryToMultiMap(Map<String, List<VodCatalogEntry>> map, String key, VodCatalogEntry entry) {
+        if (key == null || key.isEmpty()) return;
+        List<VodCatalogEntry> list = map.get(key);
+        if (list == null) {
+            list = new ArrayList<>(2);
+            map.put(key, list);
+        }
+        list.add(entry);
+    }
+
+    private static String extractFirstWord(String norm) {
+        if (norm == null || norm.isEmpty()) return "";
+        int sp = norm.indexOf(' ');
+        return sp > 0 ? norm.substring(0, sp) : norm;
+    }
+
+    private static void indexVodEntryInMaps(VodCatalogEntry entry,
+                                            Map<String, List<VodCatalogEntry>> byNormTitle,
+                                            Map<String, List<VodCatalogEntry>> byFirstWord) {
+        addEntryToMultiMap(byNormTitle, entry.normFull, entry);
+        if (!entry.normNoArt.isEmpty() && !entry.normNoArt.equals(entry.normFull)) {
+            addEntryToMultiMap(byNormTitle, entry.normNoArt, entry);
+        }
+        if (entry.normBase.length() >= 4 && !entry.normBase.equals(entry.normFull)) {
+            addEntryToMultiMap(byNormTitle, entry.normBase, entry);
+        }
+        if (entry.normBaseNoArt.length() >= 6 && !entry.normBaseNoArt.equals(entry.normBase) && !entry.normBaseNoArt.equals(entry.normNoArt)) {
+            addEntryToMultiMap(byNormTitle, entry.normBaseNoArt, entry);
+        }
+        String fw1 = extractFirstWord(entry.normFull);
+        if (fw1.length() >= 3) {
+            addEntryToMultiMap(byFirstWord, fw1, entry);
+        }
+        String fw2 = extractFirstWord(entry.normNoArt);
+        if (fw2.length() >= 3 && !fw2.equals(fw1)) {
+            addEntryToMultiMap(byFirstWord, fw2, entry);
         }
     }
 
@@ -903,13 +1032,16 @@ public class KeoDatabase extends SQLiteOpenHelper {
         if (current != null) return current;
         synchronized (catalogCacheLock) {
             if (vodCatalogCache != null) return vodCatalogCache;
-            List<VodCatalogEntry> built = new ArrayList<>(25000);
-            Map<String, VodCatalogEntry> byId = new HashMap<>(25000);
+            List<VodCatalogEntry> builtVod = new ArrayList<>(40000);
+            List<VodCatalogEntry> builtLive = new ArrayList<>(15000);
+            Map<String, VodCatalogEntry> byId = new HashMap<>(60000);
+            Map<String, List<VodCatalogEntry>> byNormTitle = new HashMap<>(45000);
+            Map<String, List<VodCatalogEntry>> byFirstWord = new HashMap<>(25000);
             SQLiteDatabase db = getReadableDatabase();
             Cursor c = null;
             try {
                 c = db.rawQuery(
-                        "SELECT id, stream_type, name, movie_cast, director, release_date FROM channels WHERE is_separator = 0 AND stream_type IN ('vod', 'series')",
+                        "SELECT id, stream_type, name, movie_cast, director, release_date FROM channels WHERE is_separator = 0",
                         null
                 );
                 while (c != null && c.moveToNext()) {
@@ -922,8 +1054,13 @@ public class KeoDatabase extends SQLiteOpenHelper {
                     if (id == null || name == null) continue;
                     VodCatalogEntry entry = new VodCatalogEntry(id, st, name, cast, dir, rel);
                     if (!entry.normFull.isEmpty()) {
-                        built.add(entry);
-                        byId.put(id, entry);
+                        if ("live".equalsIgnoreCase(st)) {
+                            builtLive.add(entry);
+                        } else {
+                            builtVod.add(entry);
+                            byId.put(id, entry);
+                            indexVodEntryInMaps(entry, byNormTitle, byFirstWord);
+                        }
                     }
                 }
             } catch (Throwable t) {
@@ -931,7 +1068,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 if (c != null) { try { c.close(); } catch (Exception ignored) {} c = null; }
                 try {
                     c = db.rawQuery(
-                            "SELECT id, stream_type, name FROM channels WHERE is_separator = 0 AND stream_type IN ('vod', 'series')",
+                            "SELECT id, stream_type, name FROM channels WHERE is_separator = 0",
                             null
                     );
                     while (c != null && c.moveToNext()) {
@@ -941,8 +1078,13 @@ public class KeoDatabase extends SQLiteOpenHelper {
                         if (id == null || name == null) continue;
                         VodCatalogEntry entry = new VodCatalogEntry(id, st, name, "", "", "");
                         if (!entry.normFull.isEmpty()) {
-                            built.add(entry);
-                            byId.put(id, entry);
+                            if ("live".equalsIgnoreCase(st)) {
+                                builtLive.add(entry);
+                            } else {
+                                builtVod.add(entry);
+                                byId.put(id, entry);
+                                indexVodEntryInMaps(entry, byNormTitle, byFirstWord);
+                            }
                         }
                     }
                 } catch (Throwable ignored) {}
@@ -950,9 +1092,83 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 if (c != null) try { c.close(); } catch (Exception ignored) {}
             }
             vodCatalogById = byId;
-            vodCatalogCache = built;
-            return built;
+            vodByNormTitle = byNormTitle;
+            vodByFirstWord = byFirstWord;
+            liveCatalogCache = builtLive;
+            vodCatalogCache = builtVod;
+            return builtVod;
         }
+    }
+
+    public static String stripAccentsLowerFast(String s) {
+        if (s == null || s.isEmpty()) return "";
+        int len = s.length();
+        boolean needsChange = false;
+        for (int i = 0; i < len; i++) {
+            char ch = s.charAt(i);
+            if (ch >= 128 || (ch >= 'A' && ch <= 'Z')) {
+                needsChange = true;
+                break;
+            }
+        }
+        if (!needsChange) return s;
+
+        StringBuilder sb = new StringBuilder(len + 4);
+        boolean needsNfd = false;
+        for (int i = 0; i < len; i++) {
+            char ch = s.charAt(i);
+            if (ch < 128) {
+                if (ch >= 'A' && ch <= 'Z') {
+                    sb.append((char) (ch + 32));
+                } else {
+                    sb.append(ch);
+                }
+            } else {
+                switch (ch) {
+                    case '\u00A0': case '\u202F': case '\u2007': case '\u2060':
+                        sb.append(' '); break;
+                    case 'à': case 'â': case 'ä': case 'á': case 'ã': case 'å':
+                    case 'À': case 'Â': case 'Ä': case 'Á': case 'Ã': case 'Å':
+                        sb.append('a'); break;
+                    case 'é': case 'è': case 'ê': case 'ë':
+                    case 'É': case 'È': case 'Ê': case 'Ë':
+                        sb.append('e'); break;
+                    case 'î': case 'ï': case 'í': case 'ì':
+                    case 'Î': case 'Ï': case 'Í': case 'Ì':
+                        sb.append('i'); break;
+                    case 'ô': case 'ö': case 'ó': case 'ò': case 'õ':
+                    case 'Ô': case 'Ö': case 'Ó': case 'Ò': case 'Õ':
+                        sb.append('o'); break;
+                    case 'ù': case 'û': case 'ü': case 'ú':
+                    case 'Ù': case 'Û': case 'Ü': case 'Ú':
+                        sb.append('u'); break;
+                    case 'ç': case 'Ç':
+                        sb.append('c'); break;
+                    case 'ñ': case 'Ñ':
+                        sb.append('n'); break;
+                    case 'ÿ': case 'ý': case 'Ÿ': case 'Ý':
+                        sb.append('y'); break;
+                    case 'œ': case 'Œ':
+                        sb.append("oe"); break;
+                    case 'æ': case 'Æ':
+                        sb.append("ae"); break;
+                    case '’': case '‘': case '´':
+                        sb.append('\''); break;
+                    case '–': case '—':
+                        sb.append('-'); break;
+                    default:
+                        sb.append(Character.toLowerCase(ch));
+                        needsNfd = true;
+                        break;
+                }
+            }
+        }
+        String res = sb.toString();
+        if (needsNfd) {
+            String normalized = java.text.Normalizer.normalize(res, java.text.Normalizer.Form.NFD);
+            res = PAT_DIA.matcher(normalized).replaceAll("");
+        }
+        return res;
     }
 
     public static String stripAccents(String s) {
@@ -1042,30 +1258,96 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
     public static String extractCleanTitle(String rawName) {
         if (rawName == null || rawName.isEmpty()) return "";
-        String s = rawName.replace('\u00A0', ' ').replace('\u202F', ' ').replace('\u2007', ' ').trim();
-        if (s.startsWith("|")) {
-            s = PAT_LEAD_PIPES.matcher(s).replaceFirst("");
-            if (s.startsWith("|")) {
-                int lastPipe = s.lastIndexOf('|', Math.min(28, s.length() - 1));
-                if (lastPipe >= 0 && lastPipe < s.length() - 1) {
-                    s = s.substring(lastPipe + 1).trim();
+        String s = rawName;
+        if (s.indexOf('\u00A0') >= 0 || s.indexOf('\u202F') >= 0 || s.indexOf('\u2007') >= 0) {
+            s = s.replace('\u00A0', ' ').replace('\u202F', ' ').replace('\u2007', ' ');
+        }
+        int len = s.length();
+        int start = 0;
+        while (start < len && s.charAt(start) <= ' ') start++;
+
+        // Fast-path: strip leading |...| tags (e.g. "|FR|", "|VO|STFR|") without regex
+        while (start < len && s.charAt(start) == '|') {
+            int nextPipe = s.indexOf('|', start + 1);
+            if (nextPipe > start && nextPipe - start <= 20) {
+                start = nextPipe + 1;
+                while (start < len && (s.charAt(start) == '|' || s.charAt(start) <= ' ')) {
+                    if (s.charAt(start) == '|') {
+                        int np2 = s.indexOf('|', start + 1);
+                        if (np2 > start && np2 - start <= 20) {
+                            start = np2 + 1;
+                        } else {
+                            start++;
+                            break;
+                        }
+                    } else {
+                        start++;
+                    }
                 }
+            } else {
+                break;
             }
         }
-        if (s.startsWith("[")) {
-            s = PAT_LEAD_BRACKETS.matcher(s).replaceFirst("");
-            if (s.startsWith("[")) {
-                int lastBracket = s.lastIndexOf(']', Math.min(28, s.length() - 1));
-                if (lastBracket >= 0 && lastBracket < s.length() - 1) {
-                    s = s.substring(lastBracket + 1).trim();
-                }
+
+        // Fast-path: strip leading [...] tags without regex
+        while (start < len && s.charAt(start) == '[') {
+            int nextBracket = s.indexOf(']', start + 1);
+            if (nextBracket > start && nextBracket - start <= 20) {
+                start = nextBracket + 1;
+                while (start < len && s.charAt(start) <= ' ') start++;
+            } else {
+                break;
             }
         }
-        if (s.startsWith("(")) {
-            s = PAT_LEAD_PARENS.matcher(s).replaceFirst("");
+
+        // Fast-path: strip leading (...) tags without regex
+        while (start < len && s.charAt(start) == '(') {
+            int nextParen = s.indexOf(')', start + 1);
+            if (nextParen > start && nextParen - start <= 14) {
+                start = nextParen + 1;
+                while (start < len && s.charAt(start) <= ' ') start++;
+            } else {
+                break;
+            }
         }
-        s = PAT_LEAD_LANG_TAG.matcher(s).replaceFirst("");
-        s = PAT_LEAD_SHORT_CODE.matcher(s).replaceFirst("");
+
+        int end = len;
+        while (end > start && s.charAt(end - 1) <= ' ') end--;
+
+        // Fast-path: strip trailing (YYYY) or [YYYY] without regex
+        while (end - start >= 6) {
+            char close = s.charAt(end - 1);
+            char open = s.charAt(end - 6);
+            if ((open == '(' && close == ')') || (open == '[' && close == ']')) {
+                int y = parseFourDigitYear(s, end - 5);
+                if (y >= 1900 && y <= 2099) {
+                    end -= 6;
+                    while (end > start && s.charAt(end - 1) <= ' ') end--;
+                    continue;
+                }
+            }
+            break;
+        }
+
+        if (start > 0 || end < len) {
+            s = s.substring(start, end);
+        }
+
+        // Only invoke leading code regexes if a ':', '-', or '|' exists near the start
+        int checkLeadLimit = Math.min(s.length(), 14);
+        boolean hasLeadSep = false;
+        for (int i = 1; i < checkLeadLimit; i++) {
+            char c = s.charAt(i);
+            if (c == ':' || c == '-' || c == '|') {
+                hasLeadSep = true;
+                break;
+            }
+        }
+        if (hasLeadSep) {
+            s = PAT_LEAD_LANG_TAG.matcher(s).replaceFirst("");
+            s = PAT_LEAD_SHORT_CODE.matcher(s).replaceFirst("");
+        }
+
         if (s.indexOf('[') >= 0) {
             s = PAT_TRAIL_BRACKET_TAG.matcher(s).replaceAll("");
             s = PAT_BRACKET_YEAR.matcher(s).replaceAll("");
@@ -1077,30 +1359,169 @@ public class KeoDatabase extends SQLiteOpenHelper {
         if (s.indexOf('|') >= 0) {
             s = PAT_TRAIL_PIPE_TAG.matcher(s).replaceAll("");
         }
-        s = PAT_TRAIL_YEAR.matcher(s).replaceAll("");
-        s = PAT_QUAL_WORDS.matcher(s).replaceAll("");
-        s = PAT_TRAIL_LANG.matcher(s).replaceAll("");
+        if (s.length() >= 5) {
+            char lastCh = s.charAt(s.length() - 1);
+            if (lastCh >= '0' && lastCh <= '9') {
+                s = PAT_TRAIL_YEAR.matcher(s).replaceAll("");
+            }
+            if (s.indexOf('-') >= 0 || s.indexOf('|') >= 0) {
+                s = PAT_TRAIL_LANG.matcher(s).replaceAll("");
+            }
+        }
         return s.trim();
+    }
+
+    public static String normalizeCleanedTitle(String cleaned) {
+        if (cleaned == null || cleaned.isEmpty()) return "";
+        int len = cleaned.length();
+        StringBuilder sb = new StringBuilder(len + 6);
+        boolean lastWasSpace = true;
+        boolean hasIorV = false;
+        boolean needsNfd = false;
+
+        for (int i = 0; i < len; i++) {
+            char ch = cleaned.charAt(i);
+            char mapped = 0;
+            if (ch < 128) {
+                if (ch >= 'a' && ch <= 'z') {
+                    mapped = ch;
+                } else if (ch >= 'A' && ch <= 'Z') {
+                    mapped = (char) (ch + 32);
+                } else if (ch >= '0' && ch <= '9') {
+                    mapped = ch;
+                } else if (ch == '&') {
+                    if (!lastWasSpace) sb.append(' ');
+                    sb.append("et ");
+                    lastWasSpace = true;
+                    continue;
+                } else {
+                    // Space or punctuation
+                    if (!lastWasSpace) {
+                        sb.append(' ');
+                        lastWasSpace = true;
+                    }
+                    continue;
+                }
+            } else {
+                switch (ch) {
+                    case 'à': case 'â': case 'ä': case 'á': case 'ã': case 'å':
+                    case 'À': case 'Â': case 'Ä': case 'Á': case 'Ã': case 'Å':
+                        mapped = 'a'; break;
+                    case 'é': case 'è': case 'ê': case 'ë':
+                    case 'É': case 'È': case 'Ê': case 'Ë':
+                        mapped = 'e'; break;
+                    case 'î': case 'ï': case 'í': case 'ì':
+                    case 'Î': case 'Ï': case 'Í': case 'Ì':
+                        mapped = 'i'; break;
+                    case 'ô': case 'ö': case 'ó': case 'ò': case 'õ':
+                    case 'Ô': case 'Ö': case 'Ó': case 'Ò': case 'Õ':
+                        mapped = 'o'; break;
+                    case 'ù': case 'û': case 'ü': case 'ú':
+                    case 'Ù': case 'Û': case 'Ü': case 'Ú':
+                        mapped = 'u'; break;
+                    case 'ç': case 'Ç':
+                        mapped = 'c'; break;
+                    case 'ñ': case 'Ñ':
+                        mapped = 'n'; break;
+                    case 'ÿ': case 'ý': case 'Ÿ': case 'Ý':
+                        mapped = 'y'; break;
+                    case 'œ': case 'Œ':
+                        sb.append("oe");
+                        lastWasSpace = false;
+                        continue;
+                    case 'æ': case 'Æ':
+                        sb.append("ae");
+                        lastWasSpace = false;
+                        continue;
+                    case '\u00A0': case '\u202F': case '\u2007': case '\u2060':
+                    case '’': case '‘': case '´': case '–': case '—':
+                        if (!lastWasSpace) {
+                            sb.append(' ');
+                            lastWasSpace = true;
+                        }
+                        continue;
+                    default:
+                        if (Character.isLetterOrDigit(ch)) {
+                            mapped = Character.toLowerCase(ch);
+                            needsNfd = true;
+                        } else {
+                            if (!lastWasSpace) {
+                                sb.append(' ');
+                                lastWasSpace = true;
+                            }
+                            continue;
+                        }
+                        break;
+                }
+            }
+            if (mapped == 'i' || mapped == 'v') hasIorV = true;
+            sb.append(mapped);
+            lastWasSpace = false;
+        }
+
+        if (lastWasSpace && sb.length() > 0) {
+            sb.setLength(sb.length() - 1);
+        }
+        String s = sb.toString();
+        if (needsNfd) {
+            String normalized = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD);
+            s = PAT_DIA.matcher(normalized).replaceAll("");
+        }
+        if (hasIorV) {
+            s = replaceStandaloneRomanNumeralsFast(s);
+        }
+        return s;
+    }
+
+    private static String replaceStandaloneRomanNumeralsFast(String s) {
+        int len = s.length();
+        if (len == 0) return s;
+        StringBuilder out = null;
+        int lastCopied = 0;
+        int i = 0;
+        while (i < len) {
+            int wordStart = i;
+            while (i < len && s.charAt(i) != ' ') i++;
+            int wLen = i - wordStart;
+            if (wLen >= 1 && wLen <= 4) {
+                char c0 = s.charAt(wordStart);
+                if (c0 == 'i' || c0 == 'v') {
+                    char rep = 0;
+                    if (wLen == 1 && c0 == 'v') {
+                        rep = '5';
+                    } else if (wLen == 2) {
+                        char c1 = s.charAt(wordStart + 1);
+                        if (c0 == 'i' && c1 == 'i') rep = '2';
+                        else if (c0 == 'i' && c1 == 'v') rep = '4';
+                        else if (c0 == 'v' && c1 == 'i') rep = '6';
+                    } else if (wLen == 3) {
+                        char c1 = s.charAt(wordStart + 1);
+                        char c2 = s.charAt(wordStart + 2);
+                        if (c0 == 'i' && c1 == 'i' && c2 == 'i') rep = '3';
+                        else if (c0 == 'v' && c1 == 'i' && c2 == 'i') rep = '7';
+                    } else if (wLen == 4) {
+                        if (c0 == 'v' && s.charAt(wordStart + 1) == 'i' && s.charAt(wordStart + 2) == 'i' && s.charAt(wordStart + 3) == 'i') {
+                            rep = '8';
+                        }
+                    }
+                    if (rep != 0) {
+                        if (out == null) out = new StringBuilder(len);
+                        out.append(s, lastCopied, wordStart);
+                        out.append(rep);
+                        lastCopied = i;
+                    }
+                }
+            }
+            i++; // skip space
+        }
+        if (out == null) return s;
+        if (lastCopied < len) out.append(s, lastCopied, len);
+        return out.toString();
     }
 
     public static String normalizeTitleForMatch(String raw) {
         if (raw == null || raw.isEmpty()) return "";
-        String s = stripAccents(extractCleanTitle(raw)).toLowerCase(java.util.Locale.ROOT);
-        if (s.indexOf('&') >= 0) {
-            s = s.replace("&", " et ");
-        }
-        s = PAT_PUNCT_TO_SPACE.matcher(s).replaceAll(" ");
-        if (s.indexOf('i') >= 0 || s.indexOf('v') >= 0) {
-            s = PAT_ROMAN_VIII.matcher(s).replaceAll("8");
-            s = PAT_ROMAN_VII.matcher(s).replaceAll("7");
-            s = PAT_ROMAN_III.matcher(s).replaceAll("3");
-            s = PAT_ROMAN_II.matcher(s).replaceAll("2");
-            s = PAT_ROMAN_IV.matcher(s).replaceAll("4");
-            s = PAT_ROMAN_VI.matcher(s).replaceAll("6");
-            s = PAT_ROMAN_V.matcher(s).replaceAll("5");
-        }
-        s = PAT_MULTI_SPACE.matcher(s).replaceAll(" ").trim();
-        return s;
+        return normalizeCleanedTitle(extractCleanTitle(raw));
     }
 
     public static String stripLeadingArticle(String norm) {
@@ -1226,108 +1647,92 @@ public class KeoDatabase extends SQLiteOpenHelper {
         if (trimmed.length() < 2) return list;
 
         final String qNorm = normalizeTitleForMatch(trimmed);
-        final String qUnaccLower = stripAccents(trimmed).toLowerCase(java.util.Locale.ROOT).trim();
+        final String qNormPrefix = qNorm + " ";
+        final String qUnaccLower = stripAccentsLowerFast(trimmed).trim();
         final String[] qWords = qNorm.isEmpty() ? qUnaccLower.split("\\s+") : qNorm.split("\\s+");
         final boolean includeVodSeries = (streamType == null || streamType.isEmpty() || "all".equalsIgnoreCase(streamType)
                 || "vod".equalsIgnoreCase(streamType) || "series".equalsIgnoreCase(streamType));
         final boolean includeLive = (streamType == null || streamType.isEmpty() || "all".equalsIgnoreCase(streamType)
                 || "live".equalsIgnoreCase(streamType));
+        final boolean filterVodByType = (streamType != null && !streamType.isEmpty() && !"all".equalsIgnoreCase(streamType));
 
-        // 1. Scan full in-memory VOD & Series catalog (100% coverage, zero SQL LIMIT truncation)
+        ensureVodCatalogIndex();
+
+        // 1. Scan in-memory VOD & Series catalog (100% coverage, zero SQL LIMIT truncation)
         final Map<String, Integer> matchedVodTier = new HashMap<>();
         final List<VodCatalogEntry> matchedVodEntries = new ArrayList<>();
 
         if (includeVodSeries && !qNorm.isEmpty()) {
-            List<VodCatalogEntry> catalog = ensureVodCatalogIndex();
-            // Also check movie_actors table for indexed actor names
-            Set<String> actorMatchedIds = new HashSet<>();
-            if (qUnaccLower.length() >= 3) {
-                SQLiteDatabase db = getReadableDatabase();
-                Cursor ac = null;
-                try {
-                    ac = db.rawQuery("SELECT channel_id, actor_name FROM movie_actors WHERE actor_name LIKE ?", new String[]{"%" + qUnaccLower + "%"});
-                    while (ac != null && ac.moveToNext()) {
-                        String cid = ac.getString(0);
-                        String aName = ac.getString(1);
-                        if (cid != null && aName != null) {
-                            String aNorm = stripAccents(aName).toLowerCase(java.util.Locale.ROOT);
-                            if (containsAllWordsInMetadata(aNorm, qWords)) {
-                                actorMatchedIds.add(cid);
-                            }
+            List<VodCatalogEntry> catalog = vodCatalogCache;
+            if (catalog != null) {
+                for (VodCatalogEntry e : catalog) {
+                    if (filterVodByType && !streamType.equalsIgnoreCase(e.streamType)) continue;
+                    int tier = 99;
+                    if (e.normFull.equals(qNorm) || e.normNoArt.equals(qNorm)
+                            || (!e.normBase.isEmpty() && (e.normBase.equals(qNorm) || e.normBaseNoArt.equals(qNorm)))) {
+                        tier = 1; // Exact title or base title match
+                    } else if (e.normFull.startsWith(qNormPrefix) || e.normNoArt.startsWith(qNormPrefix)) {
+                        tier = 2; // Title starts with query (e.g. "Rambo 2", "Rocky 4")
+                    } else if (e.normFull.contains(qNorm)) {
+                        if (containsWholeWordOrPrefix(e.normFull, qNorm, qNorm.length() < 4)) {
+                            tier = 3; // Whole word/phrase in title (e.g. "John Rambo")
+                        } else if (qNorm.length() >= 4) {
+                            tier = 5; // Substring in title
+                        }
+                    } else if (qWords.length > 1 && containsAllWordsInMetadata(e.normFull, qWords)) {
+                        tier = 4; // All query words present in title
+                    }
+
+                    if (tier == 99 && qUnaccLower.length() >= 3) {
+                        if ((!e.castNorm.isEmpty() && containsAllWordsInMetadata(e.castNorm, qWords))
+                                || (!e.directorNorm.isEmpty() && containsAllWordsInMetadata(e.directorNorm, qWords))) {
+                            tier = 6; // Actor / Director match
                         }
                     }
-                } catch (Exception ignored) {
-                } finally {
-                    if (ac != null) try { ac.close(); } catch (Exception ignored) {}
-                }
-            }
 
-            for (VodCatalogEntry e : catalog) {
-                if (streamType != null && !streamType.isEmpty() && !"all".equalsIgnoreCase(streamType)) {
-                    if (!streamType.equalsIgnoreCase(e.streamType)) continue;
-                }
-                int tier = 99;
-                if (e.normFull.equals(qNorm) || e.normNoArt.equals(qNorm)
-                        || (!e.normBase.isEmpty() && (e.normBase.equals(qNorm) || e.normBaseNoArt.equals(qNorm)))) {
-                    tier = 1; // Exact title or base title match
-                } else if (e.normFull.startsWith(qNorm + " ") || e.normNoArt.startsWith(qNorm + " ")) {
-                    tier = 2; // Title starts with query (e.g. "Rambo 2", "Rocky 4")
-                } else if (containsWholeWordOrPrefix(e.normFull, qNorm, qNorm.length() < 4)) {
-                    tier = 3; // Whole word/phrase in title (e.g. "John Rambo")
-                } else if (qWords.length > 1 && containsAllWordsInMetadata(e.normFull, qWords)) {
-                    tier = 4; // All query words present in title
-                } else if (qNorm.length() >= 4 && e.normFull.contains(qNorm)) {
-                    tier = 5; // Substring in title
-                } else if (actorMatchedIds.contains(e.id)
-                        || (qUnaccLower.length() >= 3 && (containsAllWordsInMetadata(e.castNorm, qWords) || containsAllWordsInMetadata(e.directorNorm, qWords)))) {
-                    tier = 6; // Actor / Director match
-                }
-
-                if (tier < 99) {
-                    matchedVodTier.put(e.id, tier);
-                    matchedVodEntries.add(e);
-                }
-            }
-
-            Collections.sort(matchedVodEntries, (a, b) -> {
-                int ta = matchedVodTier.get(a.id);
-                int tb = matchedVodTier.get(b.id);
-                if (ta != tb) return Integer.compare(ta, tb);
-                int cNorm = a.normFull.compareTo(b.normFull);
-                if (cNorm != 0) return cNorm;
-                if (a.langPriority != b.langPriority) return Integer.compare(a.langPriority, b.langPriority);
-                return a.rawName.compareToIgnoreCase(b.rawName);
-            });
-
-            List<String> orderedVodIds = new ArrayList<>(Math.min(matchedVodEntries.size(), 500));
-            for (int i = 0; i < Math.min(matchedVodEntries.size(), 500); i++) {
-                orderedVodIds.add(matchedVodEntries.get(i).id);
-            }
-            list.addAll(fetchChannelsByIdsOrdered(orderedVodIds));
-        }
-
-        // 2. Include Live channels if applicable
-        if (includeLive) {
-            SQLiteDatabase db = getReadableDatabase();
-            String q = "%" + trimmed + "%";
-            String qUnaccented = "%" + stripAccents(trimmed) + "%";
-            Cursor c = null;
-            try {
-                String sql = "SELECT DISTINCT " + CHANNEL_COLUMNS
-                        + " FROM channels WHERE is_separator = 0 AND stream_type = 'live' AND (name LIKE ? OR name LIKE ?)"
-                        + " ORDER BY (CASE WHEN name LIKE '%FR%' OR name LIKE '%VF%' THEN 0 ELSE 1 END), num ASC, name ASC LIMIT 150";
-                c = db.rawQuery(sql, new String[]{q, qUnaccented});
-                Set<String> seenIds = new HashSet<>();
-                for (ChannelItem item : list) seenIds.add(item.id);
-                while (c != null && c.moveToNext()) {
-                    ChannelItem ch = cursorToChannel(c);
-                    if (ch != null && seenIds.add(ch.id)) {
-                        list.add(ch);
+                    if (tier < 99) {
+                        matchedVodTier.put(e.id, tier);
+                        matchedVodEntries.add(e);
                     }
                 }
-            } catch (Throwable ignored) {
-            } finally {
-                if (c != null) try { c.close(); } catch (Exception ignored) {}
+
+                Collections.sort(matchedVodEntries, (a, b) -> {
+                    int ta = matchedVodTier.get(a.id);
+                    int tb = matchedVodTier.get(b.id);
+                    if (ta != tb) return Integer.compare(ta, tb);
+                    int cNorm = a.normFull.compareTo(b.normFull);
+                    if (cNorm != 0) return cNorm;
+                    if (a.langPriority != b.langPriority) return Integer.compare(a.langPriority, b.langPriority);
+                    return a.rawName.compareToIgnoreCase(b.rawName);
+                });
+
+                List<String> orderedVodIds = new ArrayList<>(Math.min(matchedVodEntries.size(), 500));
+                for (int i = 0; i < Math.min(matchedVodEntries.size(), 500); i++) {
+                    orderedVodIds.add(matchedVodEntries.get(i).id);
+                }
+                list.addAll(fetchChannelsByIdsOrdered(orderedVodIds));
+            }
+        }
+
+        // 2. Include Live channels from in-memory liveCatalogCache (zero disk scan!)
+        if (includeLive && !qNorm.isEmpty()) {
+            List<VodCatalogEntry> liveCat = liveCatalogCache;
+            if (liveCat != null && !liveCat.isEmpty()) {
+                List<VodCatalogEntry> matchedLive = new ArrayList<>();
+                for (VodCatalogEntry e : liveCat) {
+                    if (e.normFull.contains(qNorm) || (qWords.length > 1 && containsAllWordsInMetadata(e.normFull, qWords))) {
+                        matchedLive.add(e);
+                    }
+                }
+                Collections.sort(matchedLive, (a, b) -> {
+                    if (a.langPriority != b.langPriority) return Integer.compare(a.langPriority, b.langPriority);
+                    return a.rawName.compareToIgnoreCase(b.rawName);
+                });
+                List<String> liveIds = new ArrayList<>(Math.min(matchedLive.size(), 150));
+                for (int i = 0; i < Math.min(matchedLive.size(), 150); i++) {
+                    liveIds.add(matchedLive.get(i).id);
+                }
+                list.addAll(fetchChannelsByIdsOrdered(liveIds));
             }
         }
 
@@ -1337,41 +1742,25 @@ public class KeoDatabase extends SQLiteOpenHelper {
     public List<ChannelItem> searchChannelsByPersonName(String fullPersonName, String streamType) {
         List<ChannelItem> list = new ArrayList<>();
         if (fullPersonName == null || fullPersonName.trim().isEmpty()) return list;
-        String cleanPerson = stripAccents(fullPersonName).toLowerCase(java.util.Locale.ROOT).trim();
+        String cleanPerson = stripAccentsLowerFast(fullPersonName).trim();
         String[] nameTokens = cleanPerson.split("\\s+");
-
-        Set<String> actorChannelIds = new HashSet<>();
-        SQLiteDatabase db = getReadableDatabase();
-        Cursor ac = null;
-        try {
-            String firstToken = nameTokens[0];
-            ac = db.rawQuery("SELECT channel_id, actor_name FROM movie_actors WHERE actor_name LIKE ? OR actor_name LIKE ?",
-                    new String[]{"%" + cleanPerson + "%", "%" + firstToken + "%"});
-            while (ac != null && ac.moveToNext()) {
-                String cid = ac.getString(0);
-                String aName = ac.getString(1);
-                if (cid != null && aName != null) {
-                    String aNorm = stripAccents(aName).toLowerCase(java.util.Locale.ROOT);
-                    if (containsAllWholeWords(aNorm, nameTokens)) {
-                        actorChannelIds.add(cid);
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        } finally {
-            if (ac != null) try { ac.close(); } catch (Exception ignored) {}
-        }
+        if (nameTokens.length == 0 || nameTokens[0].isEmpty()) return list;
 
         List<VodCatalogEntry> catalog = ensureVodCatalogIndex();
         List<VodCatalogEntry> matched = new ArrayList<>();
+        boolean filterByType = (streamType != null && !streamType.isEmpty() && !"all".equalsIgnoreCase(streamType));
+        String firstToken = nameTokens[0];
+
         for (VodCatalogEntry e : catalog) {
-            if (streamType != null && !streamType.isEmpty() && !"all".equalsIgnoreCase(streamType)) {
-                if (!streamType.equalsIgnoreCase(e.streamType)) continue;
+            if (filterByType && !streamType.equalsIgnoreCase(e.streamType)) continue;
+            boolean isMatch = false;
+            if (!e.castNorm.isEmpty() && e.castNorm.contains(firstToken) && containsAllWholeWords(e.castNorm, nameTokens)) {
+                isMatch = true;
+            } else if (!e.directorNorm.isEmpty() && e.directorNorm.contains(firstToken) && containsAllWholeWords(e.directorNorm, nameTokens)) {
+                isMatch = true;
+            } else if (e.normFull.contains(firstToken) && containsAllWholeWords(e.normFull, nameTokens)) {
+                isMatch = true;
             }
-            boolean isMatch = actorChannelIds.contains(e.id)
-                    || containsAllWholeWords(e.castNorm, nameTokens)
-                    || containsAllWholeWords(e.directorNorm, nameTokens)
-                    || containsAllWholeWords(e.normFull, nameTokens);
             if (isMatch) {
                 matched.add(e);
             }
@@ -1389,6 +1778,18 @@ public class KeoDatabase extends SQLiteOpenHelper {
         return fetchChannelsByIdsOrdered(ids);
     }
 
+    private static String stripTrailingSingleDigit(String s) {
+        if (s == null) return "";
+        int len = s.length();
+        if (len >= 3 && s.charAt(len - 2) == ' ') {
+            char last = s.charAt(len - 1);
+            if (last >= '1' && last <= '9') {
+                return s.substring(0, len - 2).trim();
+            }
+        }
+        return s;
+    }
+
     private static void addYearToKey(Map<String, Set<Integer>> map, String key, int year) {
         if (map == null || key == null || key.isEmpty() || year <= 0) return;
         Set<Integer> set = map.get(key);
@@ -1403,12 +1804,12 @@ public class KeoDatabase extends SQLiteOpenHelper {
         if (map == null || rawTitle == null || year <= 0) return;
         String cleaned = extractCleanTitle(rawTitle);
         if (cleaned.length() < 2) return;
-        String normFull = normalizeTitleForMatch(cleaned);
+        String normFull = normalizeCleanedTitle(cleaned);
         if (normFull.length() < 2) return;
 
         addYearToKey(map, normFull, year);
         addYearToKey(map, normFull + " 1", year);
-        String rootFull = normFull.replaceAll("\\s+[1-9]$", "").trim();
+        String rootFull = stripTrailingSingleDigit(normFull);
         if (rootFull.length() >= 4) {
             addYearToKey(map, rootFull, year);
         }
@@ -1417,20 +1818,20 @@ public class KeoDatabase extends SQLiteOpenHelper {
         if (noArt.length() >= 4 && !noArt.equals(normFull)) {
             addYearToKey(map, noArt, year);
             addYearToKey(map, noArt + " 1", year);
-            String rootNoArt = noArt.replaceAll("\\s+[1-9]$", "").trim();
+            String rootNoArt = stripTrailingSingleDigit(noArt);
             if (rootNoArt.length() >= 4) {
                 addYearToKey(map, rootNoArt, year);
             }
         }
 
-        String[] parts = PAT_SUBTITLE_SPLIT.split(cleaned);
-        if (parts.length > 1) {
-            String normBase = normalizeTitleForMatch(parts[0].trim());
-            String normSub = normalizeTitleForMatch(parts[1].trim());
+        String[] parts = splitSubtitleFast(cleaned);
+        if (parts != null) {
+            String normBase = normalizeCleanedTitle(parts[0]);
+            String normSub = normalizeCleanedTitle(parts[1]);
             if (normBase.length() >= 4) {
                 addYearToKey(map, normBase, year);
                 addYearToKey(map, normBase + " 1", year);
-                String baseRoot = normBase.replaceAll("\\s+[1-9]$", "").trim();
+                String baseRoot = stripTrailingSingleDigit(normBase);
                 if (baseRoot.length() >= 4) {
                     addYearToKey(map, baseRoot, year);
                     if (normSub.length() >= 4) {
@@ -1441,7 +1842,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 if (baseNoArt.length() >= 4) {
                     addYearToKey(map, baseNoArt, year);
                     addYearToKey(map, baseNoArt + " 1", year);
-                    String baseNoArtRoot = baseNoArt.replaceAll("\\s+[1-9]$", "").trim();
+                    String baseNoArtRoot = stripTrailingSingleDigit(baseNoArt);
                     if (baseNoArtRoot.length() >= 4) {
                         addYearToKey(map, baseNoArtRoot, year);
                     }
@@ -1479,10 +1880,19 @@ public class KeoDatabase extends SQLiteOpenHelper {
         return false;
     }
 
+    private static boolean isAllDigits(String s) {
+        if (s == null || s.isEmpty()) return false;
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c < '0' || c > '9') return false;
+        }
+        return true;
+    }
+
     private static void incrementRootCount(Map<String, Integer> rootCounts, String candidateRoot, Set<String> seenRootsInSameTitle) {
         if (candidateRoot == null) return;
-        String root = candidateRoot.replaceAll("\\s+[1-9]$", "").trim();
-        if (root.length() >= 5 && !root.matches("^\\d+$") && !GENERIC_FRANCHISE_STOPWORDS.contains(root)) {
+        String root = stripTrailingSingleDigit(candidateRoot);
+        if (root.length() >= 5 && !isAllDigits(root) && !GENERIC_FRANCHISE_STOPWORDS.contains(root)) {
             if (seenRootsInSameTitle.add(root)) {
                 Integer cur = rootCounts.get(root);
                 rootCounts.put(root, cur == null ? 1 : (cur + 1));
@@ -1498,17 +1908,17 @@ public class KeoDatabase extends SQLiteOpenHelper {
         List<ChannelItem> list = new ArrayList<>();
         if (titles == null || titles.isEmpty()) return list;
 
-        Set<String> exactTargets = new HashSet<>();
+        Set<String> exactTargets = new HashSet<>(titles.size() * 3);
         Set<String> franchiseRoots = new HashSet<>();
         Map<String, Integer> rootCounts = new HashMap<>();
 
         for (String t : titles) {
             if (t == null) continue;
             String cleaned = extractCleanTitle(t);
-            if (cleaned.length() < 2 || cleaned.matches("^\\d+$")) continue;
+            if (cleaned.length() < 2 || isAllDigits(cleaned)) continue;
 
-            String normFull = normalizeTitleForMatch(cleaned);
-            if (normFull.length() < 2 || normFull.matches("^\\d+$")) continue;
+            String normFull = normalizeCleanedTitle(cleaned);
+            if (normFull.length() < 2 || isAllDigits(normFull)) continue;
 
             Set<String> seenRoots = new HashSet<>(4);
             exactTargets.add(normFull);
@@ -1526,13 +1936,11 @@ public class KeoDatabase extends SQLiteOpenHelper {
             }
 
             // Subtitle separated ONLY by ':' or whitespace-surrounded dash (' - ', ' – ', ' — ')
-            String[] parts = PAT_SUBTITLE_SPLIT.split(cleaned);
-            if (parts.length > 1) {
-                String baseRaw = parts[0].trim();
-                String subRaw = parts[1].trim();
-                String normBase = normalizeTitleForMatch(baseRaw);
-                String normSub = normalizeTitleForMatch(subRaw);
-                if (normBase.length() >= 4 && !normBase.matches("^\\d+$")) {
+            String[] parts = splitSubtitleFast(cleaned);
+            if (parts != null) {
+                String normBase = normalizeCleanedTitle(parts[0]);
+                String normSub = normalizeCleanedTitle(parts[1]);
+                if (normBase.length() >= 4 && !isAllDigits(normBase)) {
                     exactTargets.add(normBase);
                     exactTargets.add(normBase + " 1");
                     String baseNoArt = stripLeadingArticle(normBase);
@@ -1545,7 +1953,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
                         incrementRootCount(rootCounts, baseNoArt, seenRoots);
                     }
                     if (normSub.length() >= 4) {
-                        String baseRoot = normBase.replaceAll("\\s+[1-9]$", "").trim();
+                        String baseRoot = stripTrailingSingleDigit(normBase);
                         if (baseRoot.length() >= 4) {
                             exactTargets.add(baseRoot + " " + normSub);
                         }
@@ -1554,7 +1962,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
             }
         }
 
-        // Only promote a root to franchiseRoots if it appears in >= 2 titles/variants of this person OR has explicit sequel 2/3
+        // Only promote a root to franchiseRoots if it appears in >= 3 variants of this person OR has explicit sequel 2/3
         for (Map.Entry<String, Integer> entry : rootCounts.entrySet()) {
             String root = entry.getKey();
             int count = entry.getValue();
@@ -1569,14 +1977,37 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
         if (exactTargets.isEmpty()) return list;
 
-        // Scan 100% of the in-memory VOD & Series catalog (never truncates at 2500 rows!)
-        List<VodCatalogEntry> catalog = ensureVodCatalogIndex();
-        List<VodCatalogEntry> matchedEntries = new ArrayList<>();
+        // Ensure in-memory multi-index is built
+        ensureVodCatalogIndex();
+        Map<String, List<VodCatalogEntry>> byNormTitle = vodByNormTitle;
+        Map<String, List<VodCatalogEntry>> byFirstWord = vodByFirstWord;
+        if (byNormTitle == null) return list;
 
-        for (VodCatalogEntry e : catalog) {
-            if (streamType != null && !streamType.isEmpty() && !"all".equalsIgnoreCase(streamType)) {
-                if (!streamType.equalsIgnoreCase(e.streamType)) continue;
+        // Collect candidate entries in O(1) via hash index instead of scanning 150,000 catalog items!
+        Set<VodCatalogEntry> candidateEntries = new HashSet<>(256);
+        for (String target : exactTargets) {
+            List<VodCatalogEntry> hits = byNormTitle.get(target);
+            if (hits != null) {
+                candidateEntries.addAll(hits);
             }
+        }
+        if (!franchiseRoots.isEmpty() && byFirstWord != null) {
+            for (String root : franchiseRoots) {
+                String fw = extractFirstWord(root);
+                List<VodCatalogEntry> wordHits = byFirstWord.get(fw);
+                if (wordHits != null) {
+                    candidateEntries.addAll(wordHits);
+                }
+            }
+        }
+
+        if (candidateEntries.isEmpty()) return list;
+
+        List<VodCatalogEntry> matchedEntries = new ArrayList<>(candidateEntries.size());
+        boolean filterByType = (streamType != null && !streamType.isEmpty() && !"all".equalsIgnoreCase(streamType));
+
+        for (VodCatalogEntry e : candidateEntries) {
+            if (filterByType && !streamType.equalsIgnoreCase(e.streamType)) continue;
 
             String matchedKey = null;
             if (exactTargets.contains(e.normFull)) {
@@ -1588,8 +2019,8 @@ public class KeoDatabase extends SQLiteOpenHelper {
             // Check base title before ':' or ' - ' (e.g. "|FR| Rambo 1 : First Blood", "|FR| Rambo 4 : John Rambo", "|FR| Rocky 6 : Rocky Balboa")
             if (matchedKey == null && e.normBase.length() >= 4) {
                 if (exactTargets.contains(e.normBase) || exactTargets.contains(e.normBaseNoArt)) {
-                    String baseRoot = e.normBase.replaceAll("\\s+[1-9]$", "").trim();
-                    String baseNoArtRoot = e.normBaseNoArt.replaceAll("\\s+[1-9]$", "").trim();
+                    String baseRoot = stripTrailingSingleDigit(e.normBase);
+                    String baseNoArtRoot = stripTrailingSingleDigit(e.normBaseNoArt);
                     if (franchiseRoots.contains(baseRoot)
                             || franchiseRoots.contains(baseNoArtRoot)
                             || (!e.normSub.isEmpty() && exactTargets.contains(e.normSub))) {
@@ -1599,16 +2030,20 @@ public class KeoDatabase extends SQLiteOpenHelper {
             }
 
             // Check franchise prefix + sequel number or known subtitle when IPTV title omits ':' / '-' (e.g. "|FR| Rambo 1 First Blood")
-            if (matchedKey == null && e.normFull.length() >= 6) {
+            if (matchedKey == null && e.normFull.length() >= 6 && !franchiseRoots.isEmpty()) {
                 for (String root : franchiseRoots) {
+                    int rLen = root.length();
                     String candidate = null;
-                    if (e.normFull.startsWith(root + " ")) {
-                        candidate = e.normFull.substring(root.length() + 1).trim();
-                    } else if (e.normNoArt.startsWith(root + " ")) {
-                        candidate = e.normNoArt.substring(root.length() + 1).trim();
+                    if (e.normFull.length() > rLen + 1 && e.normFull.charAt(rLen) == ' ' && e.normFull.startsWith(root)) {
+                        candidate = e.normFull.substring(rLen + 1).trim();
+                    } else if (e.normNoArt.length() > rLen + 1 && e.normNoArt.charAt(rLen) == ' ' && e.normNoArt.startsWith(root)) {
+                        candidate = e.normNoArt.substring(rLen + 1).trim();
                     }
                     if (candidate != null && !candidate.isEmpty()) {
-                        if (candidate.matches("^[1-9](\\b.*|$)")
+                        char firstCh = candidate.charAt(0);
+                        boolean startsWithSeqDigit = (firstCh >= '1' && firstCh <= '9')
+                                && (candidate.length() == 1 || !Character.isLetterOrDigit(candidate.charAt(1)));
+                        if (startsWithSeqDigit
                                 || exactTargets.contains(candidate)
                                 || exactTargets.contains(stripLeadingArticle(candidate))) {
                             matchedKey = root;
@@ -1640,7 +2075,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
     public void indexPersonForChannels(List<ChannelItem> items, String personName, boolean asDirector, boolean asActor) {
         if (items == null || items.isEmpty() || personName == null || personName.trim().isEmpty()) return;
         String cleanPerson = personName.trim();
-        String cleanPersonNorm = stripAccents(cleanPerson).toLowerCase(java.util.Locale.ROOT);
+        String cleanPersonNorm = stripAccentsLowerFast(cleanPerson);
         Map<String, VodCatalogEntry> byId = vodCatalogById;
         SQLiteDatabase db = getWritableDatabase();
         db.beginTransaction();
@@ -1651,27 +2086,29 @@ public class KeoDatabase extends SQLiteOpenHelper {
                 ContentValues cv = new ContentValues();
                 VodCatalogEntry cachedEntry = (byId != null) ? byId.get(item.id) : null;
                 if (asActor) {
+                    boolean alreadyInCache = (cachedEntry != null && cachedEntry.castNorm != null && cachedEntry.castNorm.contains(cleanPersonNorm));
                     String existingCast = item.cast != null ? item.cast : "";
-                    if (!existingCast.toLowerCase(java.util.Locale.ROOT).contains(cleanPerson.toLowerCase(java.util.Locale.ROOT))) {
+                    if (!alreadyInCache && !stripAccentsLowerFast(existingCast).contains(cleanPersonNorm)) {
                         String updatedCast = existingCast.isEmpty() ? cleanPerson : (existingCast + ", " + cleanPerson);
                         cv.put("movie_cast", updatedCast);
                         item.cast = updatedCast;
                         if (cachedEntry != null) {
-                            cachedEntry.castNorm = stripAccents(updatedCast).toLowerCase(java.util.Locale.ROOT);
+                            cachedEntry.castNorm = stripAccentsLowerFast(updatedCast);
                         }
+                        insActor.bindString(1, item.id);
+                        insActor.bindString(2, cleanPerson);
+                        insActor.bindString(3, item.streamType != null ? item.streamType : "vod");
+                        insActor.executeInsert();
                     }
-                    insActor.bindString(1, item.id);
-                    insActor.bindString(2, cleanPerson);
-                    insActor.bindString(3, item.streamType != null ? item.streamType : "vod");
-                    insActor.executeInsert();
                 }
                 if (asDirector) {
+                    boolean alreadyInCache = (cachedEntry != null && cachedEntry.directorNorm != null && cachedEntry.directorNorm.contains(cleanPersonNorm));
                     String existingDir = item.director != null ? item.director : "";
-                    if (!existingDir.toLowerCase(java.util.Locale.ROOT).contains(cleanPerson.toLowerCase(java.util.Locale.ROOT))) {
+                    if (!alreadyInCache && !stripAccentsLowerFast(existingDir).contains(cleanPersonNorm)) {
                         String updatedDir = existingDir.isEmpty() ? cleanPerson : (existingDir + ", " + cleanPerson);
                         cv.put("director", updatedDir);
                         item.director = updatedDir;
-                        if (cachedEntry != null && !cachedEntry.directorNorm.contains(cleanPersonNorm)) {
+                        if (cachedEntry != null) {
                             cachedEntry.directorNorm = cachedEntry.directorNorm.isEmpty() ? cleanPersonNorm : (cachedEntry.directorNorm + ", " + cleanPersonNorm);
                         }
                     }
@@ -1711,6 +2148,32 @@ public class KeoDatabase extends SQLiteOpenHelper {
         }
     }
 
+    public void updateChannelMetadataInMemoryOnly(String id, String cast, String director) {
+        if (id == null || id.isEmpty()) return;
+        Map<String, VodCatalogEntry> byId = vodCatalogById;
+        if (byId == null) return;
+        VodCatalogEntry mainEntry = byId.get(id);
+        if (mainEntry == null) return;
+        String castNormNew = (cast != null && !cast.isEmpty()) ? stripAccentsLowerFast(cast) : null;
+        String dirNormNew = (director != null && !director.isEmpty()) ? stripAccentsLowerFast(director) : null;
+        if (castNormNew != null) mainEntry.castNorm = castNormNew;
+        if (dirNormNew != null) mainEntry.directorNorm = dirNormNew;
+        Map<String, List<VodCatalogEntry>> byNormTitle = vodByNormTitle;
+        if (byNormTitle != null && !mainEntry.normFull.isEmpty()) {
+            List<VodCatalogEntry> siblings = byNormTitle.get(mainEntry.normFull);
+            if (siblings != null) {
+                for (VodCatalogEntry sib : siblings) {
+                    if (sib == null || sib.id.equals(id)) continue;
+                    if (!mainEntry.streamType.equalsIgnoreCase(sib.streamType)) continue;
+                    if (!sib.normFull.equals(mainEntry.normFull)) continue;
+                    if (mainEntry.year > 0 && sib.year > 0 && Math.abs(mainEntry.year - sib.year) > 1) continue;
+                    if (castNormNew != null) sib.castNorm = castNormNew;
+                    if (dirNormNew != null) sib.directorNorm = dirNormNew;
+                }
+            }
+        }
+    }
+
     public void updateChannelMetadata(String id, String cast, String director, String plot, String genre, String releaseDate, String rating) {
         if (id == null || id.isEmpty()) return;
         SQLiteDatabase db = getWritableDatabase();
@@ -1728,66 +2191,34 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
             Map<String, VodCatalogEntry> byId = vodCatalogById;
             VodCatalogEntry mainEntry = (byId != null) ? byId.get(id) : null;
+            String castNormNew = (cast != null) ? stripAccentsLowerFast(cast) : null;
+            String dirNormNew = (director != null) ? stripAccentsLowerFast(director) : null;
             if (mainEntry != null) {
-                if (cast != null) mainEntry.castNorm = stripAccents(cast).toLowerCase(java.util.Locale.ROOT);
-                if (director != null) mainEntry.directorNorm = stripAccents(director).toLowerCase(java.util.Locale.ROOT);
+                if (castNormNew != null) mainEntry.castNorm = castNormNew;
+                if (dirNormNew != null) mainEntry.directorNorm = dirNormNew;
             }
 
-            String st = "vod";
-            String rawName = null;
-            Cursor c = null;
-            try {
-                c = db.rawQuery("SELECT stream_type, name FROM channels WHERE id = ? LIMIT 1", new String[]{id});
-                if (c != null && c.moveToFirst()) {
-                    st = c.getString(0);
-                    rawName = c.getString(1);
-                }
-            } catch (Exception ignored) {
-            } finally {
-                if (c != null) try { c.close(); } catch (Exception ignored) {}
-            }
-
+            String st = (mainEntry != null) ? mainEntry.streamType : "vod";
             if (cast != null && !cast.trim().isEmpty()) {
                 saveActorsForChannel(db, id, cast, st);
             }
 
-            // Propagate metadata to sibling versions of the same movie/series (e.g. VO, VF, 4K, FHD)
-            if (rawName != null && !rawName.trim().isEmpty()) {
-                String cleanTitle = extractCleanTitle(rawName);
-                if (cleanTitle != null && cleanTitle.length() >= 3) {
-                    String cleanUnacc = stripAccents(cleanTitle).toLowerCase(java.util.Locale.ROOT);
-                    Cursor siblingCursor = null;
-                    try {
-                        siblingCursor = db.rawQuery(
-                            "SELECT id, name FROM channels WHERE stream_type = ? AND name LIKE ? AND id != ?",
-                            new String[]{st, "%" + cleanTitle + "%", id}
-                        );
-                        List<String> siblingIds = new ArrayList<>();
-                        while (siblingCursor != null && siblingCursor.moveToNext()) {
-                            String sibId = siblingCursor.getString(0);
-                            String sibName = siblingCursor.getString(1);
-                            String sibClean = stripAccents(extractCleanTitle(sibName)).toLowerCase(java.util.Locale.ROOT);
-                            if (sibClean.equals(cleanUnacc)) {
-                                siblingIds.add(sibId);
-                            }
+            // O(1) in-memory sibling propagation via vodByNormTitle (zero SQLite full-table LIKE scan!)
+            Map<String, List<VodCatalogEntry>> byNormTitle = vodByNormTitle;
+            if (mainEntry != null && byNormTitle != null && !mainEntry.normFull.isEmpty()) {
+                List<VodCatalogEntry> siblings = byNormTitle.get(mainEntry.normFull);
+                if (siblings != null) {
+                    for (VodCatalogEntry sib : siblings) {
+                        if (sib == null || sib.id.equals(id)) continue;
+                        if (!st.equalsIgnoreCase(sib.streamType)) continue;
+                        if (!sib.normFull.equals(mainEntry.normFull)) continue;
+                        if (mainEntry.year > 0 && sib.year > 0 && Math.abs(mainEntry.year - sib.year) > 1) continue;
+                        db.update("channels", cv, "id = ?", new String[]{sib.id});
+                        if (cast != null && !cast.trim().isEmpty()) {
+                            saveActorsForChannel(db, sib.id, cast, st);
                         }
-                        if (!siblingIds.isEmpty()) {
-                            for (String sibId : siblingIds) {
-                                db.update("channels", cv, "id = ?", new String[]{sibId});
-                                if (cast != null && !cast.trim().isEmpty()) {
-                                    saveActorsForChannel(db, sibId, cast, st);
-                                }
-                                VodCatalogEntry sibEntry = (byId != null) ? byId.get(sibId) : null;
-                                if (sibEntry != null) {
-                                    if (cast != null) sibEntry.castNorm = stripAccents(cast).toLowerCase(java.util.Locale.ROOT);
-                                    if (director != null) sibEntry.directorNorm = stripAccents(director).toLowerCase(java.util.Locale.ROOT);
-                                }
-                            }
-                        }
-                    } catch (Exception e) {
-                        android.util.Log.w("KeoDatabase", "update sibling metadata error: " + e.getMessage());
-                    } finally {
-                        if (siblingCursor != null) try { siblingCursor.close(); } catch (Exception ignored) {}
+                        if (castNormNew != null) sib.castNorm = castNormNew;
+                        if (dirNormNew != null) sib.directorNorm = dirNormNew;
                     }
                 }
             }

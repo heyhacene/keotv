@@ -579,6 +579,47 @@ public class XtreamClient {
         return list;
     }
 
+    public static String fetchTmdbUrl(String urlStr) throws Exception {
+        Exception lastEx = null;
+        for (int attempt = 0; attempt < 2; attempt++) {
+            try {
+                URL url = new URL(urlStr);
+                HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setRequestProperty("User-Agent", USER_AGENT);
+                conn.setRequestProperty("Accept-Encoding", "gzip");
+                conn.setRequestProperty("Accept", "application/json");
+                conn.setRequestProperty("Connection", "keep-alive");
+                conn.setConnectTimeout(3500);
+                conn.setReadTimeout(4500);
+
+                int code = conn.getResponseCode();
+                if (code != 200) {
+                    conn.disconnect();
+                    throw new Exception("TMDB HTTP " + code);
+                }
+
+                InputStream in = conn.getInputStream();
+                if ("gzip".equalsIgnoreCase(conn.getContentEncoding())) {
+                    in = new GZIPInputStream(in);
+                }
+
+                BufferedReader reader = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8), 16384);
+                StringBuilder sb = new StringBuilder(32768);
+                char[] buf = new char[8192];
+                int read;
+                while ((read = reader.read(buf, 0, buf.length)) != -1) {
+                    sb.append(buf, 0, read);
+                }
+                reader.close();
+                return sb.toString();
+            } catch (Exception e) {
+                lastEx = e;
+            }
+        }
+        throw lastEx != null ? lastEx : new Exception("TMDB network error");
+    }
+
     public static String fetchUrl(String urlStr) throws Exception {
         String currentUrl = urlStr;
         int redirects = 0;

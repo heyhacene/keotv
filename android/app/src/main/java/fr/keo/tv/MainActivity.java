@@ -236,6 +236,9 @@ public class MainActivity extends AppCompatActivity {
             }
             setupAdapters();
             loadLocalData();
+            if (db != null) {
+                db.warmUpSearchIndexAsync();
+            }
 
             // Post-launch: check playlist only after window is attached to avoid BadTokenException
             getWindow().getDecorView().post(() -> {
@@ -511,8 +514,8 @@ public class MainActivity extends AppCompatActivity {
                             return;
                         }
                         // Use 850ms debounce on deletion (so holding backspace never triggers intermediate searches)
-                        // and do NOT run TMDB person lookup on a partial deleted string.
-                        final long delayMs = isDeletion ? 850L : 520L;
+                        // and 300ms on typing for snappy responsiveness.
+                        final long delayMs = isDeletion ? 850L : 300L;
                         final boolean allowPersonEnrichment = !isDeletion;
                         pendingInputSearchRunnable = () -> performGlobalSearch(text, globalSearchFilter, null, false, allowPersonEnrichment);
                         searchHandler.postDelayed(pendingInputSearchRunnable, delayMs);
@@ -1003,6 +1006,9 @@ public class MainActivity extends AppCompatActivity {
         performGlobalSearch(query, filter, sourceItemToIndex, sourceItemToIndex != null, true);
     }
 
+    private static final Map<String, JsonObject> tmdbPersonSearchCache = new ConcurrentHashMap<>();
+    private static final Map<Integer, JsonObject> tmdbPersonCreditsCache = new ConcurrentHashMap<>();
+
     private void performGlobalSearch(String query, String filter, final KeoDatabase.ChannelItem sourceItemToIndex, final boolean forcePersonSearch, final boolean allowTmdbPersonEnrichment) {
         final String q = query != null ? query.replace('\u00A0', ' ').trim() : "";
         if (pendingInputSearchRunnable != null) {
@@ -1031,9 +1037,9 @@ public class MainActivity extends AppCompatActivity {
             tvSearchResultsCount.setText("Recherche en cours pour '" + q + "'...");
         }
 
-        new Thread(() -> {
-            if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
-            if (sourceItemToIndex != null && sourceItemToIndex.id != null) {
+        if (sourceItemToIndex != null && sourceItemToIndex.id != null) {
+            db.updateChannelMetadataInMemoryOnly(sourceItemToIndex.id, sourceItemToIndex.cast, sourceItemToIndex.director);
+            new Thread(() -> {
                 try {
                     db.updateChannelMetadata(
                             sourceItemToIndex.id,
@@ -1045,8 +1051,10 @@ public class MainActivity extends AppCompatActivity {
                             sourceItemToIndex.rating
                     );
                 } catch (Exception ignored) {}
-            }
+            }).start();
+        }
 
+        new Thread(() -> {
             if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
             final String streamTypeFilter = "all".equals(filter) ? null : filter;
             final List<KeoDatabase.ChannelItem> results = db.searchChannels(q, streamTypeFilter);
@@ -1068,10 +1076,7 @@ public class MainActivity extends AppCompatActivity {
             });
 
             if (allowTmdbPersonEnrichment && q.length() >= 3 && !"live".equals(streamTypeFilter)) {
-                pendingTmdbSearchRunnable = () -> new Thread(() -> {
-                    enrichSearchResultsWithActorCredits(q, streamTypeFilter, currentResults, myGen, forcePersonSearch);
-                }).start();
-                searchHandler.postDelayed(pendingTmdbSearchRunnable, forcePersonSearch ? 10L : 150L);
+                enrichSearchResultsWithActorCredits(q, streamTypeFilter, currentResults, myGen, forcePersonSearch);
             }
         }).start();
     }
@@ -1161,11 +1166,16 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
-            String enc = URLEncoder.encode(q, "UTF-8");
-            String searchUrl = "https://api.themoviedb.org/3/search/person?api_key=f090bb54758cabf231fb605d3e3e0468&query=" + enc + "&language=fr-FR";
-            String searchJson = XtreamClient.fetchUrl(searchUrl);
+            JsonObject searchObj = tmdbPersonSearchCache.get(qLower);
+            if (searchObj == null) {
+                String enc = URLEncoder.encode(q, "UTF-8");
+                String searchUrl = "https://api.themoviedb.org/3/search/person?api_key=f090bb54758cabf231fb605d3e3e0468&query=" + enc + "&language=fr-FR";
+                String searchJson = XtreamClient.fetchTmdbUrl(searchUrl);
+                if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
+                searchObj = JsonParser.parseString(searchJson).getAsJsonObject();
+                tmdbPersonSearchCache.put(qLower, searchObj);
+            }
             if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
-            JsonObject searchObj = JsonParser.parseString(searchJson).getAsJsonObject();
             JsonArray results = searchObj.has("results") && searchObj.get("results").isJsonArray()
                     ? searchObj.getAsJsonArray("results") : null;
             if (results == null || results.size() == 0) return;
@@ -1175,7 +1185,7 @@ public class MainActivity extends AppCompatActivity {
             for (int i = 0; i < Math.min(10, results.size()); i++) {
                 JsonObject p = results.get(i).getAsJsonObject();
                 String name = p.has("name") && !p.get("name").isJsonNull() ? p.get("name").getAsString() : "";
-                String nameNorm = KeoDatabase.stripAccents(name).toLowerCase(Locale.ROOT).trim();
+                String nameNorm = KeoDatabase.stripAccentsLowerFast(name).trim();
                 double pop = p.has("popularity") && !p.get("popularity").isJsonNull() ? p.get("popularity").getAsDouble() : 0.0;
                 String dept = p.has("known_for_department") && !p.get("known_for_department").isJsonNull() ? p.get("known_for_department").getAsString() : "";
                 boolean isActorOrDirector = "Acting".equalsIgnoreCase(dept) || "Directing".equalsIgnoreCase(dept);
@@ -1234,17 +1244,22 @@ public class MainActivity extends AppCompatActivity {
 
             int personId = bestPerson.get("id").getAsInt();
             final String personName = bestPerson.has("name") ? bestPerson.get("name").getAsString() : q;
-            final String personNameNorm = KeoDatabase.stripAccents(personName).toLowerCase(Locale.ROOT).trim();
+            final String personNameNorm = KeoDatabase.stripAccentsLowerFast(personName).trim();
             final boolean isExactPersonQuery = forcePersonSearch || personNameNorm.equals(qLower);
             final String[] personTokens = personNameNorm.split("\\s+");
             final String personSurname = personTokens.length > 1 ? personTokens[personTokens.length - 1] : personNameNorm;
             final String knownDept = bestPerson.has("known_for_department") ? bestPerson.get("known_for_department").getAsString() : "Acting";
             final boolean isDirector = "Directing".equalsIgnoreCase(knownDept);
 
-            String creditsUrl = "https://api.themoviedb.org/3/person/" + personId + "/combined_credits?api_key=f090bb54758cabf231fb605d3e3e0468&language=fr-FR";
-            String creditsJson = XtreamClient.fetchUrl(creditsUrl);
+            JsonObject creditsObj = tmdbPersonCreditsCache.get(personId);
+            if (creditsObj == null) {
+                String creditsUrl = "https://api.themoviedb.org/3/person/" + personId + "/combined_credits?api_key=f090bb54758cabf231fb605d3e3e0468&language=fr-FR";
+                String creditsJson = XtreamClient.fetchTmdbUrl(creditsUrl);
+                if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
+                creditsObj = JsonParser.parseString(creditsJson).getAsJsonObject();
+                tmdbPersonCreditsCache.put(personId, creditsObj);
+            }
             if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
-            JsonObject creditsObj = JsonParser.parseString(creditsJson).getAsJsonObject();
 
             List<String> titles = new ArrayList<>(600);
             Set<String> seenTitleStrings = new HashSet<>(600);
@@ -1393,12 +1408,6 @@ public class MainActivity extends AppCompatActivity {
             }
 
             if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
-            if (!directedBatch.isEmpty()) {
-                db.indexPersonForChannels(directedBatch, personName, true, false);
-            }
-            if (!actedBatch.isEmpty()) {
-                db.indexPersonForChannels(actedBatch, personName, false, true);
-            }
 
             sortSearchChannelItemsDeterministically(mergedResults);
             synchronized (currentResults) {
@@ -1435,6 +1444,14 @@ public class MainActivity extends AppCompatActivity {
                         }
                     }
                 });
+            }
+
+            // Persist person indexing in background AFTER UI is already updated!
+            if (!directedBatch.isEmpty()) {
+                db.indexPersonForChannels(directedBatch, personName, true, false);
+            }
+            if (!actedBatch.isEmpty()) {
+                db.indexPersonForChannels(actedBatch, personName, false, true);
             }
         } catch (Exception e) {
             Log.e(TAG, "enrichSearchResultsWithActorCredits error: " + e.getMessage());
@@ -1474,15 +1491,12 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // Only split subtitles on ':' or whitespace-surrounded dash (' - ', ' – ', ' — '), NEVER on hyphens inside words ("Camping-Car", "Au-delà")
-        String[] parts = KeoDatabase.PAT_SUBTITLE_SPLIT.split(t);
-        if (parts.length > 1) {
-            String base = parts[0].trim();
-            if (base.length() >= 4 && !base.matches("^\\d+$") && !list.contains(base)) {
-                list.add(base);
-                String baseUnacc = KeoDatabase.stripAccents(base);
-                if (!baseUnacc.equals(base) && !list.contains(baseUnacc)) {
-                    list.add(baseUnacc);
-                }
+        String base = KeoDatabase.splitSubtitleFast(t);
+        if (base != null && base.length() >= 4 && !base.matches("^\\d+$") && !list.contains(base)) {
+            list.add(base);
+            String baseUnacc = KeoDatabase.stripAccents(base);
+            if (!baseUnacc.equals(base) && !list.contains(baseUnacc)) {
+                list.add(baseUnacc);
             }
         }
 
@@ -2844,7 +2858,7 @@ public class MainActivity extends AppCompatActivity {
                 int tmdbId = -1;
                 if (isSeries) {
                     String searchUrl = "https://api.themoviedb.org/3/search/tv?api_key=f090bb54758cabf231fb605d3e3e0468&query=" + encTitle + "&language=fr-FR";
-                    String json = XtreamClient.fetchUrl(searchUrl);
+                    String json = XtreamClient.fetchTmdbUrl(searchUrl);
                     JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
                     JsonArray arr = obj.has("results") && obj.get("results").isJsonArray() ? obj.getAsJsonArray("results") : null;
                     if (arr != null && arr.size() > 0) {
@@ -2853,12 +2867,12 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     String searchUrl = "https://api.themoviedb.org/3/search/movie?api_key=f090bb54758cabf231fb605d3e3e0468&query=" + encTitle + "&language=fr-FR"
                             + (targetYear > 0 ? "&year=" + targetYear : "");
-                    String json = XtreamClient.fetchUrl(searchUrl);
+                    String json = XtreamClient.fetchTmdbUrl(searchUrl);
                     JsonObject obj = JsonParser.parseString(json).getAsJsonObject();
                     JsonArray arr = obj.has("results") && obj.get("results").isJsonArray() ? obj.getAsJsonArray("results") : null;
                     if ((arr == null || arr.size() == 0) && targetYear > 0) {
                         String fallbackUrl = "https://api.themoviedb.org/3/search/movie?api_key=f090bb54758cabf231fb605d3e3e0468&query=" + encTitle + "&language=fr-FR";
-                        json = XtreamClient.fetchUrl(fallbackUrl);
+                        json = XtreamClient.fetchTmdbUrl(fallbackUrl);
                         obj = JsonParser.parseString(json).getAsJsonObject();
                         arr = obj.has("results") && obj.get("results").isJsonArray() ? obj.getAsJsonArray("results") : null;
                     }
@@ -2874,7 +2888,7 @@ public class MainActivity extends AppCompatActivity {
 
                 if (isSeries) {
                     String detailUrl = "https://api.themoviedb.org/3/tv/" + tmdbId + "?api_key=f090bb54758cabf231fb605d3e3e0468&append_to_response=credits&language=fr-FR";
-                    String detailJson = XtreamClient.fetchUrl(detailUrl);
+                    String detailJson = XtreamClient.fetchTmdbUrl(detailUrl);
                     JsonObject detailObj = JsonParser.parseString(detailJson).getAsJsonObject();
                     List<String> dirs = new ArrayList<>();
                     if (detailObj.has("created_by") && detailObj.get("created_by").isJsonArray()) {
@@ -2915,7 +2929,7 @@ public class MainActivity extends AppCompatActivity {
                     foundDirector = android.text.TextUtils.join(", ", dirs);
                 } else {
                     String credUrl = "https://api.themoviedb.org/3/movie/" + tmdbId + "/credits?api_key=f090bb54758cabf231fb605d3e3e0468&language=fr-FR";
-                    String credJson = XtreamClient.fetchUrl(credUrl);
+                    String credJson = XtreamClient.fetchTmdbUrl(credUrl);
                     JsonObject credObj = JsonParser.parseString(credJson).getAsJsonObject();
                     if (credObj.has("crew") && credObj.get("crew").isJsonArray()) {
                         JsonArray crew = credObj.getAsJsonArray("crew");
@@ -4384,6 +4398,7 @@ public class MainActivity extends AppCompatActivity {
                     tvStatusBadge.setText("✅ Prêt (" + liveCount + " chaînes, " + vodCount + " films, " + seriesCount + " séries)");
                     tvStatusBadge.setBackgroundColor(0xFF132E27);
                     loadLocalData();
+                    if (db != null) db.warmUpSearchIndexAsync();
                     Toast.makeText(MainActivity.this, "Synchronisation terminée avec succès !", Toast.LENGTH_LONG).show();
                 });
             }
