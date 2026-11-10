@@ -1491,12 +1491,15 @@ public class MainActivity extends AppCompatActivity {
         }
 
         // Only split subtitles on ':' or whitespace-surrounded dash (' - ', ' – ', ' — '), NEVER on hyphens inside words ("Camping-Car", "Au-delà")
-        String base = KeoDatabase.splitSubtitleFast(t);
-        if (base != null && base.length() >= 4 && !base.matches("^\\d+$") && !list.contains(base)) {
-            list.add(base);
-            String baseUnacc = KeoDatabase.stripAccents(base);
-            if (!baseUnacc.equals(base) && !list.contains(baseUnacc)) {
-                list.add(baseUnacc);
+        String[] parts = KeoDatabase.splitSubtitleFast(t);
+        if (parts != null && parts.length > 0) {
+            String base = parts[0].trim();
+            if (base.length() >= 4 && !base.matches("^\\d+$") && !list.contains(base)) {
+                list.add(base);
+                String baseUnacc = KeoDatabase.stripAccents(base);
+                if (!baseUnacc.equals(base) && !list.contains(baseUnacc)) {
+                    list.add(baseUnacc);
+                }
             }
         }
 
