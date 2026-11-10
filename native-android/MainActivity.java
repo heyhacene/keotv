@@ -439,12 +439,47 @@ public class MainActivity extends AppCompatActivity {
                 @Override
                 public void afterTextChanged(Editable s) {}
             });
+
+            etGlobalSearch.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        focusSearchFilterOrInput();
+                        return true;
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        if (btnSearchClear != null) {
+                            btnSearchClear.requestFocus();
+                            return true;
+                        }
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                        focusActiveSidebarButton();
+                        return true;
+                    }
+                }
+                return false;
+            });
         }
 
         if (btnSearchClear != null) {
             btnSearchClear.setOnClickListener(v -> {
                 if (etGlobalSearch != null) etGlobalSearch.setText("");
                 performGlobalSearch("", globalSearchFilter);
+            });
+
+            btnSearchClear.setOnKeyListener((v, keyCode, event) -> {
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                        if (etGlobalSearch != null) {
+                            etGlobalSearch.requestFocus();
+                            return true;
+                        }
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        focusSearchFilterOrInput();
+                        return true;
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        return true;
+                    }
+                }
+                return false;
             });
         }
 
@@ -460,10 +495,45 @@ public class MainActivity extends AppCompatActivity {
             performGlobalSearch(q, globalSearchFilter);
         };
 
-        if (btnSearchFilterAll != null) btnSearchFilterAll.setOnClickListener(filterListener);
-        if (btnSearchFilterLive != null) btnSearchFilterLive.setOnClickListener(filterListener);
-        if (btnSearchFilterVod != null) btnSearchFilterVod.setOnClickListener(filterListener);
-        if (btnSearchFilterSeries != null) btnSearchFilterSeries.setOnClickListener(filterListener);
+        View.OnKeyListener searchFilterKeyListener = (v, keyCode, event) -> {
+            if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                    if (etGlobalSearch != null) {
+                        etGlobalSearch.requestFocus();
+                        return true;
+                    }
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                    if (searchResultsAdapter != null && searchResultsAdapter.getItemCount() > 0 && recyclerSearchResults != null) {
+                        focusRecyclerViewItem(recyclerSearchResults, 0);
+                        return true;
+                    }
+                    return true;
+                } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                    if (v.getId() == R.id.btn_search_filter_all) {
+                        focusActiveSidebarButton();
+                        return true;
+                    }
+                }
+            }
+            return false;
+        };
+
+        if (btnSearchFilterAll != null) {
+            btnSearchFilterAll.setOnClickListener(filterListener);
+            btnSearchFilterAll.setOnKeyListener(searchFilterKeyListener);
+        }
+        if (btnSearchFilterLive != null) {
+            btnSearchFilterLive.setOnClickListener(filterListener);
+            btnSearchFilterLive.setOnKeyListener(searchFilterKeyListener);
+        }
+        if (btnSearchFilterVod != null) {
+            btnSearchFilterVod.setOnClickListener(filterListener);
+            btnSearchFilterVod.setOnKeyListener(searchFilterKeyListener);
+        }
+        if (btnSearchFilterSeries != null) {
+            btnSearchFilterSeries.setOnClickListener(filterListener);
+            btnSearchFilterSeries.setOnKeyListener(searchFilterKeyListener);
+        }
 
         // Quick in-bouquet search
         if (etSearch != null) {
@@ -487,6 +557,13 @@ public class MainActivity extends AppCompatActivity {
                         return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
                         focusCategoriesList();
+                        return true;
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                        if (channelsAdapter != null && channelsAdapter.getItemCount() > 0) {
+                            focusRecyclerViewItem(recyclerChannels, channelsAdapter.getItemCount() - 1);
+                        }
+                        return true;
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
                         return true;
                     }
                 }
@@ -526,6 +603,7 @@ public class MainActivity extends AppCompatActivity {
             if (panelSearch != null) panelSearch.setVisibility(View.VISIBLE);
             if (layoutContentSplit != null) layoutContentSplit.setVisibility(View.GONE);
             if (tvSectionTitle != null) tvSectionTitle.setText("🔍 RECHERCHE GLOBALE");
+            updateSearchFilterTabs();
             if (etGlobalSearch != null) {
                 etGlobalSearch.requestFocus();
             }
@@ -906,6 +984,22 @@ public class MainActivity extends AppCompatActivity {
         else if ("favs".equals(currentType) && btnNavFavs != null) btnNavFavs.requestFocus();
         else if ("search".equals(currentType) && btnNavSearch != null) btnNavSearch.requestFocus();
         else if (btnNavLive != null) btnNavLive.requestFocus();
+    }
+
+    private void focusSearchFilterOrInput() {
+        if ("all".equals(globalSearchFilter) && btnSearchFilterAll != null && btnSearchFilterAll.getVisibility() == View.VISIBLE) {
+            btnSearchFilterAll.requestFocus();
+        } else if ("live".equals(globalSearchFilter) && btnSearchFilterLive != null && btnSearchFilterLive.getVisibility() == View.VISIBLE) {
+            btnSearchFilterLive.requestFocus();
+        } else if ("vod".equals(globalSearchFilter) && btnSearchFilterVod != null && btnSearchFilterVod.getVisibility() == View.VISIBLE) {
+            btnSearchFilterVod.requestFocus();
+        } else if ("series".equals(globalSearchFilter) && btnSearchFilterSeries != null && btnSearchFilterSeries.getVisibility() == View.VISIBLE) {
+            btnSearchFilterSeries.requestFocus();
+        } else if (btnSearchFilterAll != null && btnSearchFilterAll.getVisibility() == View.VISIBLE) {
+            btnSearchFilterAll.requestFocus();
+        } else if (etGlobalSearch != null && etGlobalSearch.getVisibility() == View.VISIBLE) {
+            etGlobalSearch.requestFocus();
+        }
     }
 
     private void focusCategoriesList() {
@@ -1563,17 +1657,27 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private boolean handleCarouselDown(int currentPos, int totalCount, boolean isVod) {
+        return handleCarouselDown(recyclerChannels, currentPos, totalCount, isVod);
+    }
+
+    private boolean handleCarouselDown(RecyclerView rv, int currentPos, int totalCount, boolean isVod) {
         if (totalCount <= 0) return true;
         lastTopReachedTime = 0;
 
         int span = isVod ? (findViewById(R.id.sidebar) != null ? 7 : 3) : 1;
         int lastRowStart = isVod ? ((totalCount - 1) - ((totalCount - 1) % span)) : (totalCount - 1);
+        RecyclerView targetRv = rv != null ? rv : recyclerChannels;
 
         if (currentPos < lastRowStart) {
             int nextPos = Math.min(currentPos + span, totalCount - 1);
             lastBottomReachedTime = 0;
-            focusRecyclerViewItem(recyclerChannels, nextPos);
+            focusRecyclerViewItem(targetRv, nextPos);
             return true; // Strictly consume! Focus must NEVER leak out of channels!
+        }
+
+        // In search mode or if targetRv is recyclerSearchResults: stay on last item, do not loop
+        if (targetRv == recyclerSearchResults || "search".equals(currentType)) {
+            return true;
         }
 
         // At bottom boundary: pause before wrapping around to top
@@ -1585,22 +1689,39 @@ public class MainActivity extends AppCompatActivity {
         if (now - lastBottomReachedTime >= CAROUSEL_PAUSE_MS) {
             lastBottomReachedTime = 0;
             int targetPos = isVod ? Math.min(currentPos % span, totalCount - 1) : 0;
-            focusRecyclerViewItem(recyclerChannels, targetPos);
+            focusRecyclerViewItem(targetRv, targetPos);
         }
         return true;
     }
 
     private boolean handleCarouselUp(int currentPos, int totalCount, boolean isVod) {
+        return handleCarouselUp(recyclerChannels, currentPos, totalCount, isVod);
+    }
+
+    private boolean handleCarouselUp(RecyclerView rv, int currentPos, int totalCount, boolean isVod) {
         if (totalCount <= 0) return true;
         lastBottomReachedTime = 0;
 
         int span = isVod ? (findViewById(R.id.sidebar) != null ? 7 : 3) : 1;
+        RecyclerView targetRv = rv != null ? rv : recyclerChannels;
 
         if (currentPos >= span) {
             int prevPos = Math.max(0, currentPos - span);
             lastTopReachedTime = 0;
-            focusRecyclerViewItem(recyclerChannels, prevPos);
+            focusRecyclerViewItem(targetRv, prevPos);
             return true; // Strictly consume! Focus must NEVER leak out of channels!
+        }
+
+        // If in search mode, pressing UP from top row should focus the active search filter or search input!
+        if (targetRv == recyclerSearchResults || "search".equals(currentType)) {
+            focusSearchFilterOrInput();
+            return true;
+        }
+
+        // If in live channels mode and etSearch is visible and reachable, pressing UP from top row focuses etSearch!
+        if (!isVod && etSearch != null && etSearch.getVisibility() == View.VISIBLE) {
+            etSearch.requestFocus();
+            return true;
         }
 
         // At top boundary: pause before wrapping around to bottom
@@ -1613,7 +1734,7 @@ public class MainActivity extends AppCompatActivity {
             lastTopReachedTime = 0;
             int lastRowStart = isVod ? ((totalCount - 1) - ((totalCount - 1) % span)) : (totalCount - 1);
             int targetPos = isVod ? Math.min(lastRowStart + (currentPos % span), totalCount - 1) : (totalCount - 1);
-            focusRecyclerViewItem(recyclerChannels, targetPos);
+            focusRecyclerViewItem(targetRv, targetPos);
         }
         return true;
     }
@@ -1747,7 +1868,7 @@ public class MainActivity extends AppCompatActivity {
             return;
         }
 
-        List<KeoDatabase.ChannelItem> currentList = channelsAdapter.getItems();
+        List<KeoDatabase.ChannelItem> currentList = "search".equals(currentType) && searchResultsAdapter != null ? searchResultsAdapter.getItems() : channelsAdapter.getItems();
         List<String> urls = new ArrayList<>();
         List<String> titles = new ArrayList<>();
         int startIndex = 0;
@@ -5174,6 +5295,19 @@ public class MainActivity extends AppCompatActivity {
         private int selectedPos = 0;
         private boolean isVodGrid = false;
         private int gridSpanCount = 7;
+        private RecyclerView attachedRecyclerView = null;
+
+        @Override
+        public void onAttachedToRecyclerView(@NonNull RecyclerView recyclerView) {
+            super.onAttachedToRecyclerView(recyclerView);
+            this.attachedRecyclerView = recyclerView;
+        }
+
+        public RecyclerView getTargetRecyclerView() {
+            if (attachedRecyclerView != null) return attachedRecyclerView;
+            if ("search".equals(currentType)) return recyclerSearchResults;
+            return recyclerChannels;
+        }
 
         public void setVodGridMode(boolean enabled, int spanCount) {
             this.isVodGrid = enabled;
@@ -5317,21 +5451,25 @@ public class MainActivity extends AppCompatActivity {
 
                         if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
                             if (pos + 1 < total) {
-                                focusRecyclerViewItem(recyclerChannels, pos + 1);
+                                focusRecyclerViewItem(getTargetRecyclerView(), pos + 1);
                             }
                             return true; // Strictly consume! Never let focus escape
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                            if ("search".equals(currentType) || getTargetRecyclerView() == recyclerSearchResults) {
+                                focusActiveSidebarButton();
+                                return true;
+                            }
                             if ((pos % span) == 0) {
                                 // 1st item in row: exit back to bouquet list!
                                 exitVodBouquetGrid();
                             } else if (pos - 1 >= 0) {
-                                focusRecyclerViewItem(recyclerChannels, pos - 1);
+                                focusRecyclerViewItem(getTargetRecyclerView(), pos - 1);
                             }
                             return true; // Strictly consume!
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                            return handleCarouselDown(pos, total, true);
+                            return handleCarouselDown(getTargetRecyclerView(), pos, total, true);
                         } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                            return handleCarouselUp(pos, total, true);
+                            return handleCarouselUp(getTargetRecyclerView(), pos, total, true);
                         }
                     } else if (event.getAction() == KeyEvent.ACTION_UP) {
                         if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
@@ -5457,14 +5595,21 @@ public class MainActivity extends AppCompatActivity {
                             if (!holder.isTimelineMode) {
                                 // NORMAL CHANNEL BROWSING MODE
                                 if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                                    return handleCarouselUp(curPos, total, false);
+                                    return handleCarouselUp(getTargetRecyclerView(), curPos, total, false);
                                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                                    return handleCarouselDown(curPos, total, false);
+                                    return handleCarouselDown(getTargetRecyclerView(), curPos, total, false);
                                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                                    if ("search".equals(currentType) || getTargetRecyclerView() == recyclerSearchResults) {
+                                        return true;
+                                    }
                                     // DPAD_RIGHT: Explore future programs on timeline
                                     holder.activateTimelineFuture();
                                     return true;
                                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                                    if ("search".equals(currentType) || getTargetRecyclerView() == recyclerSearchResults) {
+                                        focusActiveSidebarButton();
+                                        return true;
+                                    }
                                     if (event.getRepeatCount() == 0) {
                                         holder.leftLongPressTriggered = false;
                                         if (holder.leftLongPressRunnable != null) {
@@ -5496,10 +5641,10 @@ public class MainActivity extends AppCompatActivity {
                                     return holder.timelineStepLeft();
                                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
                                     holder.deactivateTimeline();
-                                    return handleCarouselUp(curPos, total, false);
+                                    return handleCarouselUp(getTargetRecyclerView(), curPos, total, false);
                                 } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                                     holder.deactivateTimeline();
-                                    return handleCarouselDown(curPos, total, false);
+                                    return handleCarouselDown(getTargetRecyclerView(), curPos, total, false);
                                 } else if (keyCode == KeyEvent.KEYCODE_BACK) {
                                     holder.deactivateTimeline();
                                     return true;
@@ -5507,6 +5652,9 @@ public class MainActivity extends AppCompatActivity {
                             }
                         } else if (event.getAction() == KeyEvent.ACTION_UP) {
                             if (!holder.isTimelineMode && keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                                if ("search".equals(currentType) || getTargetRecyclerView() == recyclerSearchResults) {
+                                    return true;
+                                }
                                 if (holder.leftLongPressRunnable != null) {
                                     holder.itemView.removeCallbacks(holder.leftLongPressRunnable);
                                 }
@@ -5525,13 +5673,21 @@ public class MainActivity extends AppCompatActivity {
                     });
 
                 } else {
-                    // Fallback when timeline not active (e.g. non-live list in live mode)
+                    // Fallback when timeline not active (e.g. non-live list in live mode, or search results)
                     holder.itemView.setFocusable(true);
+                    holder.itemView.setClickable(true);
                     if (holder.layoutEpgTimeline != null) holder.layoutEpgTimeline.setVisibility(View.GONE);
                     if (holder.tvEpg != null) {
                         holder.tvEpg.setVisibility(View.VISIBLE);
-                        holder.tvEpg.setText(item.groupName != null ? item.groupName : "Direct");
+                        holder.tvEpg.setText(item.groupName != null ? item.groupName : (item.streamType != null ? item.streamType.toUpperCase() : "Direct"));
                     }
+                    holder.itemView.setOnFocusChangeListener((v, hasFocus) -> {
+                        if (hasFocus) {
+                            holder.itemView.setSelected(true);
+                            selectedPos = holder.getBindingAdapterPosition();
+                            selectChannel(item);
+                        }
+                    });
                     holder.itemView.setOnClickListener(v -> {
                         selectChannel(item);
                         launchPlayerFullscreen();
@@ -5539,12 +5695,24 @@ public class MainActivity extends AppCompatActivity {
                     holder.itemView.setOnKeyListener((v, keyCode, event) -> {
                         if (event.getAction() == KeyEvent.ACTION_DOWN) {
                             int curPos = holder.getBindingAdapterPosition();
+                            if (curPos == RecyclerView.NO_POSITION) return false;
                             if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                                return handleCarouselUp(curPos, items.size(), false);
+                                return handleCarouselUp(getTargetRecyclerView(), curPos, items.size(), false);
                             } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                                return handleCarouselDown(curPos, items.size(), false);
+                                return handleCarouselDown(getTargetRecyclerView(), curPos, items.size(), false);
                             } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                                focusCategoriesList();
+                                if ("search".equals(currentType) || getTargetRecyclerView() == recyclerSearchResults) {
+                                    focusActiveSidebarButton();
+                                } else {
+                                    focusCategoriesList();
+                                }
+                                return true;
+                            } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                                return true;
+                            }
+                        } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                            if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER) {
+                                holder.itemView.performClick();
                                 return true;
                             }
                         }
@@ -5912,6 +6080,22 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
             if ("search".equals(currentType)) {
+                if (recyclerSearchResults != null && recyclerSearchResults.hasFocus()) {
+                    focusSearchFilterOrInput();
+                    return true;
+                }
+                if ((btnSearchFilterAll != null && btnSearchFilterAll.hasFocus()) ||
+                    (btnSearchFilterLive != null && btnSearchFilterLive.hasFocus()) ||
+                    (btnSearchFilterVod != null && btnSearchFilterVod.hasFocus()) ||
+                    (btnSearchFilterSeries != null && btnSearchFilterSeries.hasFocus()) ||
+                    (btnSearchClear != null && btnSearchClear.hasFocus())) {
+                    if (etGlobalSearch != null) etGlobalSearch.requestFocus();
+                    return true;
+                }
+                if (etGlobalSearch != null && etGlobalSearch.hasFocus() && etGlobalSearch.getText() != null && etGlobalSearch.getText().length() > 0) {
+                    etGlobalSearch.setText("");
+                    return true;
+                }
                 switchSection("live");
                 focusActiveSidebarButton();
                 return true;
@@ -5921,7 +6105,9 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             }
             if (etSearch != null && etSearch.hasFocus()) {
-                etSearch.setText("");
+                if (etSearch.getText() != null && etSearch.getText().length() > 0) {
+                    etSearch.setText("");
+                }
                 etSearch.clearFocus();
                 focusChannelsList();
                 return true;

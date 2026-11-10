@@ -239,8 +239,8 @@
             android:background="@drawable/bg_item_selector"
             android:singleLine="true"
             android:imeOptions="actionSearch"
-            android:focusable="false"
-            android:focusableInTouchMode="false" />
+            android:focusable="true"
+            android:focusableInTouchMode="true" />
 
     </LinearLayout>
 

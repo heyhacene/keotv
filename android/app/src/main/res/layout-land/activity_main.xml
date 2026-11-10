@@ -470,8 +470,12 @@
                                 android:background="@drawable/bg_item_selector"
                                 android:singleLine="true"
                                 android:imeOptions="actionSearch"
-                                android:focusable="false"
-                                android:focusableInTouchMode="false" />
+                                android:focusable="true"
+                                android:focusableInTouchMode="true"
+                                android:nextFocusDown="@+id/recycler_channels"
+                                android:nextFocusLeft="@+id/recycler_categories"
+                                android:nextFocusRight="@+id/et_search"
+                                android:nextFocusUp="@+id/recycler_channels" />
 
                         </LinearLayout>
 
@@ -766,7 +770,7 @@
                         android:descendantFocusability="afterDescendants"
                         android:nextFocusLeft="@+id/recycler_categories"
                         android:nextFocusRight="@+id/recycler_channels"
-                        android:nextFocusUp="@+id/recycler_channels"
+                        android:nextFocusUp="@+id/et_search"
                         android:nextFocusDown="@+id/recycler_channels"
                         android:scrollbars="vertical"
                         android:overScrollMode="always"
@@ -809,7 +813,10 @@
                         android:background="@drawable/bg_item_selector"
                         android:singleLine="true"
                         android:imeOptions="actionSearch"
-                        android:focusable="true" />
+                        android:focusable="true"
+                        android:nextFocusLeft="@+id/sidebar"
+                        android:nextFocusRight="@+id/btn_search_clear"
+                        android:nextFocusDown="@+id/btn_search_filter_all" />
 
                     <Button
                         android:id="@+id/btn_search_clear"
@@ -822,7 +829,10 @@
                         android:background="@drawable/bg_button_selector"
                         android:paddingStart="16dp"
                         android:paddingEnd="16dp"
-                        android:focusable="true" />
+                        android:focusable="true"
+                        android:nextFocusLeft="@+id/et_global_search"
+                        android:nextFocusRight="@+id/btn_search_clear"
+                        android:nextFocusDown="@+id/btn_search_filter_all" />
 
                 </LinearLayout>
 
@@ -843,7 +853,11 @@
                         android:textStyle="bold"
                         android:background="@drawable/bg_tab_selector"
                         android:layout_marginEnd="6dp"
-                        android:focusable="true" />
+                        android:focusable="true"
+                        android:nextFocusLeft="@+id/sidebar"
+                        android:nextFocusRight="@+id/btn_search_filter_live"
+                        android:nextFocusUp="@+id/et_global_search"
+                        android:nextFocusDown="@+id/recycler_search_results" />
 
                     <Button
                         android:id="@+id/btn_search_filter_live"
@@ -855,7 +869,11 @@
                         android:textStyle="bold"
                         android:background="@drawable/bg_tab_selector"
                         android:layout_marginEnd="6dp"
-                        android:focusable="true" />
+                        android:focusable="true"
+                        android:nextFocusLeft="@+id/btn_search_filter_all"
+                        android:nextFocusRight="@+id/btn_search_filter_vod"
+                        android:nextFocusUp="@+id/et_global_search"
+                        android:nextFocusDown="@+id/recycler_search_results" />
 
                     <Button
                         android:id="@+id/btn_search_filter_vod"
@@ -867,7 +885,11 @@
                         android:textStyle="bold"
                         android:background="@drawable/bg_tab_selector"
                         android:layout_marginEnd="6dp"
-                        android:focusable="true" />
+                        android:focusable="true"
+                        android:nextFocusLeft="@+id/btn_search_filter_live"
+                        android:nextFocusRight="@+id/btn_search_filter_series"
+                        android:nextFocusUp="@+id/et_global_search"
+                        android:nextFocusDown="@+id/recycler_search_results" />
 
                     <Button
                         android:id="@+id/btn_search_filter_series"
@@ -878,7 +900,11 @@
                         android:textSize="11sp"
                         android:textStyle="bold"
                         android:background="@drawable/bg_tab_selector"
-                        android:focusable="true" />
+                        android:focusable="true"
+                        android:nextFocusLeft="@+id/btn_search_filter_vod"
+                        android:nextFocusRight="@+id/btn_search_filter_series"
+                        android:nextFocusUp="@+id/et_global_search"
+                        android:nextFocusDown="@+id/recycler_search_results" />
 
                 </LinearLayout>
 
@@ -899,6 +925,8 @@
                     android:layout_marginTop="8dp"
                     android:focusable="false"
                     android:descendantFocusability="afterDescendants"
+                    android:nextFocusUp="@+id/btn_search_filter_all"
+                    android:nextFocusLeft="@+id/sidebar"
                     android:scrollbars="vertical" />
 
             </LinearLayout>
