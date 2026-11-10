@@ -772,32 +772,71 @@ public class KeoDatabase extends SQLiteOpenHelper {
         return count;
     }
 
+    public static String stripAccents(String s) {
+        if (s == null) return "";
+        String normalized = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD);
+        return normalized.replaceAll("\\p{InCombiningDiacriticalMarks}+", "");
+    }
+
+    public static String extractCleanTitle(String rawName) {
+        if (rawName == null) return "";
+        String s = rawName.trim();
+        if (s.startsWith("|")) {
+            int lastPipe = s.lastIndexOf('|', Math.min(25, s.length() - 1));
+            if (lastPipe >= 0 && lastPipe < s.length() - 1) {
+                s = s.substring(lastPipe + 1).trim();
+            }
+        }
+        if (s.startsWith("[")) {
+            int lastBracket = s.lastIndexOf(']', Math.min(25, s.length() - 1));
+            if (lastBracket >= 0 && lastBracket < s.length() - 1) {
+                s = s.substring(lastBracket + 1).trim();
+            }
+        }
+        s = s.replaceAll("^[A-Za-z]{2,6}\\s*[:\\-]\\s*", "");
+        s = s.replaceAll("(?i)\\s*\\[(VF|VO|VOSTFR|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|HEVC|1080P|720P)\\]", "");
+        s = s.replaceAll("(?i)\\s*\\((VF|VO|VOSTFR|TRUEFRENCH|MULTI|EN|FR|4K|UHD|FHD|HD|HEVC|1080P|720P)\\)", "");
+        s = s.replaceAll("\\s*\\((19|20)\\d{2}\\)", "");
+        s = s.replaceAll("\\s*\\[(19|20)\\d{2}\\]", "");
+        s = s.replaceAll("(?i)\\s*\\b(4K|UHD|FHD|HD|HEVC|1080p|720p)\\b", "");
+        return s.trim();
+    }
+
     public List<ChannelItem> searchChannels(String query, String streamType) {
         List<ChannelItem> list = new ArrayList<>();
         if (query == null || query.trim().isEmpty()) return list;
         SQLiteDatabase db = getReadableDatabase();
-        String q = "%" + query.trim() + "%";
+        String trimmed = query.trim();
+        String q = "%" + trimmed + "%";
+        String qClean = "%" + extractCleanTitle(trimmed) + "%";
+        String qUnaccented = "%" + stripAccents(trimmed) + "%";
 
         Cursor c = null;
         try {
             String sql = "SELECT DISTINCT " + CHANNEL_COLUMNS
-                    + " FROM channels WHERE (name LIKE ? OR movie_cast LIKE ? OR director LIKE ? OR plot LIKE ? "
-                    + " OR id IN (SELECT channel_id FROM movie_actors WHERE actor_name LIKE ?)) "
+                    + " FROM channels WHERE (name LIKE ? OR name LIKE ? OR name LIKE ? OR movie_cast LIKE ? OR movie_cast LIKE ? OR director LIKE ? OR director LIKE ? OR plot LIKE ? "
+                    + " OR id IN (SELECT channel_id FROM movie_actors WHERE actor_name LIKE ? OR actor_name LIKE ?)) "
                     + " AND is_separator = 0";
 
             List<String> argsList = new ArrayList<>();
             argsList.add(q);
+            argsList.add(qClean);
+            argsList.add(qUnaccented);
+            argsList.add(q);
+            argsList.add(qUnaccented);
+            argsList.add(q);
+            argsList.add(qUnaccented);
             argsList.add(q);
             argsList.add(q);
-            argsList.add(q);
-            argsList.add(q);
+            argsList.add(qUnaccented);
 
             if (streamType != null && !streamType.isEmpty() && !"all".equalsIgnoreCase(streamType)) {
                 sql += " AND stream_type = ?";
                 argsList.add(streamType);
             }
 
-            sql += " ORDER BY (CASE WHEN name LIKE ? THEN 0 WHEN movie_cast LIKE ? THEN 1 ELSE 2 END), name ASC LIMIT 100";
+            sql += " ORDER BY (CASE WHEN name LIKE ? THEN 0 WHEN movie_cast LIKE ? THEN 1 WHEN director LIKE ? THEN 2 ELSE 3 END), name ASC LIMIT 100";
+            argsList.add(q);
             argsList.add(q);
             argsList.add(q);
 
@@ -810,9 +849,10 @@ public class KeoDatabase extends SQLiteOpenHelper {
             if (c != null) { try { c.close(); } catch (Exception ignored) {} c = null; }
             try {
                 String sql = "SELECT id, name, num, group_id, group_name, stream_url, stream_type, logo, is_fav, resolution, is_separator, stream_id, tv_archive, tv_archive_duration, epg_channel_id "
-                        + " FROM channels WHERE name LIKE ? AND is_separator = 0";
+                        + " FROM channels WHERE (name LIKE ? OR name LIKE ?) AND is_separator = 0";
                 List<String> argsList = new ArrayList<>();
                 argsList.add(q);
+                argsList.add(qUnaccented);
                 if (streamType != null && !streamType.isEmpty() && !"all".equalsIgnoreCase(streamType)) {
                     sql += " AND stream_type = ?";
                     argsList.add(streamType);
@@ -846,7 +886,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
             if (s.matches("^\\d+$")) continue;
             if (!cleanTitles.contains(s)) {
                 cleanTitles.add(s);
-                if (cleanTitles.size() >= 60) break;
+                if (cleanTitles.size() >= 150) break;
             }
         }
         if (cleanTitles.isEmpty()) return list;
@@ -865,7 +905,7 @@ public class KeoDatabase extends SQLiteOpenHelper {
             sb.append(" AND stream_type = ?");
             args.add(streamType);
         }
-        sb.append(" ORDER BY name ASC LIMIT 100");
+        sb.append(" ORDER BY name ASC LIMIT 150");
 
         Cursor c = null;
         try {
@@ -920,18 +960,54 @@ public class KeoDatabase extends SQLiteOpenHelper {
 
             db.update("channels", cv, "id = ?", new String[]{id});
 
-            if (cast != null && !cast.trim().isEmpty()) {
-                Cursor c = null;
-                String st = "vod";
-                try {
-                    c = db.rawQuery("SELECT stream_type FROM channels WHERE id = ? LIMIT 1", new String[]{id});
-                    if (c != null && c.moveToFirst()) st = c.getString(0);
-                } catch (Exception ignored) {
-                } finally {
-                    if (c != null) try { c.close(); } catch (Exception ignored) {}
+            String st = "vod";
+            String rawName = null;
+            Cursor c = null;
+            try {
+                c = db.rawQuery("SELECT stream_type, name FROM channels WHERE id = ? LIMIT 1", new String[]{id});
+                if (c != null && c.moveToFirst()) {
+                    st = c.getString(0);
+                    rawName = c.getString(1);
                 }
+            } catch (Exception ignored) {
+            } finally {
+                if (c != null) try { c.close(); } catch (Exception ignored) {}
+            }
+
+            if (cast != null && !cast.trim().isEmpty()) {
                 saveActorsForChannel(db, id, cast, st);
             }
+
+            // Propagate metadata to sibling versions of the same movie/series (e.g. VO, VF, 4K, FHD)
+            if (rawName != null && !rawName.trim().isEmpty()) {
+                String cleanTitle = extractCleanTitle(rawName);
+                if (cleanTitle != null && cleanTitle.length() >= 3) {
+                    Cursor siblingCursor = null;
+                    try {
+                        siblingCursor = db.rawQuery(
+                            "SELECT id FROM channels WHERE stream_type = ? AND name LIKE ? AND id != ?",
+                            new String[]{st, "%" + cleanTitle + "%", id}
+                        );
+                        List<String> siblingIds = new ArrayList<>();
+                        while (siblingCursor != null && siblingCursor.moveToNext()) {
+                            siblingIds.add(siblingCursor.getString(0));
+                        }
+                        if (!siblingIds.isEmpty()) {
+                            for (String sibId : siblingIds) {
+                                db.update("channels", cv, "id = ?", new String[]{sibId});
+                                if (cast != null && !cast.trim().isEmpty()) {
+                                    saveActorsForChannel(db, sibId, cast, st);
+                                }
+                            }
+                        }
+                    } catch (Exception e) {
+                        android.util.Log.w("KeoDatabase", "update sibling metadata error: " + e.getMessage());
+                    } finally {
+                        if (siblingCursor != null) try { siblingCursor.close(); } catch (Exception ignored) {}
+                    }
+                }
+            }
+
             db.setTransactionSuccessful();
         } catch (Exception e) {
             android.util.Log.e("KeoDatabase", "updateChannelMetadata failed: " + e.getMessage());

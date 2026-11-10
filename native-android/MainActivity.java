@@ -116,6 +116,7 @@ public class MainActivity extends AppCompatActivity {
     private RecyclerView recyclerSearchResults;
     private ChannelsAdapter searchResultsAdapter;
     private String globalSearchFilter = "all";
+    private boolean isProgrammaticSearch = false;
     private Runnable pendingTmdbSearchRunnable = null;
     private final Handler searchHandler = new Handler(Looper.getMainLooper());
 
@@ -433,7 +434,9 @@ public class MainActivity extends AppCompatActivity {
 
                 @Override
                 public void onTextChanged(CharSequence s, int start, int before, int count) {
-                    performGlobalSearch(s != null ? s.toString() : "", globalSearchFilter);
+                    if (!isProgrammaticSearch) {
+                        performGlobalSearch(s != null ? s.toString() : "", globalSearchFilter);
+                    }
                 }
 
                 @Override
@@ -659,12 +662,14 @@ public class MainActivity extends AppCompatActivity {
         switchSection("search");
         globalSearchFilter = "all";
         updateSearchFilterTabs();
+        isProgrammaticSearch = true;
         if (etGlobalSearch != null) {
             etGlobalSearch.setText(query != null ? query : "");
             if (query != null && !query.isEmpty()) {
                 etGlobalSearch.setSelection(query.length());
             }
         }
+        isProgrammaticSearch = false;
         performGlobalSearch(query != null ? query : "", "all");
     }
 
@@ -736,9 +741,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void enrichSearchResultsWithActorCredits(String query, String streamTypeFilter, List<KeoDatabase.ChannelItem> currentResults) {
-        if (query == null || query.length() < 3) return;
+        if (query == null || query.trim().length() < 3) return;
+        final String q = query.trim();
         try {
-            String enc = URLEncoder.encode(query, "UTF-8");
+            String enc = URLEncoder.encode(q, "UTF-8");
             String searchUrl = "https://api.themoviedb.org/3/search/person?api_key=f090bb54758cabf231fb605d3e3e0468&query=" + enc + "&language=fr-FR";
             String searchJson = XtreamClient.fetchUrl(searchUrl);
             JsonObject searchObj = JsonParser.parseString(searchJson).getAsJsonObject();
@@ -747,47 +753,69 @@ public class MainActivity extends AppCompatActivity {
             if (results == null || results.size() == 0) return;
 
             JsonObject bestPerson = null;
-            for (int i = 0; i < Math.min(4, results.size()); i++) {
+            for (int i = 0; i < Math.min(6, results.size()); i++) {
                 JsonObject p = results.get(i).getAsJsonObject();
                 String name = p.has("name") ? p.get("name").getAsString() : "";
                 double pop = p.has("popularity") ? p.get("popularity").getAsDouble() : 0.0;
                 String dept = p.has("known_for_department") ? p.get("known_for_department").getAsString() : "";
-                if (name.equalsIgnoreCase(query)) {
+                if (name.equalsIgnoreCase(q)) {
                     bestPerson = p;
                     break;
                 }
-                if (bestPerson == null && (dept.equalsIgnoreCase("Acting") || dept.equalsIgnoreCase("Directing") || pop > 1.5)) {
+                if (bestPerson == null && (dept.equalsIgnoreCase("Acting") || dept.equalsIgnoreCase("Directing") || pop > 1.2)) {
                     bestPerson = p;
                 }
             }
             if (bestPerson == null) return;
 
             int personId = bestPerson.get("id").getAsInt();
-            final String personName = bestPerson.has("name") ? bestPerson.get("name").getAsString() : query;
+            final String personName = bestPerson.has("name") ? bestPerson.get("name").getAsString() : q;
+            final String knownDept = bestPerson.has("known_for_department") ? bestPerson.get("known_for_department").getAsString() : "Acting";
+            final boolean isDirector = "Directing".equalsIgnoreCase(knownDept);
 
-            // Fetch combined credits (movies + series)
+            // Fetch combined credits (both movies and series, cast + director crew)
             String creditsUrl = "https://api.themoviedb.org/3/person/" + personId + "/combined_credits?api_key=f090bb54758cabf231fb605d3e3e0468&language=fr-FR";
             String creditsJson = XtreamClient.fetchUrl(creditsUrl);
             JsonObject creditsObj = JsonParser.parseString(creditsJson).getAsJsonObject();
-            JsonArray castArr = creditsObj.has("cast") && creditsObj.get("cast").isJsonArray()
-                    ? creditsObj.getAsJsonArray("cast") : new JsonArray();
 
             List<String> titles = new ArrayList<>();
-            for (int i = 0; i < castArr.size(); i++) {
-                JsonObject c = castArr.get(i).getAsJsonObject();
-                if (c.has("title") && !c.get("title").isJsonNull()) {
-                    addTitleVariants(titles, c.get("title").getAsString());
+            final java.util.Set<String> directorTitles = new java.util.HashSet<>();
+            final java.util.Set<String> actorTitles = new java.util.HashSet<>();
+
+            // 1. Cast credits (Acting)
+            if (creditsObj.has("cast") && creditsObj.get("cast").isJsonArray()) {
+                JsonArray castArr = creditsObj.getAsJsonArray("cast");
+                for (int i = 0; i < castArr.size(); i++) {
+                    JsonObject c = castArr.get(i).getAsJsonObject();
+                    List<String> cur = new ArrayList<>();
+                    collectTitlesFromCredit(cur, c);
+                    for (String t : cur) {
+                        actorTitles.add(t.toLowerCase());
+                        actorTitles.add(KeoDatabase.stripAccents(t).toLowerCase());
+                        if (!titles.contains(t)) titles.add(t);
+                    }
+                    if (titles.size() >= 200) break;
                 }
-                if (c.has("name") && !c.get("name").isJsonNull()) {
-                    addTitleVariants(titles, c.get("name").getAsString());
+            }
+
+            // 2. Crew credits (Directing)
+            if (creditsObj.has("crew") && creditsObj.get("crew").isJsonArray()) {
+                JsonArray crewArr = creditsObj.getAsJsonArray("crew");
+                for (int i = 0; i < crewArr.size(); i++) {
+                    JsonObject c = crewArr.get(i).getAsJsonObject();
+                    String job = c.has("job") ? c.get("job").getAsString() : "";
+                    String dept = c.has("department") ? c.get("department").getAsString() : "";
+                    if ("Director".equalsIgnoreCase(job) || "Directing".equalsIgnoreCase(dept)) {
+                        List<String> cur = new ArrayList<>();
+                        collectTitlesFromCredit(cur, c);
+                        for (String t : cur) {
+                            directorTitles.add(t.toLowerCase());
+                            directorTitles.add(KeoDatabase.stripAccents(t).toLowerCase());
+                            if (!titles.contains(t)) titles.add(t);
+                        }
+                        if (titles.size() >= 200) break;
+                    }
                 }
-                if (c.has("original_title") && !c.get("original_title").isJsonNull()) {
-                    addTitleVariants(titles, c.get("original_title").getAsString());
-                }
-                if (c.has("original_name") && !c.get("original_name").isJsonNull()) {
-                    addTitleVariants(titles, c.get("original_name").getAsString());
-                }
-                if (titles.size() >= 75) break;
             }
 
             if (titles.isEmpty()) return;
@@ -811,11 +839,24 @@ public class MainActivity extends AppCompatActivity {
                     }
                     addedCount++;
                     try {
-                        String newCast = (newItem.cast != null && !newItem.cast.isEmpty())
-                                ? (newItem.cast.contains(personName) ? newItem.cast : newItem.cast + ", " + personName)
-                                : personName;
-                        newItem.cast = newCast;
-                        db.updateChannelMetadata(newItem.id, newCast, newItem.director, newItem.plot, newItem.genre, newItem.releaseDate, newItem.rating);
+                        String cleanNameLower = KeoDatabase.extractCleanTitle(newItem.name).toLowerCase();
+                        String cleanUnaccented = KeoDatabase.stripAccents(cleanNameLower);
+                        boolean isTitleDirected = isDirector || directorTitles.contains(cleanNameLower) || directorTitles.contains(cleanUnaccented);
+                        boolean isTitleActed = !isDirector || actorTitles.contains(cleanNameLower) || actorTitles.contains(cleanUnaccented);
+
+                        if (isTitleDirected) {
+                            String newDir = (newItem.director != null && !newItem.director.isEmpty())
+                                    ? (newItem.director.contains(personName) ? newItem.director : newItem.director + ", " + personName)
+                                    : personName;
+                            newItem.director = newDir;
+                        }
+                        if (isTitleActed) {
+                            String newCast = (newItem.cast != null && !newItem.cast.isEmpty())
+                                    ? (newItem.cast.contains(personName) ? newItem.cast : newItem.cast + ", " + personName)
+                                    : personName;
+                            newItem.cast = newCast;
+                        }
+                        db.updateChannelMetadata(newItem.id, newItem.cast, newItem.director, newItem.plot, newItem.genre, newItem.releaseDate, newItem.rating);
                     } catch (Exception ignored) {}
                 }
             }
@@ -823,9 +864,10 @@ public class MainActivity extends AppCompatActivity {
             if (addedCount > 0) {
                 final int totalCount = currentResults.size();
                 final int addedFromFilmography = addedCount;
+                final String roleLabel = isDirector ? "réalisateur" : "filmographie";
                 runOnUiThread(() -> {
                     if (tvSearchResultsCount != null) {
-                        tvSearchResultsCount.setText(totalCount + " résultat(s) pour '" + personName + "' (dont " + addedFromFilmography + " via filmographie)");
+                        tvSearchResultsCount.setText(totalCount + " résultat(s) pour '" + personName + "' (dont " + addedFromFilmography + " via " + roleLabel + ")");
                     }
                     if (searchResultsAdapter != null) {
                         searchResultsAdapter.setItems(new ArrayList<>(currentResults));
@@ -833,7 +875,22 @@ public class MainActivity extends AppCompatActivity {
                 });
             }
         } catch (Exception e) {
-            Log.d(TAG, "enrichSearchResultsWithActorCredits error: " + e.getMessage());
+            Log.e(TAG, "enrichSearchResultsWithActorCredits error: " + e.getMessage());
+        }
+    }
+
+    private void collectTitlesFromCredit(List<String> titles, JsonObject c) {
+        if (c.has("title") && !c.get("title").isJsonNull()) {
+            addTitleVariants(titles, c.get("title").getAsString());
+        }
+        if (c.has("original_title") && !c.get("original_title").isJsonNull()) {
+            addTitleVariants(titles, c.get("original_title").getAsString());
+        }
+        if (c.has("name") && !c.get("name").isJsonNull()) {
+            addTitleVariants(titles, c.get("name").getAsString());
+        }
+        if (c.has("original_name") && !c.get("original_name").isJsonNull()) {
+            addTitleVariants(titles, c.get("original_name").getAsString());
         }
     }
 
@@ -843,6 +900,16 @@ public class MainActivity extends AppCompatActivity {
         if (t.length() < 3) return;
         if (t.matches("^\\d+$")) return;
         if (!list.contains(t)) list.add(t);
+
+        String noDots = t.replace(".", "").trim();
+        if (!noDots.equals(t) && noDots.length() >= 3 && !list.contains(noDots)) {
+            list.add(noDots);
+        }
+
+        String unacc = KeoDatabase.stripAccents(t);
+        if (!unacc.equals(t) && unacc.length() >= 3 && !list.contains(unacc)) {
+            list.add(unacc);
+        }
 
         String lower = t.toLowerCase();
         String stripped = null;
@@ -2027,6 +2094,7 @@ public class MainActivity extends AppCompatActivity {
             ImageView ivPoster = view.findViewById(R.id.iv_movie_poster);
             TextView tvPlot = view.findViewById(R.id.tv_movie_plot);
             TextView tvDirector = view.findViewById(R.id.tv_movie_director);
+            Button btnMovieDirector = view.findViewById(R.id.btn_movie_director);
             TextView tvCast = view.findViewById(R.id.tv_movie_cast);
             LinearLayout layoutActorsContainer = view.findViewById(R.id.layout_actors_container);
             Button btnSearchActor = view.findViewById(R.id.btn_search_actor);
@@ -2066,7 +2134,24 @@ public class MainActivity extends AppCompatActivity {
                 tvPlot.setText(movieItem.plot);
             }
             if (movieItem.director != null && !movieItem.director.isEmpty()) {
-                tvDirector.setText("Réalisateur : " + movieItem.director);
+                if (btnMovieDirector != null) {
+                    btnMovieDirector.setText("🎬 Réalisateur : " + movieItem.director);
+                    btnMovieDirector.setVisibility(View.VISIBLE);
+                    btnMovieDirector.setOnClickListener(v -> {
+                        dialog.dismiss();
+                        if (movieItem.cast != null && !movieItem.cast.isEmpty()) {
+                            db.updateChannelMetadata(movieItem.id, movieItem.cast, movieItem.director, movieItem.plot, movieItem.genre, movieItem.releaseDate, movieItem.rating);
+                        }
+                        switchToSearch(movieItem.director);
+                    });
+                    if (tvDirector != null) tvDirector.setVisibility(View.GONE);
+                } else if (tvDirector != null) {
+                    tvDirector.setText("Réalisateur : " + movieItem.director);
+                    tvDirector.setVisibility(View.VISIBLE);
+                }
+            } else {
+                if (btnMovieDirector != null) btnMovieDirector.setVisibility(View.GONE);
+                if (tvDirector != null) tvDirector.setVisibility(View.GONE);
             }
             if (movieItem.cast != null && !movieItem.cast.isEmpty()) {
                 populateActorChips(layoutActorsContainer, movieItem.cast, dialog, movieItem, firstActor);
@@ -2120,9 +2205,6 @@ public class MainActivity extends AppCompatActivity {
                         if (info.has("plot") && !info.get("plot").isJsonNull()) {
                             tvPlot.setText(info.get("plot").getAsString());
                         }
-                        if (info.has("director") && !info.get("director").isJsonNull()) {
-                            tvDirector.setText("Réalisateur : " + info.get("director").getAsString());
-                        }
 
                         // Extract full metadata
                         String cast = "";
@@ -2153,6 +2235,23 @@ public class MainActivity extends AppCompatActivity {
                         movieItem.plot = plot;
                         movieItem.releaseDate = releaseDate;
                         movieItem.rating = rating;
+
+                        if (director != null && !director.isEmpty()) {
+                            if (btnMovieDirector != null) {
+                                btnMovieDirector.setText("🎬 Réalisateur : " + director);
+                                btnMovieDirector.setVisibility(View.VISIBLE);
+                                final String fDirectorSearch = director;
+                                btnMovieDirector.setOnClickListener(v -> {
+                                    dialog.dismiss();
+                                    db.updateChannelMetadata(movieItem.id, movieItem.cast, movieItem.director, movieItem.plot, movieItem.genre, movieItem.releaseDate, movieItem.rating);
+                                    switchToSearch(fDirectorSearch);
+                                });
+                                if (tvDirector != null) tvDirector.setVisibility(View.GONE);
+                            } else if (tvDirector != null) {
+                                tvDirector.setText("Réalisateur : " + director);
+                                tvDirector.setVisibility(View.VISIBLE);
+                            }
+                        }
 
                         // Persist metadata asynchronously in database
                         final String fCast = movieItem.cast;
@@ -2271,6 +2370,7 @@ public class MainActivity extends AppCompatActivity {
             TextView tvRating = view.findViewById(R.id.tv_series_rating);
             TextView tvMeta = view.findViewById(R.id.tv_series_meta);
             TextView tvDirector = view.findViewById(R.id.tv_series_director);
+            Button btnSeriesDirector = view.findViewById(R.id.btn_series_director);
             ImageView ivCover = view.findViewById(R.id.iv_series_cover);
             TextView tvPlot = view.findViewById(R.id.tv_series_plot);
             TextView tvCast = view.findViewById(R.id.tv_series_cast);
@@ -2307,8 +2407,25 @@ public class MainActivity extends AppCompatActivity {
             if (seriesItem.plot != null && !seriesItem.plot.isEmpty()) {
                 tvPlot.setText(seriesItem.plot);
             }
-            if (seriesItem.director != null && !seriesItem.director.isEmpty() && tvDirector != null) {
-                tvDirector.setText("Réalisateur : " + seriesItem.director);
+            if (seriesItem.director != null && !seriesItem.director.isEmpty()) {
+                if (btnSeriesDirector != null) {
+                    btnSeriesDirector.setText("🎬 Réalisateur : " + seriesItem.director);
+                    btnSeriesDirector.setVisibility(View.VISIBLE);
+                    btnSeriesDirector.setOnClickListener(v -> {
+                        dialog.dismiss();
+                        if (seriesItem.cast != null && !seriesItem.cast.isEmpty()) {
+                            db.updateChannelMetadata(seriesItem.id, seriesItem.cast, seriesItem.director, seriesItem.plot, seriesItem.genre, seriesItem.releaseDate, seriesItem.rating);
+                        }
+                        switchToSearch(seriesItem.director);
+                    });
+                    if (tvDirector != null) tvDirector.setVisibility(View.GONE);
+                } else if (tvDirector != null) {
+                    tvDirector.setText("Réalisateur : " + seriesItem.director);
+                    tvDirector.setVisibility(View.VISIBLE);
+                }
+            } else {
+                if (btnSeriesDirector != null) btnSeriesDirector.setVisibility(View.GONE);
+                if (tvDirector != null) tvDirector.setVisibility(View.GONE);
             }
             if (seriesItem.genre != null && !seriesItem.genre.isEmpty() && tvMeta != null) {
                 String meta = (seriesItem.releaseDate != null ? seriesItem.releaseDate + " • " : "") + seriesItem.genre;
@@ -2443,8 +2560,21 @@ public class MainActivity extends AppCompatActivity {
                         seriesItem.releaseDate = releaseDate;
                         seriesItem.rating = rating;
 
-                        if (tvDirector != null && !director.isEmpty()) {
-                            tvDirector.setText("Réalisateur : " + director);
+                        if (director != null && !director.isEmpty()) {
+                            if (btnSeriesDirector != null) {
+                                btnSeriesDirector.setText("🎬 Réalisateur : " + director);
+                                btnSeriesDirector.setVisibility(View.VISIBLE);
+                                final String fSeriesDir = director;
+                                btnSeriesDirector.setOnClickListener(v -> {
+                                    dialog.dismiss();
+                                    db.updateChannelMetadata(seriesItem.id, seriesItem.cast, seriesItem.director, seriesItem.plot, seriesItem.genre, seriesItem.releaseDate, seriesItem.rating);
+                                    switchToSearch(fSeriesDir);
+                                });
+                                if (tvDirector != null) tvDirector.setVisibility(View.GONE);
+                            } else if (tvDirector != null) {
+                                tvDirector.setText("Réalisateur : " + director);
+                                tvDirector.setVisibility(View.VISIBLE);
+                            }
                         }
                         if (tvMeta != null && (!genre.isEmpty() || !releaseDate.isEmpty())) {
                             tvMeta.setText((!releaseDate.isEmpty() ? releaseDate + " • " : "") + genre);

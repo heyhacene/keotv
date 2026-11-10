@@ -76,6 +76,22 @@
                 android:layout_marginTop="2dp" />
 
             <!-- Director -->
+            <Button
+                android:id="@+id/btn_series_director"
+                android:layout_width="wrap_content"
+                android:layout_height="30dp"
+                android:layout_marginTop="3dp"
+                android:background="@drawable/bg_button_selector"
+                android:textColor="#38BDF8"
+                android:textSize="11.5sp"
+                android:textStyle="bold"
+                android:text="🎬 Réalisateur : -"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp"
+                android:focusable="true"
+                android:clickable="true"
+                android:visibility="gone" />
+
             <TextView
                 android:id="@+id/tv_series_director"
                 android:layout_width="match_parent"
