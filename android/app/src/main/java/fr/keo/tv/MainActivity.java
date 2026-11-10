@@ -107,6 +107,7 @@ public class MainActivity extends AppCompatActivity {
 
     // Global Search UI
     private EditText etGlobalSearch;
+    private Button btnSearchBackspace;
     private Button btnSearchClear;
     private Button btnSearchFilterAll;
     private Button btnSearchFilterLive;
@@ -119,6 +120,8 @@ public class MainActivity extends AppCompatActivity {
     private boolean isProgrammaticSearch = false;
     private Runnable pendingInputSearchRunnable = null;
     private Runnable pendingTmdbSearchRunnable = null;
+    private Runnable backspaceRepeatRunnable = null;
+    private EditText activeBackspaceTarget = null;
     private final java.util.concurrent.atomic.AtomicInteger globalSearchGeneration = new java.util.concurrent.atomic.AtomicInteger(0);
     private final Handler searchHandler = new Handler(Looper.getMainLooper());
 
@@ -312,6 +315,7 @@ public class MainActivity extends AppCompatActivity {
 
         // Global search panel views
         etGlobalSearch = findViewById(R.id.et_global_search);
+        btnSearchBackspace = findViewById(R.id.btn_search_backspace);
         btnSearchClear = findViewById(R.id.btn_search_clear);
         btnSearchFilterAll = findViewById(R.id.btn_search_filter_all);
         btnSearchFilterLive = findViewById(R.id.btn_search_filter_live);
@@ -468,6 +472,10 @@ public class MainActivity extends AppCompatActivity {
 
         // Global Search setup
         if (etGlobalSearch != null) {
+            etGlobalSearch.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                    | android.text.InputType.TYPE_TEXT_VARIATION_FILTER);
+
             etGlobalSearch.addTextChangedListener(new TextWatcher() {
                 @Override
                 public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
@@ -476,6 +484,7 @@ public class MainActivity extends AppCompatActivity {
                 public void onTextChanged(CharSequence s, int start, int before, int count) {
                     if (!isProgrammaticSearch) {
                         final String text = s != null ? s.toString().trim() : "";
+                        final boolean isDeletion = before > count;
                         if (pendingInputSearchRunnable != null) {
                             searchHandler.removeCallbacks(pendingInputSearchRunnable);
                             pendingInputSearchRunnable = null;
@@ -486,18 +495,26 @@ public class MainActivity extends AppCompatActivity {
                         }
                         globalSearchGeneration.incrementAndGet();
                         if (text.length() < 2) {
-                            if (tvSearchResultsCount != null) {
-                                tvSearchResultsCount.setText(text.isEmpty()
-                                        ? "Saisissez un texte pour rechercher dans tous les catalogues."
-                                        : "Saisissez au moins 2 caractères pour lancer la recherche.");
-                            }
-                            if (searchResultsAdapter != null) {
-                                searchResultsAdapter.setItems(new ArrayList<>());
-                            }
+                            // Defer UI update slightly so IME continuous key-repeat on backspace is never interrupted by a layout pass
+                            pendingInputSearchRunnable = () -> {
+                                if (tvSearchResultsCount != null) {
+                                    tvSearchResultsCount.setText(text.isEmpty()
+                                            ? "Saisissez un texte pour rechercher dans tous les catalogues."
+                                            : "Saisissez au moins 2 caractères pour lancer la recherche.");
+                                }
+                                if (searchResultsAdapter != null) {
+                                    searchResultsAdapter.setItems(new ArrayList<>());
+                                }
+                            };
+                            searchHandler.postDelayed(pendingInputSearchRunnable, isDeletion ? 250 : 80);
                             return;
                         }
-                        pendingInputSearchRunnable = () -> performGlobalSearch(text, globalSearchFilter);
-                        searchHandler.postDelayed(pendingInputSearchRunnable, 380);
+                        // Use 850ms debounce on deletion (so holding backspace never triggers intermediate searches)
+                        // and do NOT run TMDB person lookup on a partial deleted string.
+                        final long delayMs = isDeletion ? 850L : 520L;
+                        final boolean allowPersonEnrichment = !isDeletion;
+                        pendingInputSearchRunnable = () -> performGlobalSearch(text, globalSearchFilter, null, false, allowPersonEnrichment);
+                        searchHandler.postDelayed(pendingInputSearchRunnable, delayMs);
                     }
                 }
 
@@ -505,20 +522,110 @@ public class MainActivity extends AppCompatActivity {
                 public void afterTextChanged(Editable s) {}
             });
 
+            etGlobalSearch.setOnEditorActionListener((v, actionId, event) -> {
+                if (actionId == android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+                        || actionId == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                    String q = etGlobalSearch.getText() != null ? etGlobalSearch.getText().toString().trim() : "";
+                    performGlobalSearch(q, globalSearchFilter, null, false, true);
+                    return true;
+                }
+                return false;
+            });
+
             etGlobalSearch.setOnKeyListener((v, keyCode, event) -> {
+                if (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL) {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                        if (event.getRepeatCount() == 0) {
+                            startContinuousBackspace(etGlobalSearch, 340L);
+                        }
+                    } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                        stopContinuousBackspace();
+                    }
+                    return false;
+                }
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    stopContinuousBackspace();
                     if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                         focusSearchFilterOrInput();
                         return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
                         if (focusHeaderBar()) return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        int selEnd = etGlobalSearch.getSelectionEnd();
+                        int len = etGlobalSearch.getText() != null ? etGlobalSearch.getText().length() : 0;
+                        if (selEnd >= len) {
+                            if (btnSearchBackspace != null && btnSearchBackspace.getVisibility() == View.VISIBLE) {
+                                btnSearchBackspace.requestFocus();
+                                return true;
+                            } else if (btnSearchClear != null) {
+                                btnSearchClear.requestFocus();
+                                return true;
+                            }
+                        }
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                        int selStart = etGlobalSearch.getSelectionStart();
+                        if (selStart <= 0) {
+                            focusActiveSidebarButton();
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            });
+        }
+
+        if (btnSearchBackspace != null) {
+            btnSearchBackspace.setOnClickListener(v -> {
+                deleteOneCharFromEditText(etGlobalSearch);
+            });
+
+            btnSearchBackspace.setOnTouchListener((v, event) -> {
+                if (event.getAction() == android.view.MotionEvent.ACTION_DOWN) {
+                    deleteOneCharFromEditText(etGlobalSearch);
+                    startContinuousBackspace(etGlobalSearch, 280L);
+                    return true;
+                } else if (event.getAction() == android.view.MotionEvent.ACTION_UP
+                        || event.getAction() == android.view.MotionEvent.ACTION_CANCEL) {
+                    stopContinuousBackspace();
+                    return true;
+                }
+                return false;
+            });
+
+            btnSearchBackspace.setOnFocusChangeListener((v, hasFocus) -> {
+                if (!hasFocus) stopContinuousBackspace();
+            });
+
+            btnSearchBackspace.setOnKeyListener((v, keyCode, event) -> {
+                if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER || keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                        if (event.getRepeatCount() == 0) {
+                            deleteOneCharFromEditText(etGlobalSearch);
+                            startContinuousBackspace(etGlobalSearch, 280L);
+                        }
+                        return true;
+                    } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                        stopContinuousBackspace();
+                        return true;
+                    }
+                }
+                if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    stopContinuousBackspace();
+                    if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+                        if (etGlobalSearch != null) {
+                            etGlobalSearch.requestFocus();
+                            return true;
+                        }
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
                         if (btnSearchClear != null) {
                             btnSearchClear.requestFocus();
                             return true;
                         }
-                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                        focusActiveSidebarButton();
+                        return true;
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+                        if (focusHeaderBar()) return true;
+                    } else if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
+                        focusSearchFilterOrInput();
                         return true;
                     }
                 }
@@ -528,6 +635,7 @@ public class MainActivity extends AppCompatActivity {
 
         if (btnSearchClear != null) {
             btnSearchClear.setOnClickListener(v -> {
+                stopContinuousBackspace();
                 isProgrammaticSearch = true;
                 if (etGlobalSearch != null) etGlobalSearch.setText("");
                 isProgrammaticSearch = false;
@@ -538,7 +646,10 @@ public class MainActivity extends AppCompatActivity {
             btnSearchClear.setOnKeyListener((v, keyCode, event) -> {
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
                     if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                        if (etGlobalSearch != null) {
+                        if (btnSearchBackspace != null && btnSearchBackspace.getVisibility() == View.VISIBLE) {
+                            btnSearchBackspace.requestFocus();
+                            return true;
+                        } else if (etGlobalSearch != null) {
                             etGlobalSearch.requestFocus();
                             return true;
                         }
@@ -609,6 +720,10 @@ public class MainActivity extends AppCompatActivity {
 
         // Quick in-bouquet search
         if (etSearch != null) {
+            etSearch.setInputType(android.text.InputType.TYPE_CLASS_TEXT
+                    | android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                    | android.text.InputType.TYPE_TEXT_VARIATION_FILTER);
+
             etSearch.addTextChangedListener(new TextWatcher() {
                 @Override
                 public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
@@ -623,13 +738,27 @@ public class MainActivity extends AppCompatActivity {
             });
 
             etSearch.setOnKeyListener((v, keyCode, event) -> {
+                if (keyCode == KeyEvent.KEYCODE_DEL || keyCode == KeyEvent.KEYCODE_FORWARD_DEL) {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                        if (event.getRepeatCount() == 0) {
+                            startContinuousBackspace(etSearch, 340L);
+                        }
+                    } else if (event.getAction() == KeyEvent.ACTION_UP) {
+                        stopContinuousBackspace();
+                    }
+                    return false;
+                }
                 if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                    stopContinuousBackspace();
                     if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
                         focusChannelsList();
                         return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
-                        focusCategoriesList();
-                        return true;
+                        int selStart = etSearch.getSelectionStart();
+                        if (selStart <= 0) {
+                            focusCategoriesList();
+                            return true;
+                        }
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
                         if (focusHeaderBar()) {
                             return true;
@@ -639,7 +768,11 @@ public class MainActivity extends AppCompatActivity {
                         }
                         return true;
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                        return true;
+                        int selEnd = etSearch.getSelectionEnd();
+                        int len = etSearch.getText() != null ? etSearch.getText().length() : 0;
+                        if (selEnd >= len) {
+                            return true;
+                        }
                     }
                 }
                 return false;
@@ -665,11 +798,65 @@ public class MainActivity extends AppCompatActivity {
         updateSidebarHighlights();
     }
 
+    private void deleteOneCharFromEditText(EditText target) {
+        if (target == null) return;
+        Editable editable = target.getText();
+        if (editable == null || editable.length() == 0) return;
+        int selStart = target.getSelectionStart();
+        int selEnd = target.getSelectionEnd();
+        if (selStart < 0 || selEnd < 0) {
+            int len = editable.length();
+            editable.delete(len - 1, len);
+            target.setSelection(editable.length());
+        } else if (selStart != selEnd) {
+            int min = Math.min(selStart, selEnd);
+            int max = Math.max(selStart, selEnd);
+            editable.delete(min, max);
+            target.setSelection(min);
+        } else if (selStart > 0) {
+            editable.delete(selStart - 1, selStart);
+            target.setSelection(selStart - 1);
+        } else if (editable.length() > 0) {
+            int len = editable.length();
+            editable.delete(len - 1, len);
+            target.setSelection(editable.length());
+        }
+    }
+
+    private void startContinuousBackspace(final EditText target, long initialDelayMs) {
+        stopContinuousBackspace();
+        if (target == null) return;
+        activeBackspaceTarget = target;
+        backspaceRepeatRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (activeBackspaceTarget == null || isFinishing() || isDestroyed()) return;
+                Editable ed = activeBackspaceTarget.getText();
+                if (ed == null || ed.length() == 0) {
+                    stopContinuousBackspace();
+                    return;
+                }
+                deleteOneCharFromEditText(activeBackspaceTarget);
+                searchHandler.postDelayed(this, 60L);
+            }
+        };
+        searchHandler.postDelayed(backspaceRepeatRunnable, initialDelayMs);
+    }
+
+    private void stopContinuousBackspace() {
+        if (backspaceRepeatRunnable != null) {
+            searchHandler.removeCallbacks(backspaceRepeatRunnable);
+            backspaceRepeatRunnable = null;
+        }
+        activeBackspaceTarget = null;
+    }
+
     private int dpToPx(int dp) {
         return (int) (dp * getResources().getDisplayMetrics().density + 0.5f);
     }
 
     public void switchSection(String section) {
+        stopContinuousBackspace();
         currentType = section;
         updateSidebarHighlights();
 
@@ -755,7 +942,8 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         isProgrammaticSearch = false;
-        performGlobalSearch(query != null ? query : "", "all", sourceItemToIndex);
+        boolean isPersonChipClick = (sourceItemToIndex != null) || (query != null && !query.trim().isEmpty());
+        performGlobalSearch(query != null ? query : "", "all", sourceItemToIndex, isPersonChipClick, true);
     }
 
     private void updateSidebarHighlights() {
@@ -783,10 +971,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void performGlobalSearch(String query, String filter) {
-        performGlobalSearch(query, filter, null);
+        performGlobalSearch(query, filter, null, false, true);
     }
 
     private void performGlobalSearch(String query, String filter, final KeoDatabase.ChannelItem sourceItemToIndex) {
+        performGlobalSearch(query, filter, sourceItemToIndex, sourceItemToIndex != null, true);
+    }
+
+    private void performGlobalSearch(String query, String filter, final KeoDatabase.ChannelItem sourceItemToIndex, final boolean forcePersonSearch, final boolean allowTmdbPersonEnrichment) {
         final String q = query != null ? query.replace('\u00A0', ' ').trim() : "";
         if (pendingInputSearchRunnable != null) {
             searchHandler.removeCallbacks(pendingInputSearchRunnable);
@@ -846,20 +1038,68 @@ public class MainActivity extends AppCompatActivity {
                 }
             });
 
-            if (q.length() >= 3 && !"live".equals(streamTypeFilter)) {
+            if (allowTmdbPersonEnrichment && q.length() >= 3 && !"live".equals(streamTypeFilter)) {
                 pendingTmdbSearchRunnable = () -> new Thread(() -> {
-                    enrichSearchResultsWithActorCredits(q, streamTypeFilter, currentResults, myGen);
+                    enrichSearchResultsWithActorCredits(q, streamTypeFilter, currentResults, myGen, forcePersonSearch);
                 }).start();
-                searchHandler.postDelayed(pendingTmdbSearchRunnable, 150);
+                searchHandler.postDelayed(pendingTmdbSearchRunnable, forcePersonSearch ? 10L : 150L);
             }
         }).start();
     }
 
-    private void enrichSearchResultsWithActorCredits(String query, String streamTypeFilter, List<KeoDatabase.ChannelItem> currentResults, final int myGen) {
+    private static void sortSearchChannelItemsDeterministically(List<KeoDatabase.ChannelItem> items) {
+        if (items == null || items.size() <= 1) return;
+        final Map<String, String> normCache = new HashMap<>(items.size() * 2);
+        final Map<String, Integer> langCache = new HashMap<>(items.size() * 2);
+        for (KeoDatabase.ChannelItem item : items) {
+            if (item == null || item.id == null) continue;
+            String raw = item.name != null ? item.name : "";
+            normCache.put(item.id, KeoDatabase.normalizeTitleForMatch(raw));
+            String upper = raw.toUpperCase(Locale.ROOT);
+            int lp = (upper.contains("FR") || upper.contains("VF") || upper.contains("VO") || upper.contains("MULTI")) ? 0 : 1;
+            langCache.put(item.id, lp);
+        }
+        Collections.sort(items, (a, b) -> {
+            boolean aVod = a.streamType != null && ("vod".equalsIgnoreCase(a.streamType) || "series".equalsIgnoreCase(a.streamType));
+            boolean bVod = b.streamType != null && ("vod".equalsIgnoreCase(b.streamType) || "series".equalsIgnoreCase(b.streamType));
+            if (aVod != bVod) return aVod ? -1 : 1;
+            String na = normCache.get(a.id);
+            String nb = normCache.get(b.id);
+            if (na != null && nb != null) {
+                int c = na.compareTo(nb);
+                if (c != 0) return c;
+            }
+            Integer la = langCache.get(a.id);
+            Integer lb = langCache.get(b.id);
+            if (la != null && lb != null && !la.equals(lb)) {
+                return Integer.compare(la, lb);
+            }
+            String ra = a.name != null ? a.name : "";
+            String rb = b.name != null ? b.name : "";
+            return ra.compareToIgnoreCase(rb);
+        });
+    }
+
+    private void enrichSearchResultsWithActorCredits(String query, String streamTypeFilter, List<KeoDatabase.ChannelItem> currentResults, final int myGen, final boolean forcePersonSearch) {
         if (query == null || query.trim().length() < 3) return;
         if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
         final String q = query.replace('\u00A0', ' ').trim();
         try {
+            String qLower = KeoDatabase.stripAccents(q).toLowerCase(Locale.ROOT).trim();
+            String qTitleNorm = KeoDatabase.normalizeTitleForMatch(q);
+
+            // Count how many current results matched directly by title (to avoid turning movie searches like "Rambo" into minor crew searches)
+            int directTitleMatchCount = 0;
+            synchronized (currentResults) {
+                for (KeoDatabase.ChannelItem item : currentResults) {
+                    if (item == null || item.name == null) continue;
+                    String itemNorm = KeoDatabase.normalizeTitleForMatch(item.name);
+                    if (itemNorm.equals(qTitleNorm) || itemNorm.startsWith(qTitleNorm + " ")) {
+                        directTitleMatchCount++;
+                    }
+                }
+            }
+
             String enc = URLEncoder.encode(q, "UTF-8");
             String searchUrl = "https://api.themoviedb.org/3/search/person?api_key=f090bb54758cabf231fb605d3e3e0468&query=" + enc + "&language=fr-FR";
             String searchJson = XtreamClient.fetchUrl(searchUrl);
@@ -871,13 +1111,13 @@ public class MainActivity extends AppCompatActivity {
 
             JsonObject bestPerson = null;
             double bestScore = -1.0;
-            String qLower = KeoDatabase.stripAccents(q).toLowerCase(Locale.ROOT);
             for (int i = 0; i < Math.min(10, results.size()); i++) {
                 JsonObject p = results.get(i).getAsJsonObject();
                 String name = p.has("name") && !p.get("name").isJsonNull() ? p.get("name").getAsString() : "";
-                String nameNorm = KeoDatabase.stripAccents(name).toLowerCase(Locale.ROOT);
+                String nameNorm = KeoDatabase.stripAccents(name).toLowerCase(Locale.ROOT).trim();
                 double pop = p.has("popularity") && !p.get("popularity").isJsonNull() ? p.get("popularity").getAsDouble() : 0.0;
                 String dept = p.has("known_for_department") && !p.get("known_for_department").isJsonNull() ? p.get("known_for_department").getAsString() : "";
+                boolean isActorOrDirector = "Acting".equalsIgnoreCase(dept) || "Directing".equalsIgnoreCase(dept);
 
                 int knownForVotes = 0;
                 if (p.has("known_for") && p.get("known_for").isJsonArray()) {
@@ -892,16 +1132,39 @@ public class MainActivity extends AppCompatActivity {
                     }
                 }
 
-                double score = knownForVotes + (pop * 15.0);
-                if (nameNorm.equals(qLower)) {
+                boolean exactNameMatch = nameNorm.equals(qLower);
+                boolean surnameMatch = nameNorm.endsWith(" " + qLower);
+                boolean firstNameMatch = nameNorm.startsWith(qLower + " ");
+
+                if (!forcePersonSearch) {
+                    // When the user typed in the search box manually:
+                    // 1. Must match full name, surname, or first name
+                    if (!exactNameMatch && !surnameMatch && !firstNameMatch) {
+                        continue;
+                    }
+                    // 2. If user typed a single word (not an exact full name), require a genuinely well-known actor/director
+                    if (!exactNameMatch) {
+                        if (!isActorOrDirector) continue;
+                        if (knownForVotes < 2500 && pop < 12.0) continue;
+                        // 3. If the query already matches 2+ movie titles directly (e.g. "Rambo", "Rocky"), only enrich if it's a major surname match
+                        if (directTitleMatchCount >= 2 && (!surnameMatch || knownForVotes < 15000)) {
+                            continue;
+                        }
+                    }
+                }
+
+                double score = knownForVotes + (pop * 20.0);
+                if (exactNameMatch) {
                     score += 500000.0;
-                } else if (nameNorm.endsWith(" " + qLower) || nameNorm.startsWith(qLower + " ")) {
-                    score += 15000.0;
+                } else if (surnameMatch) {
+                    score += 25000.0;
+                } else if (firstNameMatch) {
+                    score += 10000.0;
                 }
-                if ("Acting".equalsIgnoreCase(dept) || "Directing".equalsIgnoreCase(dept)) {
-                    score += 1000.0;
+                if (isActorOrDirector) {
+                    score += 2000.0;
                 }
-                if (score > bestScore && (knownForVotes > 20 || pop > 1.0 || nameNorm.equals(qLower))) {
+                if (score > bestScore && (knownForVotes > 20 || pop > 1.0 || exactNameMatch || forcePersonSearch)) {
                     bestScore = score;
                     bestPerson = p;
                 }
@@ -910,6 +1173,9 @@ public class MainActivity extends AppCompatActivity {
 
             int personId = bestPerson.get("id").getAsInt();
             final String personName = bestPerson.has("name") ? bestPerson.get("name").getAsString() : q;
+            final String personNameNorm = KeoDatabase.stripAccents(personName).toLowerCase(Locale.ROOT).trim();
+            final String[] personTokens = personNameNorm.split("\\s+");
+            final String personSurname = personTokens.length > 1 ? personTokens[personTokens.length - 1] : personNameNorm;
             final String knownDept = bestPerson.has("known_for_department") ? bestPerson.get("known_for_department").getAsString() : "Acting";
             final boolean isDirector = "Directing".equalsIgnoreCase(knownDept);
 
@@ -918,7 +1184,8 @@ public class MainActivity extends AppCompatActivity {
             if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
             JsonObject creditsObj = JsonParser.parseString(creditsJson).getAsJsonObject();
 
-            List<String> titles = new ArrayList<>();
+            List<String> titles = new ArrayList<>(600);
+            Set<String> seenTitleStrings = new HashSet<>(600);
             final java.util.Set<String> directorTitles = new java.util.HashSet<>();
             final java.util.Set<String> actorTitles = new java.util.HashSet<>();
 
@@ -944,9 +1211,8 @@ public class MainActivity extends AppCompatActivity {
                     for (String t : cur) {
                         String norm = KeoDatabase.normalizeTitleForMatch(t);
                         if (!norm.isEmpty()) directorTitles.add(norm);
-                        if (!titles.contains(t)) titles.add(t);
+                        if (seenTitleStrings.add(t)) titles.add(t);
                     }
-                    if (titles.size() >= 180) break;
                 }
             }
 
@@ -956,8 +1222,27 @@ public class MainActivity extends AppCompatActivity {
                 for (int i = 0; i < castArr.size(); i++) {
                     JsonObject c = castArr.get(i).getAsJsonObject();
                     String character = c.has("character") && !c.get("character").isJsonNull() ? c.get("character").getAsString().trim() : "";
-                    if (character.equalsIgnoreCase("Self") || character.startsWith("Self ") || character.equalsIgnoreCase("Himself") || character.equalsIgnoreCase("Herself") || character.contains("uncredited")) {
+                    String charLower = character.toLowerCase(Locale.ROOT);
+                    String mediaType = c.has("media_type") && !c.get("media_type").isJsonNull() ? c.get("media_type").getAsString() : "";
+                    int voteCount = c.has("vote_count") && !c.get("vote_count").isJsonNull() ? c.get("vote_count").getAsInt() : 0;
+                    int episodeCount = c.has("episode_count") && !c.get("episode_count").isJsonNull() ? c.get("episode_count").getAsInt() : 99;
+
+                    if (charLower.contains("uncredited") || charLower.contains("archive footage")) {
                         continue;
+                    }
+                    // Skip 1-episode TV guest appearances (e.g. talk shows, Saturday Night Live)
+                    if ("tv".equalsIgnoreCase(mediaType) && episodeCount <= 1) {
+                        continue;
+                    }
+                    if (charLower.equals("self") || charLower.startsWith("self ") || charLower.equals("himself") || charLower.equals("herself")) {
+                        String tFr = c.has("title") && !c.get("title").isJsonNull() ? c.get("title").getAsString()
+                                : (c.has("name") && !c.get("name").isJsonNull() ? c.get("name").getAsString() : "");
+                        String tNorm = KeoDatabase.stripAccents(tFr).toLowerCase(Locale.ROOT);
+                        boolean hasPersonSurnameInTitle = personSurname.length() >= 4 && tNorm.contains(personSurname);
+                        boolean isMajorDocMovie = "movie".equalsIgnoreCase(mediaType) && voteCount >= 80;
+                        if (!hasPersonSurnameInTitle && !isMajorDocMovie) {
+                            continue;
+                        }
                     }
                     castCredits.add(c);
                 }
@@ -966,47 +1251,59 @@ public class MainActivity extends AppCompatActivity {
                     int vb = b.has("vote_count") && !b.get("vote_count").isJsonNull() ? b.get("vote_count").getAsInt() : 0;
                     return Integer.compare(vb, va);
                 });
+                // Process ALL legitimate acting credits (no 250-string cutoff!)
                 for (JsonObject c : castCredits) {
                     List<String> cur = new ArrayList<>();
                     collectTitlesFromCredit(cur, c);
                     for (String t : cur) {
                         String norm = KeoDatabase.normalizeTitleForMatch(t);
                         if (!norm.isEmpty()) actorTitles.add(norm);
-                        if (!titles.contains(t)) titles.add(t);
+                        if (seenTitleStrings.add(t)) titles.add(t);
                     }
-                    if (titles.size() >= 250) break;
                 }
             }
 
-            if (titles.isEmpty() || myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
+            if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
 
-            List<KeoDatabase.ChannelItem> creditChannels = db.searchChannelsByTitles(titles, streamTypeFilter);
-            if (creditChannels.isEmpty() || myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
+            // Combine:
+            // 1) Local person search by resolved full personName + surname (so "Stallone" and "Sylvester Stallone" get identical DB matches)
+            // 2) Full in-memory catalog title search across all TMDB credits
+            List<KeoDatabase.ChannelItem> personDbChannels = db.searchChannelsByPersonName(personName, streamTypeFilter);
+            if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
+            List<KeoDatabase.ChannelItem> creditChannels = titles.isEmpty()
+                    ? new ArrayList<>()
+                    : db.searchChannelsByTitles(titles, streamTypeFilter);
+            if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
 
             java.util.Set<String> existingIds = new java.util.HashSet<>();
+            final List<KeoDatabase.ChannelItem> mergedResults = new ArrayList<>();
             synchronized (currentResults) {
                 for (KeoDatabase.ChannelItem item : currentResults) {
-                    existingIds.add(item.id);
+                    if (item != null && item.id != null && existingIds.add(item.id)) {
+                        mergedResults.add(item);
+                    }
                 }
             }
 
-            final List<KeoDatabase.ChannelItem> newlyAdded = new ArrayList<>();
+            for (KeoDatabase.ChannelItem pItem : personDbChannels) {
+                if (pItem != null && pItem.id != null && existingIds.add(pItem.id)) {
+                    mergedResults.add(pItem);
+                }
+            }
+
             List<KeoDatabase.ChannelItem> directedBatch = new ArrayList<>();
             List<KeoDatabase.ChannelItem> actedBatch = new ArrayList<>();
 
             for (KeoDatabase.ChannelItem newItem : creditChannels) {
-                if (!existingIds.contains(newItem.id)) {
-                    synchronized (currentResults) {
-                        currentResults.add(newItem);
-                        existingIds.add(newItem.id);
-                    }
-                    newlyAdded.add(newItem);
-                    String normItem = KeoDatabase.normalizeTitleForMatch(newItem.name);
-                    boolean isTitleDirected = directorTitles.contains(normItem) || (isDirector && !actorTitles.contains(normItem));
-                    boolean isTitleActed = actorTitles.contains(normItem) || (!isDirector && !directorTitles.contains(normItem));
-                    if (isTitleDirected) directedBatch.add(newItem);
-                    if (isTitleActed) actedBatch.add(newItem);
+                if (newItem == null || newItem.id == null) continue;
+                if (existingIds.add(newItem.id)) {
+                    mergedResults.add(newItem);
                 }
+                String normItem = KeoDatabase.normalizeTitleForMatch(newItem.name);
+                boolean isTitleDirected = directorTitles.contains(normItem) || (isDirector && !actorTitles.contains(normItem));
+                boolean isTitleActed = actorTitles.contains(normItem) || (!isDirector && !directorTitles.contains(normItem));
+                if (isTitleDirected) directedBatch.add(newItem);
+                if (isTitleActed) actedBatch.add(newItem);
             }
 
             if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
@@ -1017,17 +1314,22 @@ public class MainActivity extends AppCompatActivity {
                 db.indexPersonForChannels(actedBatch, personName, false, true);
             }
 
-            if (!newlyAdded.isEmpty() && myGen == globalSearchGeneration.get() && "search".equals(currentType)) {
-                final int totalCount = currentResults.size();
-                final int addedFromFilmography = newlyAdded.size();
-                final String roleLabel = (!directorTitles.isEmpty() && isDirector) ? "réalisateur" : "filmographie";
+            sortSearchChannelItemsDeterministically(mergedResults);
+            synchronized (currentResults) {
+                currentResults.clear();
+                currentResults.addAll(mergedResults);
+            }
+
+            if (myGen == globalSearchGeneration.get() && "search".equals(currentType)) {
+                final int totalCount = mergedResults.size();
+                final String roleLabel = (!directorTitles.isEmpty() && isDirector) ? "réalisateur" : "filmographie complète";
                 runOnUiThread(() -> {
                     if (myGen != globalSearchGeneration.get() || !"search".equals(currentType)) return;
                     if (tvSearchResultsCount != null) {
-                        tvSearchResultsCount.setText(totalCount + " résultat(s) pour '" + personName + "' (dont " + addedFromFilmography + " via " + roleLabel + ")");
+                        tvSearchResultsCount.setText(totalCount + " résultat(s) pour '" + personName + "' (" + roleLabel + ")");
                     }
                     if (searchResultsAdapter != null) {
-                        searchResultsAdapter.appendItems(newlyAdded);
+                        searchResultsAdapter.setItems(new ArrayList<>(mergedResults));
                     }
                 });
             }
@@ -6444,18 +6746,14 @@ public class MainActivity extends AppCompatActivity {
                     (btnSearchFilterLive != null && btnSearchFilterLive.hasFocus()) ||
                     (btnSearchFilterVod != null && btnSearchFilterVod.hasFocus()) ||
                     (btnSearchFilterSeries != null && btnSearchFilterSeries.hasFocus()) ||
+                    (btnSearchBackspace != null && btnSearchBackspace.hasFocus()) ||
                     (btnSearchClear != null && btnSearchClear.hasFocus())) {
+                    stopContinuousBackspace();
                     if (etGlobalSearch != null) etGlobalSearch.requestFocus();
                     return true;
                 }
                 if (etGlobalSearch != null && etGlobalSearch.hasFocus()) {
-                    if (etGlobalSearch.getText() != null && etGlobalSearch.getText().length() > 0) {
-                        isProgrammaticSearch = true;
-                        etGlobalSearch.setText("");
-                        isProgrammaticSearch = false;
-                        performGlobalSearch("", globalSearchFilter);
-                        return true;
-                    }
+                    stopContinuousBackspace();
                     focusActiveSidebarButton();
                     return true;
                 }

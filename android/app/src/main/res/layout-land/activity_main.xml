@@ -478,6 +478,7 @@
                                 android:paddingEnd="8dp"
                                 android:background="@drawable/bg_item_selector"
                                 android:singleLine="true"
+                                android:inputType="text|textNoSuggestions"
                                 android:imeOptions="actionSearch"
                                 android:focusable="true"
                                 android:focusableInTouchMode="true"
@@ -821,10 +822,29 @@
                         android:paddingEnd="16dp"
                         android:background="@drawable/bg_item_selector"
                         android:singleLine="true"
+                        android:inputType="text|textNoSuggestions"
                         android:imeOptions="actionSearch"
                         android:focusable="true"
                         android:nextFocusUp="@+id/btn_header_sync"
                         android:nextFocusLeft="@+id/sidebar"
+                        android:nextFocusRight="@+id/btn_search_backspace"
+                        android:nextFocusDown="@+id/btn_search_filter_all" />
+
+                    <Button
+                        android:id="@+id/btn_search_backspace"
+                        android:layout_width="wrap_content"
+                        android:layout_height="44dp"
+                        android:layout_marginStart="8dp"
+                        android:text="⌫"
+                        android:textColor="#E2E8F0"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:background="@drawable/bg_button_selector"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="14dp"
+                        android:focusable="true"
+                        android:nextFocusUp="@+id/btn_header_sync"
+                        android:nextFocusLeft="@+id/et_global_search"
                         android:nextFocusRight="@+id/btn_search_clear"
                         android:nextFocusDown="@+id/btn_search_filter_all" />
 
@@ -841,7 +861,7 @@
                         android:paddingEnd="16dp"
                         android:focusable="true"
                         android:nextFocusUp="@+id/btn_header_sync"
-                        android:nextFocusLeft="@+id/et_global_search"
+                        android:nextFocusLeft="@+id/btn_search_backspace"
                         android:nextFocusRight="@+id/btn_search_clear"
                         android:nextFocusDown="@+id/btn_search_filter_all" />
 
