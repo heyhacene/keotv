@@ -394,6 +394,21 @@ public class PlayerActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void attachBaseContext(Context newBase) {
+        try {
+            SharedPreferences prefs = newBase.getSharedPreferences("keotv_prefs", Context.MODE_PRIVATE);
+            float scale = prefs.getFloat("pref_font_scale", 1.0f);
+            if (scale >= 0.7f && scale <= 1.6f && Math.abs(scale - 1.0f) > 0.01f) {
+                Configuration config = new Configuration(newBase.getResources().getConfiguration());
+                config.fontScale = scale;
+                super.attachBaseContext(newBase.createConfigurationContext(config));
+                return;
+            }
+        } catch (Exception ignored) {}
+        super.attachBaseContext(newBase);
+    }
+
+    @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         isPlayerActivityActive = true;

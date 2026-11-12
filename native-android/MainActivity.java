@@ -185,7 +185,7 @@ public class MainActivity extends AppCompatActivity {
     private long lastTopReachedTime = 0;
     private long lastCategoryBottomTime = 0;
     private long lastCategoryTopTime = 0;
-    private static final long CAROUSEL_PAUSE_MS = 500;
+    private static final long CAROUSEL_PAUSE_MS = 1000;
     private final Handler vodHeroHandler = new Handler(Looper.getMainLooper());
     private Runnable pendingVodHeroRunnable = null;
     private final Map<String, JsonObject> vodDetailsCache = new ConcurrentHashMap<>();
@@ -197,6 +197,54 @@ public class MainActivity extends AppCompatActivity {
     private String restoredCategoryId = null;
     private String restoredChannelId = null;
     private String restoredSearchQuery = null;
+    private String pendingPostLoadFocusZone = null;
+
+    // Deterministic Focus Tracking & Back-Navigation Snapshots
+    private String lastValidFocusZone = "categories";
+    private long lastIntentionalSidebarFocusMs = 0L;
+    private boolean isRestoringFocusGuard = false;
+    private FocusSnapshot preSettingsSnapshot = null;
+    private FocusSnapshot prePlayerSnapshot = null;
+    private FocusSnapshot preSearchSnapshot = null;
+    private boolean suppressNextDialogDismissRestore = false;
+
+    private static class FocusSnapshot {
+        final String section;
+        final String categoryId;
+        final int categoryPos;
+        final String channelId;
+        final int channelPos;
+        final int searchResultPos;
+        final String focusZone;
+        final int focusedViewId;
+
+        FocusSnapshot(String section, String categoryId, int categoryPos, String channelId, int channelPos,
+                      int searchResultPos, String focusZone, int focusedViewId) {
+            this.section = section;
+            this.categoryId = categoryId;
+            this.categoryPos = categoryPos;
+            this.channelId = channelId;
+            this.channelPos = channelPos;
+            this.searchResultPos = searchResultPos;
+            this.focusZone = focusZone;
+            this.focusedViewId = focusedViewId;
+        }
+    }
+
+    @Override
+    protected void attachBaseContext(Context newBase) {
+        try {
+            SharedPreferences prefs = newBase.getSharedPreferences("keotv_prefs", Context.MODE_PRIVATE);
+            float scale = prefs.getFloat("pref_font_scale", 1.0f);
+            if (scale >= 0.7f && scale <= 1.6f && Math.abs(scale - 1.0f) > 0.01f) {
+                Configuration config = new Configuration(newBase.getResources().getConfiguration());
+                config.fontScale = scale;
+                super.attachBaseContext(newBase.createConfigurationContext(config));
+                return;
+            }
+        } catch (Exception ignored) {}
+        super.attachBaseContext(newBase);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -210,6 +258,7 @@ public class MainActivity extends AppCompatActivity {
             restoredCategoryId = savedInstanceState.getString("saved_category_id");
             restoredChannelId = savedInstanceState.getString("saved_channel_id");
             restoredSearchQuery = savedInstanceState.getString("saved_search_query");
+            pendingPostLoadFocusZone = savedInstanceState.getString("saved_focus_zone");
         }
 
         // Global crash protector to avoid silent exits on Android TV & phone
@@ -230,6 +279,7 @@ public class MainActivity extends AppCompatActivity {
             db = KeoDatabase.getInstance(this);
 
             initViews();
+            setupGlobalFocusGuard();
             if (restoredSearchQuery != null && !restoredSearchQuery.isEmpty()) {
                 if (etSearch != null) etSearch.setText(restoredSearchQuery);
                 if (etGlobalSearch != null) etGlobalSearch.setText(restoredSearchQuery);
@@ -764,9 +814,6 @@ public class MainActivity extends AppCompatActivity {
                             return true;
                         }
                     } else if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-                        if (focusHeaderBar()) {
-                            return true;
-                        }
                         if (channelsAdapter != null && channelsAdapter.getItemCount() > 0) {
                             focusRecyclerViewItem(recyclerChannels, channelsAdapter.getItemCount() - 1);
                         }
@@ -865,6 +912,13 @@ public class MainActivity extends AppCompatActivity {
 
     public void switchSection(String section) {
         stopContinuousBackspace();
+        if ("search".equals(section) && !"search".equals(currentType)) {
+            if (preSearchSnapshot == null) {
+                preSearchSnapshot = captureCurrentFocusSnapshot();
+            }
+        } else if (!"search".equals(section)) {
+            preSearchSnapshot = null;
+        }
         currentType = section;
         updateSidebarHighlights();
         sectionLoadGeneration.incrementAndGet();
@@ -959,6 +1013,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void switchToSearch(String query, KeoDatabase.ChannelItem sourceItemToIndex) {
+        if (!"search".equals(currentType)) {
+            preSearchSnapshot = new FocusSnapshot(
+                    currentType,
+                    selectedCategory != null ? selectedCategory.id : null,
+                    categoriesAdapter != null ? categoriesAdapter.getSelectedPos() : 0,
+                    activeChannel != null ? activeChannel.id : (sourceItemToIndex != null ? sourceItemToIndex.id : null),
+                    channelsAdapter != null ? channelsAdapter.getSelectedPos() : 0,
+                    0,
+                    "channels",
+                    View.NO_ID
+            );
+        }
         switchSection("search");
         globalSearchFilter = "all";
         updateSearchFilterTabs();
@@ -1567,6 +1633,14 @@ public class MainActivity extends AppCompatActivity {
         }
         recyclerCategories.setNestedScrollingEnabled(true);
         recyclerCategories.setOverScrollMode(View.OVER_SCROLL_ALWAYS);
+        recyclerCategories.setItemAnimator(null);
+        recyclerCategories.setFocusable(true);
+        recyclerCategories.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        recyclerCategories.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus && recyclerCategories.getFocusedChild() == null && categoriesAdapter != null && categoriesAdapter.getItemCount() > 0) {
+                focusCategoriesList();
+            }
+        });
 
         categoriesAdapter = new CategoriesAdapter();
         recyclerCategories.setAdapter(categoriesAdapter);
@@ -1580,6 +1654,14 @@ public class MainActivity extends AppCompatActivity {
         }
         recyclerChannels.setNestedScrollingEnabled(true);
         recyclerChannels.setOverScrollMode(View.OVER_SCROLL_ALWAYS);
+        recyclerChannels.setItemAnimator(null);
+        recyclerChannels.setFocusable(true);
+        recyclerChannels.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        recyclerChannels.setOnFocusChangeListener((v, hasFocus) -> {
+            if (hasFocus && recyclerChannels.getFocusedChild() == null && channelsAdapter != null && channelsAdapter.getItemCount() > 0) {
+                focusChannelsList();
+            }
+        });
         channelsAdapter = new ChannelsAdapter();
         channelsAdapter.setVodGridMode(isVod, spanCount);
         recyclerChannels.setAdapter(channelsAdapter);
@@ -1588,9 +1670,196 @@ public class MainActivity extends AppCompatActivity {
             recyclerSearchResults.setLayoutManager(new LinearLayoutManager(this));
             recyclerSearchResults.setNestedScrollingEnabled(true);
             recyclerSearchResults.setOverScrollMode(View.OVER_SCROLL_ALWAYS);
+            recyclerSearchResults.setItemAnimator(null);
+            recyclerSearchResults.setFocusable(true);
+            recyclerSearchResults.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+            recyclerSearchResults.setOnFocusChangeListener((v, hasFocus) -> {
+                if (hasFocus && recyclerSearchResults.getFocusedChild() == null && searchResultsAdapter != null && searchResultsAdapter.getItemCount() > 0) {
+                    int target = Math.max(0, Math.min(searchResultsAdapter.getSelectedPos(), searchResultsAdapter.getItemCount() - 1));
+                    focusRecyclerViewItem(recyclerSearchResults, target);
+                }
+            });
             searchResultsAdapter = new ChannelsAdapter();
             recyclerSearchResults.setAdapter(searchResultsAdapter);
         }
+    }
+
+    private boolean isDescendantOf(View child, View parent) {
+        if (child == null || parent == null) return false;
+        if (child == parent) return true;
+        android.view.ViewParent p = child.getParent();
+        while (p instanceof View) {
+            if (p == parent) return true;
+            p = p.getParent();
+        }
+        return false;
+    }
+
+    private String detectFocusZone(View v) {
+        if (v == null) return null;
+        if (isDescendantOf(v, recyclerChannels)) return "channels";
+        if (isDescendantOf(v, recyclerCategories)) return "categories";
+        if (isDescendantOf(v, recyclerSearchResults)) return "search_results";
+        if (v == etGlobalSearch || v == btnSearchBackspace || v == btnSearchClear) return "search_input";
+        if (v == btnSearchFilterAll || v == btnSearchFilterLive || v == btnSearchFilterVod || v == btnSearchFilterSeries) return "search_filters";
+        if (v == etSearch) return "live_search";
+        if (isDescendantOf(v, headerBar)) return "header";
+        if (isDescendantOf(v, sidebar)) return "sidebar";
+        return null;
+    }
+
+    private void setupGlobalFocusGuard() {
+        try {
+            getWindow().getDecorView().getViewTreeObserver().addOnGlobalFocusChangeListener((oldFocus, newFocus) -> {
+                if (isRestoringFocusGuard || isFinishing() || isDestroyed() || newFocus == null) return;
+                String newZone = detectFocusZone(newFocus);
+                String oldZone = detectFocusZone(oldFocus);
+
+                if (newFocus == btnNavLive) {
+                    long now = System.currentTimeMillis();
+                    boolean intentional = (now - lastIntentionalSidebarFocusMs < 350L)
+                            || "sidebar".equals(oldZone)
+                            || (oldFocus != null && oldFocus.getId() == R.id.btn_header_sync);
+                    if (!intentional && !"sidebar".equals(lastValidFocusZone)) {
+                        isRestoringFocusGuard = true;
+                        try {
+                            restoreFocusToZone(lastValidFocusZone);
+                        } finally {
+                            isRestoringFocusGuard = false;
+                        }
+                        return;
+                    }
+                }
+
+                if (newZone != null) {
+                    lastValidFocusZone = newZone;
+                }
+            });
+        } catch (Exception ignored) {}
+    }
+
+    private void restoreFocusToZone(String zone) {
+        if ("search".equals(currentType)) {
+            if ("search_results".equals(zone) && searchResultsAdapter != null && searchResultsAdapter.getItemCount() > 0) {
+                focusRecyclerViewItem(recyclerSearchResults, searchResultsAdapter.getSelectedPos());
+            } else if ("search_filters".equals(zone)) {
+                focusSearchFilterOrInput();
+            } else if (etGlobalSearch != null) {
+                etGlobalSearch.requestFocus();
+            }
+            return;
+        }
+        if ("channels".equals(zone) && channelsAdapter != null && channelsAdapter.getItemCount() > 0) {
+            focusChannelsList();
+        } else if ("live_search".equals(zone) && etSearch != null && etSearch.getVisibility() == View.VISIBLE) {
+            etSearch.requestFocus();
+        } else if (categoriesAdapter != null && categoriesAdapter.getItemCount() > 0) {
+            focusCategoriesList();
+        } else {
+            focusActiveSidebarButton();
+        }
+    }
+
+    private FocusSnapshot captureCurrentFocusSnapshot() {
+        View cur = getCurrentFocus();
+        String zone = detectFocusZone(cur);
+        if (zone == null) {
+            zone = lastValidFocusZone != null ? lastValidFocusZone : ("search".equals(currentType) ? "search_results" : "categories");
+        }
+        int viewId = cur != null ? cur.getId() : View.NO_ID;
+        return new FocusSnapshot(
+                currentType,
+                selectedCategory != null ? selectedCategory.id : null,
+                categoriesAdapter != null ? categoriesAdapter.getSelectedPos() : 0,
+                activeChannel != null ? activeChannel.id : null,
+                channelsAdapter != null ? channelsAdapter.getSelectedPos() : 0,
+                searchResultsAdapter != null ? searchResultsAdapter.getSelectedPos() : 0,
+                zone,
+                viewId
+        );
+    }
+
+    private void restoreFocusSnapshot(final FocusSnapshot snap) {
+        if (snap == null || isFinishing() || isDestroyed()) {
+            restoreFocusToZone(lastValidFocusZone);
+            return;
+        }
+        if (categoriesAdapter != null && categoriesAdapter.getItemCount() > 0) {
+            int catIdx = Math.max(0, Math.min(snap.categoryPos, categoriesAdapter.getItemCount() - 1));
+            if (snap.categoryId != null) {
+                for (int i = 0; i < categoriesAdapter.items.size(); i++) {
+                    KeoDatabase.CategoryItem c = categoriesAdapter.items.get(i);
+                    if (c != null && snap.categoryId.equals(c.id)) {
+                        catIdx = i;
+                        break;
+                    }
+                }
+            }
+            categoriesAdapter.setSelectedPos(catIdx);
+        }
+        if (channelsAdapter != null && channelsAdapter.getItemCount() > 0) {
+            int chIdx = Math.max(0, Math.min(snap.channelPos, channelsAdapter.getItemCount() - 1));
+            if (snap.channelId != null) {
+                int found = channelsAdapter.getPositionForId(snap.channelId);
+                if (found != -1) chIdx = found;
+            }
+            channelsAdapter.setSelectedPos(chIdx);
+        }
+        if (searchResultsAdapter != null && searchResultsAdapter.getItemCount() > 0) {
+            int srIdx = Math.max(0, Math.min(snap.searchResultPos, searchResultsAdapter.getItemCount() - 1));
+            if (snap.channelId != null && "search".equals(snap.section)) {
+                int found = searchResultsAdapter.getPositionForId(snap.channelId);
+                if (found != -1) srIdx = found;
+            }
+            searchResultsAdapter.setSelectedPos(srIdx);
+        }
+
+        final Runnable applyFocus = () -> {
+            if (isFinishing() || isDestroyed()) return;
+            lastValidFocusZone = snap.focusZone;
+            if ("search".equals(currentType)) {
+                if ("search_results".equals(snap.focusZone) && searchResultsAdapter != null && searchResultsAdapter.getItemCount() > 0) {
+                    focusRecyclerViewItem(recyclerSearchResults, searchResultsAdapter.getSelectedPos());
+                } else if ("search_filters".equals(snap.focusZone)) {
+                    focusSearchFilterOrInput();
+                } else if ("sidebar".equals(snap.focusZone)) {
+                    focusActiveSidebarButton();
+                } else if (snap.focusedViewId != View.NO_ID && findViewById(snap.focusedViewId) != null) {
+                    findViewById(snap.focusedViewId).requestFocus();
+                } else if (etGlobalSearch != null) {
+                    etGlobalSearch.requestFocus();
+                }
+                return;
+            }
+
+            if ("channels".equals(snap.focusZone) && channelsAdapter != null && channelsAdapter.getItemCount() > 0) {
+                focusChannelsList();
+            } else if ("categories".equals(snap.focusZone) && categoriesAdapter != null && categoriesAdapter.getItemCount() > 0) {
+                focusCategoriesList();
+            } else if ("live_search".equals(snap.focusZone) && etSearch != null && etSearch.getVisibility() == View.VISIBLE) {
+                etSearch.requestFocus();
+            } else if ("header".equals(snap.focusZone)) {
+                if (snap.focusedViewId != View.NO_ID && findViewById(snap.focusedViewId) != null) {
+                    findViewById(snap.focusedViewId).requestFocus();
+                } else {
+                    focusHeaderBar();
+                }
+            } else if ("sidebar".equals(snap.focusZone)) {
+                lastIntentionalSidebarFocusMs = System.currentTimeMillis();
+                if (snap.focusedViewId != View.NO_ID && findViewById(snap.focusedViewId) != null) {
+                    findViewById(snap.focusedViewId).requestFocus();
+                } else {
+                    focusActiveSidebarButton();
+                }
+            } else if (channelsAdapter != null && channelsAdapter.getItemCount() > 0) {
+                focusChannelsList();
+            } else {
+                focusCategoriesList();
+            }
+        };
+
+        applyFocus.run();
+        mainHandler.postDelayed(applyFocus, 45);
     }
 
     private void focusRecyclerViewItem(RecyclerView rv, int position) {
@@ -1640,6 +1909,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void focusActiveSidebarButton() {
+        lastIntentionalSidebarFocusMs = System.currentTimeMillis();
+        lastValidFocusZone = "sidebar";
         if ("replay".equals(currentType) && btnNavReplay != null) btnNavReplay.requestFocus();
         else if ("vod".equals(currentType) && btnNavVod != null) btnNavVod.requestFocus();
         else if ("series".equals(currentType) && btnNavSeries != null) btnNavSeries.requestFocus();
@@ -1687,12 +1958,14 @@ public class MainActivity extends AppCompatActivity {
 
     private void focusCategoriesList() {
         if (recyclerCategories == null || categoriesAdapter == null || categoriesAdapter.getItemCount() == 0) return;
+        lastValidFocusZone = "categories";
         int target = Math.max(0, Math.min(categoriesAdapter.getSelectedPos(), categoriesAdapter.getItemCount() - 1));
         focusRecyclerViewItem(recyclerCategories, target);
     }
 
     private void focusChannelsList() {
         if (recyclerChannels == null || channelsAdapter == null || channelsAdapter.getItemCount() == 0) return;
+        lastValidFocusZone = "channels";
         int target = Math.max(0, Math.min(channelsAdapter.getSelectedPos(), channelsAdapter.getItemCount() - 1));
         focusRecyclerViewItem(recyclerChannels, target);
     }
@@ -1976,9 +2249,19 @@ public class MainActivity extends AppCompatActivity {
 
             runOnUiThread(() -> {
                 if (mySecGen != sectionLoadGeneration.get() || isFinishing() || isDestroyed()) return;
+                if (restoredCategoryId == null && selectedCategory != null && selectedCategory.id != null) {
+                    restoredCategoryId = selectedCategory.id;
+                }
+                if (restoredChannelId == null && activeChannel != null && activeChannel.id != null) {
+                    restoredChannelId = activeChannel.id;
+                }
+                if ("channels".equals(pendingPostLoadFocusZone) || (recyclerChannels != null && recyclerChannels.hasFocus())) {
+                    wantFocusChannelsOnCategoryLoad = true;
+                }
                 View curFocus = getCurrentFocus();
-                boolean sidebarHasFocus = (sidebar != null && sidebar.hasFocus());
-                boolean hadCatFocus = !sidebarHasFocus && ((recyclerCategories != null && recyclerCategories.hasFocus())
+                boolean sidebarHasFocus = (sidebar != null && sidebar.hasFocus()) && !"channels".equals(pendingPostLoadFocusZone) && !"categories".equals(pendingPostLoadFocusZone);
+                boolean hadCatFocus = !wantFocusChannelsOnCategoryLoad && !sidebarHasFocus && ((recyclerCategories != null && recyclerCategories.hasFocus())
+                        || "categories".equals(pendingPostLoadFocusZone)
                         || curFocus == null
                         || (panelSearch != null && panelSearch.getVisibility() != View.VISIBLE && panelSearch.hasFocus()));
                 categoriesAdapter.setItems(cats);
@@ -2000,6 +2283,7 @@ public class MainActivity extends AppCompatActivity {
                     }
                     selectCategory(targetCat);
                 } else {
+                    pendingPostLoadFocusZone = null;
                     channelsAdapter.setItems(new ArrayList<>());
                     if (tvChannelsHeader != null) {
                         tvChannelsHeader.setText("Aucun élément disponible dans cette section.");
@@ -2045,8 +2329,12 @@ public class MainActivity extends AppCompatActivity {
             final List<KeoDatabase.ChannelItem> channels = (channelsList != null) ? channelsList : new ArrayList<>();
             runOnUiThread(() -> {
                 if (myCatGen != categoryLoadGeneration.get() || isFinishing() || isDestroyed()) return;
-                boolean hadChannelFocus = (recyclerChannels != null && recyclerChannels.hasFocus()) || wantFocusChannelsOnCategoryLoad;
+                boolean hadChannelFocus = (recyclerChannels != null && recyclerChannels.hasFocus())
+                        || wantFocusChannelsOnCategoryLoad
+                        || "channels".equals(pendingPostLoadFocusZone);
                 wantFocusChannelsOnCategoryLoad = false;
+                String postZone = pendingPostLoadFocusZone;
+                pendingPostLoadFocusZone = null;
                 channelsAdapter.setItems(channels);
                 lastBottomReachedTime = 0;
                 lastTopReachedTime = 0;
@@ -2080,13 +2368,13 @@ public class MainActivity extends AppCompatActivity {
                     }
                     if (hadChannelFocus) {
                         focusChannelsList();
-                    } else if (getCurrentFocus() == null) {
+                    } else if ("categories".equals(postZone) || getCurrentFocus() == null) {
                         focusCategoriesList();
                     }
                 } else {
                     activeChannel = null;
                     if (tvVodCounter != null) tvVodCounter.setText("0 / 0");
-                    if (hadChannelFocus || getCurrentFocus() == null) {
+                    if (hadChannelFocus || "categories".equals(postZone) || getCurrentFocus() == null) {
                         focusCategoriesList();
                     }
                 }
@@ -2356,12 +2644,14 @@ public class MainActivity extends AppCompatActivity {
 
         root.addView(actions);
 
+        final FocusSnapshot snap = captureCurrentFocusSnapshot();
         builder.setView(root);
         AlertDialog dialog = builder.create();
         if (dialog.getWindow() != null) {
             dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
         }
         btnClose.setOnClickListener(v -> dialog.dismiss());
+        dialog.setOnDismissListener(d -> restoreFocusSnapshot(snap));
         dialog.show();
         btnClose.requestFocus();
     }
@@ -2400,7 +2690,7 @@ public class MainActivity extends AppCompatActivity {
 
         // At bottom boundary: pause before wrapping around to top
         long now = System.currentTimeMillis();
-        if (lastBottomReachedTime == 0 || (now - lastBottomReachedTime > 1500)) {
+        if (lastBottomReachedTime == 0 || (now - lastBottomReachedTime > 2500)) {
             lastBottomReachedTime = now;
             return true; // Pause at bottom boundary
         }
@@ -2444,25 +2734,18 @@ public class MainActivity extends AppCompatActivity {
             return true;
         }
 
-        // If in live channels mode and etSearch is visible and reachable, pressing UP from top row focuses etSearch!
-        if (!isVod && layoutLiveHeader != null && layoutLiveHeader.getVisibility() == View.VISIBLE && etSearch != null && etSearch.getVisibility() == View.VISIBLE) {
-            etSearch.requestFocus();
-            return true;
-        }
-
-        // Otherwise, pressing UP from the top row reaches the top header / VOD action buttons!
-        if (focusHeaderBar()) {
-            return true;
-        }
-
-        // At top boundary: pause before wrapping around to bottom
+        // At top boundary: pause before wrapping around to bottom (or reaching live search bar)
         long now = System.currentTimeMillis();
-        if (lastTopReachedTime == 0 || (now - lastTopReachedTime > 1500)) {
+        if (lastTopReachedTime == 0 || (now - lastTopReachedTime > 2500)) {
             lastTopReachedTime = now;
             return true; // Pause at top boundary
         }
         if (now - lastTopReachedTime >= CAROUSEL_PAUSE_MS) {
             lastTopReachedTime = 0;
+            if (!isVod && layoutLiveHeader != null && layoutLiveHeader.getVisibility() == View.VISIBLE && etSearch != null && etSearch.getVisibility() == View.VISIBLE) {
+                etSearch.requestFocus();
+                return true;
+            }
             int lastRowStart = isVod ? ((totalCount - 1) - ((totalCount - 1) % span)) : (totalCount - 1);
             int targetPos = isVod ? Math.min(lastRowStart + (currentPos % span), totalCount - 1) : (totalCount - 1);
             focusRecyclerViewItem(targetRv, targetPos);
@@ -2544,7 +2827,7 @@ public class MainActivity extends AppCompatActivity {
 
         // At bottom boundary: pause before wrapping around to top
         long now = System.currentTimeMillis();
-        if (lastCategoryBottomTime == 0 || (now - lastCategoryBottomTime > 1500)) {
+        if (lastCategoryBottomTime == 0 || (now - lastCategoryBottomTime > 2500)) {
             lastCategoryBottomTime = now;
             return true; // Pause at bottom boundary
         }
@@ -2565,13 +2848,9 @@ public class MainActivity extends AppCompatActivity {
             return true; // Strictly consume! Focus stays firmly in bouquets!
         }
 
-        if (focusHeaderBar()) {
-            return true;
-        }
-
-        // At top boundary: pause before wrapping around to bottom
+        // At top boundary: pause before wrapping around to bottom (bidirectional bouquet carousel)
         long now = System.currentTimeMillis();
-        if (lastCategoryTopTime == 0 || (now - lastCategoryTopTime > 1500)) {
+        if (lastCategoryTopTime == 0 || (now - lastCategoryTopTime > 2500)) {
             lastCategoryTopTime = now;
             return true; // Pause at top boundary
         }
@@ -2635,6 +2914,7 @@ public class MainActivity extends AppCompatActivity {
         PlayerActivity.pendingCurrentProgramTime = null;
         PlayerActivity.pendingNextProgramTitle = null;
 
+        prePlayerSnapshot = captureCurrentFocusSnapshot();
         Intent intent = new Intent(this, PlayerActivity.class);
         startActivity(intent);
     }
@@ -2677,6 +2957,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void launchMoviePlayer(String url, String title, boolean forceRestart) {
+        if (prePlayerSnapshot == null) {
+            prePlayerSnapshot = captureCurrentFocusSnapshot();
+        }
         List<String> urls = new ArrayList<>();
         List<String> titles = new ArrayList<>();
         urls.add(url);
@@ -2753,6 +3036,7 @@ public class MainActivity extends AppCompatActivity {
                 });
 
                 dirChip.setOnClickListener(v -> {
+                    suppressNextDialogDismissRestore = true;
                     dialog.dismiss();
                     switchToSearch(dirName, movieItem);
                 });
@@ -2810,6 +3094,7 @@ public class MainActivity extends AppCompatActivity {
                 });
 
                 actorChip.setOnClickListener(v -> {
+                    suppressNextDialogDismissRestore = true;
                     dialog.dismiss();
                     switchToSearch(actorName, movieItem);
                 });
@@ -2828,6 +3113,7 @@ public class MainActivity extends AppCompatActivity {
                 btnDir.setText("🎬 Réalisateur : " + directorStr.trim());
                 btnDir.setVisibility(View.VISIBLE);
                 btnDir.setOnClickListener(v -> {
+                    suppressNextDialogDismissRestore = true;
                     dialog.dismiss();
                     switchToSearch(firstDir, item);
                 });
@@ -3025,6 +3311,7 @@ public class MainActivity extends AppCompatActivity {
         if (isFinishing() || isDestroyed() || movieItem == null) return;
 
         try {
+            final FocusSnapshot snap = captureCurrentFocusSnapshot();
             final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
             View view = LayoutInflater.from(this).inflate(R.layout.dialog_movie_detail, null);
 
@@ -3200,6 +3487,8 @@ public class MainActivity extends AppCompatActivity {
             }
 
             btnPlay.setOnClickListener(v -> {
+                prePlayerSnapshot = snap;
+                suppressNextDialogDismissRestore = true;
                 dialog.dismiss();
                 launchMoviePlayer(streamUrlHolder[0], tvTitle.getText().toString(), false);
             });
@@ -3210,10 +3499,14 @@ public class MainActivity extends AppCompatActivity {
                             .setTitle(tvTitle.getText().toString())
                             .setMessage("Options de lecture du film :")
                             .setPositiveButton("↺ Recommencer du début", (d, which) -> {
+                                prePlayerSnapshot = snap;
+                                suppressNextDialogDismissRestore = true;
                                 dialog.dismiss();
                                 launchMoviePlayer(streamUrlHolder[0], tvTitle.getText().toString(), true);
                             })
                             .setNegativeButton("▶ Reprendre (" + formatPlaybackTime(savedPosHolder[0]) + ")", (d, which) -> {
+                                prePlayerSnapshot = snap;
+                                suppressNextDialogDismissRestore = true;
                                 dialog.dismiss();
                                 launchMoviePlayer(streamUrlHolder[0], tvTitle.getText().toString(), false);
                             })
@@ -3226,6 +3519,8 @@ public class MainActivity extends AppCompatActivity {
 
             if (btnRestart != null) {
                 btnRestart.setOnClickListener(v -> {
+                    prePlayerSnapshot = snap;
+                    suppressNextDialogDismissRestore = true;
                     dialog.dismiss();
                     launchMoviePlayer(streamUrlHolder[0], tvTitle.getText().toString(), true);
                 });
@@ -3242,6 +3537,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (btnSearchActor != null) {
                 btnSearchActor.setOnClickListener(v -> {
+                    suppressNextDialogDismissRestore = true;
                     dialog.dismiss();
                     if (!firstActor[0].isEmpty()) {
                         switchToSearch(firstActor[0], movieItem);
@@ -3252,6 +3548,13 @@ public class MainActivity extends AppCompatActivity {
             }
 
             btnClose.setOnClickListener(v -> dialog.dismiss());
+            dialog.setOnDismissListener(d -> {
+                if (suppressNextDialogDismissRestore) {
+                    suppressNextDialogDismissRestore = false;
+                    return;
+                }
+                restoreFocusSnapshot(snap);
+            });
             dialog.show();
 
             if (dialog.getWindow() != null) {
@@ -3274,6 +3577,7 @@ public class MainActivity extends AppCompatActivity {
         if (isFinishing() || isDestroyed() || seriesItem == null) return;
 
         try {
+            final FocusSnapshot snap = captureCurrentFocusSnapshot();
             final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
             View view = LayoutInflater.from(this).inflate(R.layout.dialog_series_detail, null);
 
@@ -3340,6 +3644,8 @@ public class MainActivity extends AppCompatActivity {
                     if (shortTitle.isEmpty()) shortTitle = savedTitle;
                     btnResume.setText("▶ Reprendre : " + shortTitle + " (" + formatPlaybackTime(savedPos) + ")");
                     btnResume.setOnClickListener(v -> {
+                        prePlayerSnapshot = snap;
+                        suppressNextDialogDismissRestore = true;
                         dialog.dismiss();
                         List<String> urls = new ArrayList<>();
                         urls.add(savedUrl);
@@ -3358,6 +3664,8 @@ public class MainActivity extends AppCompatActivity {
                                 .setTitle(seriesItem.name)
                                 .setMessage("Options de reprise de la série :")
                                 .setPositiveButton("↺ Recommencer cet épisode", (d, which) -> {
+                                    prePlayerSnapshot = snap;
+                                    suppressNextDialogDismissRestore = true;
                                     dialog.dismiss();
                                     List<String> urls = new ArrayList<>();
                                     urls.add(savedUrl);
@@ -3401,6 +3709,7 @@ public class MainActivity extends AppCompatActivity {
             // Search actor / series button
             if (btnSearchActor != null) {
                 btnSearchActor.setOnClickListener(v -> {
+                    suppressNextDialogDismissRestore = true;
                     dialog.dismiss();
                     if (firstActor[0] != null && !firstActor[0].isEmpty()) {
                         switchToSearch(firstActor[0], seriesItem);
@@ -3501,7 +3810,7 @@ public class MainActivity extends AppCompatActivity {
                             btnSeason.setOnClickListener(v -> {
                                 for (Button b : seasonButtons) if (b != null) b.setSelected(false);
                                 btnSeason.setSelected(true);
-                                loadEpisodesForSeason(episodesObj.getAsJsonArray(seasonKey), recyclerEpisodes, dialog, seriesItem.name, pl, rawId);
+                                loadEpisodesForSeason(episodesObj.getAsJsonArray(seasonKey), recyclerEpisodes, dialog, seriesItem.name, pl, rawId, snap);
                             });
 
                             layoutSeasons.addView(btnSeason);
@@ -3510,7 +3819,7 @@ public class MainActivity extends AppCompatActivity {
                         // Select first season by default
                         if (seasonButtons[0] != null) {
                             seasonButtons[0].setSelected(true);
-                            loadEpisodesForSeason(episodesObj.getAsJsonArray(seasonKeys.get(0)), recyclerEpisodes, dialog, seriesItem.name, pl, rawId);
+                            loadEpisodesForSeason(episodesObj.getAsJsonArray(seasonKeys.get(0)), recyclerEpisodes, dialog, seriesItem.name, pl, rawId, snap);
                         }
                     }
 
@@ -3522,6 +3831,13 @@ public class MainActivity extends AppCompatActivity {
             }
 
             btnClose.setOnClickListener(v -> dialog.dismiss());
+            dialog.setOnDismissListener(d -> {
+                if (suppressNextDialogDismissRestore) {
+                    suppressNextDialogDismissRestore = false;
+                    return;
+                }
+                restoreFocusSnapshot(snap);
+            });
             dialog.show();
 
             if (dialog.getWindow() != null) {
@@ -3532,12 +3848,18 @@ public class MainActivity extends AppCompatActivity {
                 dialog.getWindow().setGravity(Gravity.CENTER);
             }
 
+            if (btnResume != null && btnResume.getVisibility() == View.VISIBLE) {
+                btnResume.requestFocus();
+            } else if (btnFav != null) {
+                btnFav.requestFocus();
+            }
+
         } catch (Throwable t) {
             Log.e(TAG, "Failed to show series detail dialog", t);
         }
     }
 
-    private void loadEpisodesForSeason(JsonArray episodes, RecyclerView recycler, AlertDialog dialog, String seriesName, KeoDatabase.PlaylistItem pl, String seriesId) {
+    private void loadEpisodesForSeason(JsonArray episodes, RecyclerView recycler, AlertDialog dialog, String seriesName, KeoDatabase.PlaylistItem pl, String seriesId, final FocusSnapshot snap) {
         if (episodes == null || episodes.size() == 0) return;
 
         final List<EpisodeItem> list = new ArrayList<>();
@@ -3575,7 +3897,9 @@ public class MainActivity extends AppCompatActivity {
             list.add(item);
         }
 
-        recycler.setAdapter(new EpisodesAdapter(list, streamUrls, displayTitles, seriesId, dialog, (clickedItem, index) -> {
+        recycler.setAdapter(new EpisodesAdapter(list, streamUrls, displayTitles, seriesId, dialog, snap, (clickedItem, index) -> {
+            prePlayerSnapshot = snap;
+            suppressNextDialogDismissRestore = true;
             dialog.dismiss();
             PlayerActivity.pendingUrls = streamUrls;
             PlayerActivity.pendingTitles = displayTitles;
@@ -3606,14 +3930,16 @@ public class MainActivity extends AppCompatActivity {
         private final List<String> displayTitles;
         private final String seriesId;
         private final AlertDialog parentDialog;
+        private final FocusSnapshot parentSnap;
         private final OnEpisodeClickListener listener;
 
-        EpisodesAdapter(List<EpisodeItem> episodes, List<String> streamUrls, List<String> displayTitles, String seriesId, AlertDialog parentDialog, OnEpisodeClickListener listener) {
+        EpisodesAdapter(List<EpisodeItem> episodes, List<String> streamUrls, List<String> displayTitles, String seriesId, AlertDialog parentDialog, FocusSnapshot parentSnap, OnEpisodeClickListener listener) {
             this.episodes = episodes;
             this.streamUrls = streamUrls;
             this.displayTitles = displayTitles;
             this.seriesId = seriesId;
             this.parentDialog = parentDialog;
+            this.parentSnap = parentSnap;
             this.listener = listener;
         }
 
@@ -3656,6 +3982,8 @@ public class MainActivity extends AppCompatActivity {
                                 .setTitle(item.title)
                                 .setMessage("Options de lecture de l'épisode :")
                                 .setPositiveButton("↺ Recommencer du début", (d, which) -> {
+                                    prePlayerSnapshot = parentSnap;
+                                    suppressNextDialogDismissRestore = true;
                                     if (parentDialog != null) parentDialog.dismiss();
                                     PlayerActivity.pendingUrls = streamUrls;
                                     PlayerActivity.pendingTitles = displayTitles;
@@ -3667,6 +3995,8 @@ public class MainActivity extends AppCompatActivity {
                                     startActivity(intent);
                                 })
                                 .setNegativeButton("▶ Reprendre (" + formatPlaybackTime(posMs) + ")", (d, which) -> {
+                                    prePlayerSnapshot = parentSnap;
+                                    suppressNextDialogDismissRestore = true;
                                     if (parentDialog != null) parentDialog.dismiss();
                                     PlayerActivity.pendingUrls = streamUrls;
                                     PlayerActivity.pendingTitles = displayTitles;
@@ -3708,6 +4038,7 @@ public class MainActivity extends AppCompatActivity {
         // Strict guard: Replay is strictly for Linear TV, never for VOD or Series
         if ("vod".equals(ch.streamType) || "series".equals(ch.streamType)) return;
 
+        final FocusSnapshot snap = captureCurrentFocusSnapshot();
         final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
         if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) {
             Toast.makeText(this, "Compte non configuré", Toast.LENGTH_SHORT).show();
@@ -3824,13 +4155,13 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 // Populate programs list
-                populateCatchupCards(listContainer, pastPrograms, dialog, ch, pl);
+                populateCatchupCards(listContainer, pastPrograms, dialog, ch, pl, snap);
 
                 tvSortToggle.setOnClickListener(v -> {
                     isDesc[0] = !isDesc[0];
                     Collections.reverse(pastPrograms);
                     tvSortToggle.setText(isDesc[0] ? "⇅ Plus récents" : "⇅ Plus anciens");
-                    populateCatchupCards(listContainer, pastPrograms, dialog, ch, pl);
+                    populateCatchupCards(listContainer, pastPrograms, dialog, ch, pl, snap);
                 });
                 tvSortToggle.setOnKeyListener((v, keyCode, event) -> {
                     if (event.getAction() == KeyEvent.ACTION_DOWN && (keyCode == KeyEvent.KEYCODE_DPAD_CENTER || keyCode == KeyEvent.KEYCODE_ENTER)) {
@@ -3874,7 +4205,19 @@ public class MainActivity extends AppCompatActivity {
                 closeLp.topMargin = dpToPx(8);
                 root.addView(btnClose, closeLp);
 
+                dialog.setOnDismissListener(d -> {
+                    if (suppressNextDialogDismissRestore) {
+                        suppressNextDialogDismissRestore = false;
+                        return;
+                    }
+                    restoreFocusSnapshot(snap);
+                });
                 dialog.show();
+                if (listContainer.getChildCount() > 0) {
+                    listContainer.getChildAt(0).requestFocus();
+                } else {
+                    btnClose.requestFocus();
+                }
             }
 
             @Override
@@ -3885,7 +4228,7 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
-    private void populateCatchupCards(LinearLayout listContainer, List<XtreamClient.EpgProgram> pastPrograms, AlertDialog dialog, KeoDatabase.ChannelItem ch, KeoDatabase.PlaylistItem pl) {
+    private void populateCatchupCards(LinearLayout listContainer, List<XtreamClient.EpgProgram> pastPrograms, AlertDialog dialog, KeoDatabase.ChannelItem ch, KeoDatabase.PlaylistItem pl, final FocusSnapshot snap) {
         listContainer.removeAllViews();
         for (int i = 0; i < pastPrograms.size(); i++) {
             final XtreamClient.EpgProgram prog = pastPrograms.get(i);
@@ -3983,6 +4326,8 @@ public class MainActivity extends AppCompatActivity {
             });
 
             card.setOnClickListener(v -> {
+                prePlayerSnapshot = snap;
+                suppressNextDialogDismissRestore = true;
                 dialog.dismiss();
                 playCatchupStream(ch, prog, pl);
             });
@@ -4001,6 +4346,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void playCatchupStream(KeoDatabase.ChannelItem ch, XtreamClient.EpgProgram prog, KeoDatabase.PlaylistItem pl) {
         try {
+            if (prePlayerSnapshot == null) {
+                prePlayerSnapshot = captureCurrentFocusSnapshot();
+            }
             String server = pl.serverUrl.trim().replaceAll("/+$", "");
             if (!server.startsWith("http://") && !server.startsWith("https://")) server = "http://" + server;
             String user = pl.username.trim();
@@ -4134,6 +4482,7 @@ public class MainActivity extends AppCompatActivity {
         if (ch == null || isFinishing() || isDestroyed()) return;
         if ("vod".equals(ch.streamType) || "series".equals(ch.streamType)) return;
 
+        final FocusSnapshot snap = captureCurrentFocusSnapshot();
         final KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
         if (pl == null || pl.serverUrl == null || pl.serverUrl.isEmpty()) {
             Toast.makeText(this, "Compte non configuré", Toast.LENGTH_SHORT).show();
@@ -4318,6 +4667,8 @@ public class MainActivity extends AppCompatActivity {
 
                     if (isCurrentlyLive) {
                         card.setOnClickListener(v -> {
+                            prePlayerSnapshot = snap;
+                            suppressNextDialogDismissRestore = true;
                             dialog.dismiss();
                             launchPlayerFullscreen();
                         });
@@ -4367,7 +4718,19 @@ public class MainActivity extends AppCompatActivity {
                 closeLp.topMargin = dpToPx(8);
                 root.addView(btnClose, closeLp);
 
+                dialog.setOnDismissListener(d -> {
+                    if (suppressNextDialogDismissRestore) {
+                        suppressNextDialogDismissRestore = false;
+                        return;
+                    }
+                    restoreFocusSnapshot(snap);
+                });
                 dialog.show();
+                if (listContainer.getChildCount() > 0) {
+                    listContainer.getChildAt(0).requestFocus();
+                } else {
+                    btnClose.requestFocus();
+                }
             }
 
             @Override
@@ -4433,9 +4796,14 @@ public class MainActivity extends AppCompatActivity {
 
     // --- SECURE CLOUD SYNC DIALOG (PASSWORD MANDATORY) ---
     private void showCloudSyncDialog() {
+        showCloudSyncDialog(-1);
+    }
+
+    private void showCloudSyncDialog(final int returnToSettingsIndex) {
         if (isFinishing() || isDestroyed()) return;
 
         try {
+            final FocusSnapshot snap = returnToSettingsIndex < 0 ? captureCurrentFocusSnapshot() : null;
             final SharedPreferences prefs = getSharedPreferences("keotv_prefs", MODE_PRIVATE);
             String lastUser = prefs.getString("cloud_username", "heyhacene@gmail.com");
 
@@ -4464,10 +4832,10 @@ public class MainActivity extends AppCompatActivity {
             etPass.setTextSize(13);
             layout.addView(etPass);
 
-            new AlertDialog.Builder(this)
+            AlertDialog dialog = new AlertDialog.Builder(this)
                     .setTitle("☁️ Synchronisation Cloud (Favoris, VOD, Playlists)")
                     .setView(layout)
-                    .setPositiveButton("☁️ Connexion & Synchroniser", (dialog, which) -> {
+                    .setPositiveButton("☁️ Connexion & Synchroniser", (d, which) -> {
                         String ident = etUser.getText().toString().trim();
                         String pass = etPass.getText().toString().trim();
 
@@ -4486,7 +4854,7 @@ public class MainActivity extends AppCompatActivity {
                                 .apply();
                         pullAccountsFromCloud(ident, pass);
                     })
-                    .setNeutralButton("⬆️ Sauvegarder vers Cloud", (dialog, which) -> {
+                    .setNeutralButton("⬆️ Sauvegarder vers Cloud", (d, which) -> {
                         String ident = etUser.getText().toString().trim();
                         String pass = etPass.getText().toString().trim();
                         if (!ident.isEmpty()) {
@@ -4497,7 +4865,15 @@ public class MainActivity extends AppCompatActivity {
                         pushAccountsToCloud(true);
                     })
                     .setNegativeButton("Annuler", null)
-                    .show();
+                    .create();
+            dialog.setOnDismissListener(d -> {
+                if (returnToSettingsIndex >= 0) {
+                    showSettingsDialog(returnToSettingsIndex);
+                } else if (snap != null) {
+                    restoreFocusSnapshot(snap);
+                }
+            });
+            dialog.show();
         } catch (Throwable t) {
             Log.e(TAG, "Failed to show cloud sync dialog", t);
         }
@@ -4670,6 +5046,12 @@ public class MainActivity extends AppCompatActivity {
                         if (setObj.has("osd_timeout_sec")) pe.putString("osd_timeout_sec", setObj.get("osd_timeout_sec").getAsString());
                         if (setObj.has("epg_position")) pe.putString("epg_position", setObj.get("epg_position").getAsString());
                         pe.apply();
+                        if (setObj.has("font_scale")) {
+                            float fs = setObj.get("font_scale").getAsFloat();
+                            if (fs >= 0.75f && fs <= 1.5f) {
+                                getSharedPreferences("keotv_prefs", MODE_PRIVATE).edit().putFloat("pref_font_scale", fs).apply();
+                            }
+                        }
                     } catch (Exception ignored) {}
                 }
 
@@ -4727,6 +5109,7 @@ public class MainActivity extends AppCompatActivity {
                 settingsObj.addProperty("buffer_sec", playerPrefs.getString("buffer_sec", "15"));
                 settingsObj.addProperty("osd_timeout_sec", playerPrefs.getString("osd_timeout_sec", "5000"));
                 settingsObj.addProperty("epg_position", playerPrefs.getString("epg_position", "bottom"));
+                settingsObj.addProperty("font_scale", prefs.getFloat("pref_font_scale", 1.0f));
 
                 // 4. Build PATCH payload
                 JsonObject payload = new JsonObject();
@@ -4866,13 +5249,16 @@ public class MainActivity extends AppCompatActivity {
                     pe.apply();
                 }
 
-                // 4. Update Header UI
+                final boolean fFavsChanged = favsChanged;
+                // 4. Update Header UI without detaching focused ViewHolders
                 runOnUiThread(() -> {
                     if (tvHeaderSyncInfo != null) {
                         tvHeaderSyncInfo.setText("☁️ " + cleanIdent + " (Synchronisé)");
                     }
-                    if (channelsAdapter != null) {
-                        channelsAdapter.notifyDataSetChanged();
+                    if (fFavsChanged && channelsAdapter != null) {
+                        for (KeoDatabase.ChannelItem item : channelsAdapter.items) {
+                            item.isFav = mergedFavs.contains(item.id);
+                        }
                     }
                 });
 
@@ -4888,6 +5274,11 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (prePlayerSnapshot != null) {
+            FocusSnapshot snap = prePlayerSnapshot;
+            prePlayerSnapshot = null;
+            restoreFocusSnapshot(snap);
+        }
         syncCloudSilently();
     }
 
@@ -4900,10 +5291,26 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    private String getFontScaleLabel(float scale) {
+        if (scale <= 0.90f) return "Petit (85%)";
+        if (scale >= 1.25f) return "Très grand (130%)";
+        if (scale >= 1.10f) return "Grand (115%)";
+        return "Normal (100%)";
+    }
+
     private void showSettingsDialog() {
+        showSettingsDialog(0);
+    }
+
+    private void showSettingsDialog(final int initialFocusIndex) {
         if (isFinishing() || isDestroyed()) return;
 
         try {
+            if (preSettingsSnapshot == null) {
+                preSettingsSnapshot = captureCurrentFocusSnapshot();
+            }
+            final boolean[] openingSubDialog = new boolean[]{false};
+
             final SharedPreferences prefs = getSharedPreferences("keotv_prefs", MODE_PRIVATE);
             final String cloudUser = prefs.getString("cloud_username", "");
             final boolean isCloudConnected = !cloudUser.isEmpty();
@@ -4947,16 +5354,16 @@ public class MainActivity extends AppCompatActivity {
             root.addView(header);
 
             TextView tvSub = new TextView(this);
-            tvSub.setText("Configuration du lecteur, synchronisation cloud et réglages système :");
+            tvSub.setText("Configuration du lecteur, taille des caractères, synchronisation cloud et réglages système :");
             tvSub.setTextSize(12f);
             tvSub.setTextColor(0xFF94A3B8);
             tvSub.setPadding(0, dpToPx(4), 0, dpToPx(12));
             root.addView(tvSub);
 
-            ScrollView sv = new ScrollView(this);
+            final ScrollView sv = new ScrollView(this);
             sv.setFocusable(false);
             sv.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
-            LinearLayout listContainer = new LinearLayout(this);
+            final LinearLayout listContainer = new LinearLayout(this);
             listContainer.setOrientation(LinearLayout.VERTICAL);
 
             final AlertDialog dialog = builder.setView(root).create();
@@ -4964,80 +5371,114 @@ public class MainActivity extends AppCompatActivity {
                 dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             }
 
-            // 1. Organiser les bouquets & chaînes (Custom order & visibility)
+            // 0. Organiser les bouquets & chaînes (Custom order & visibility)
+            final int idxOrganize = listContainer.getChildCount();
             listContainer.addView(createSettingsCard("📁", "Organiser les bouquets & chaînes",
                     "Réorganiser l'ordre d'affichage (▲/▼), masquer ou afficher des bouquets et chaînes", v -> {
+                        openingSubDialog[0] = true;
                         dialog.dismiss();
-                        showCategoryManagerDialog();
+                        showCategoryManagerDialog(idxOrganize);
+                    }));
+
+            // 1. Taille des caractères (Font Scale)
+            final int idxFontSize = listContainer.getChildCount();
+            final float currentFontScale = prefs.getFloat("pref_font_scale", 1.0f);
+            listContainer.addView(createSettingsCard("🔤", "Taille des caractères : " + getFontScaleLabel(currentFontScale),
+                    "Ajuster la taille du texte sur toute l'interface (Petit 85%, Normal 100%, Grand 115%, Très grand 130%)", v -> {
+                        openingSubDialog[0] = true;
+                        dialog.dismiss();
+                        showFontSizeDialog(idxFontSize);
                     }));
 
             // 2. Favoris en tête des bouquets
+            final int idxFavs = listContainer.getChildCount();
             final boolean showFavs = prefs.getBoolean("pref_show_favorites_category", true);
             listContainer.addView(createSettingsCard("⭐", "Favoris en tête des bouquets : " + (showFavs ? "ACTIVÉ" : "DÉSACTIVÉ"),
                     showFavs ? "Le bouquet ⭐ Favoris s'affiche au sommet • Cliquer pour masquer" : "Le bouquet ⭐ Favoris est masqué • Cliquer pour activer", v -> {
+                        openingSubDialog[0] = true;
                         dialog.dismiss();
                         prefs.edit().putBoolean("pref_show_favorites_category", !showFavs).apply();
                         loadLocalData();
                         Toast.makeText(this, !showFavs ? "Favoris en tête activés" : "Favoris en tête masqués", Toast.LENGTH_SHORT).show();
+                        showSettingsDialog(idxFavs);
                     }));
 
             // 3. Recommandations 'Pour vous' (VOD & Séries)
+            final int idxForYou = listContainer.getChildCount();
             final boolean showForYou = prefs.getBoolean("pref_show_for_you", true);
             listContainer.addView(createSettingsCard("✨", "Recommandations 'Pour vous' : " + (showForYou ? "ACTIVÉ" : "DÉSACTIVÉ"),
                     showForYou ? "Le bouquet ✨ Pour vous s'affiche en tête des films et séries • Cliquer pour masquer" : "Le bouquet ✨ Pour vous est masqué • Cliquer pour activer", v -> {
+                        openingSubDialog[0] = true;
                         dialog.dismiss();
                         prefs.edit().putBoolean("pref_show_for_you", !showForYou).apply();
                         loadLocalData();
                         Toast.makeText(this, !showForYou ? "Recommandations activées" : "Recommandations masquées", Toast.LENGTH_SHORT).show();
+                        showSettingsDialog(idxForYou);
                     }));
 
-            // 4. Dons & Feedback (restored pre-build 100)
+            // 4. Dons & Feedback
+            final int idxDonations = listContainer.getChildCount();
             listContainer.addView(createSettingsCard("💖", "Soutenir le projet & Avis / Feedback",
                     "Faire un don (GitHub Sponsors / PayPal) ou signaler un bug", v -> {
+                        openingSubDialog[0] = true;
                         dialog.dismiss();
-                        showDonationsAndFeedbackDialog();
+                        showDonationsAndFeedbackDialog(idxDonations);
                     }));
 
             // 5. Contrôle Parental
+            final int idxParental = listContainer.getChildCount();
             listContainer.addView(createSettingsCard("🛡️", "Contrôle Parental & Code PIN",
                     "Verrouiller ou déverrouiller l'accès aux bouquets adultes (PIN)", v -> {
+                        openingSubDialog[0] = true;
                         dialog.dismiss();
-                        showParentalControlDialog();
+                        showParentalControlDialog(idxParental);
                     }));
 
             // 6. Compte Cloud & Synchronisation
             if (isCloudConnected) {
+                final int idxCloudAcc = listContainer.getChildCount();
                 listContainer.addView(createSettingsCard("☁️", "Compte Cloud : " + cloudUser,
                         "Connecté • Synchronisation automatique TV & Mobile", v -> {
+                            openingSubDialog[0] = true;
                             dialog.dismiss();
-                            showCloudSyncDialog();
+                            showCloudSyncDialog(idxCloudAcc);
                         }));
+                final int idxCloudSyncNow = listContainer.getChildCount();
                 listContainer.addView(createSettingsCard("🔄", "Synchroniser maintenant",
                         "Fusionner immédiatement favoris, positions VOD et réglages avec le Cloud", v -> {
+                            openingSubDialog[0] = true;
                             dialog.dismiss();
                             Toast.makeText(this, "Synchronisation Cloud en cours...", Toast.LENGTH_SHORT).show();
                             syncCloudSilently();
+                            showSettingsDialog(idxCloudSyncNow);
                         }));
+                final int idxCloudLogout = listContainer.getChildCount();
                 listContainer.addView(createSettingsCard("🚪", "Déconnexion du compte Cloud",
                         "Déconnecter votre profil Cloud de cet appareil", v -> {
+                            openingSubDialog[0] = true;
                             dialog.dismiss();
                             prefs.edit().remove("cloud_username").remove("cloud_password").apply();
                             if (tvHeaderSyncInfo != null) tvHeaderSyncInfo.setText("");
                             Toast.makeText(this, "Compte Cloud déconnecté", Toast.LENGTH_SHORT).show();
+                            showSettingsDialog(Math.max(0, idxCloudLogout - 2));
                         }));
             } else {
+                final int idxCloudConnect = listContainer.getChildCount();
                 listContainer.addView(createSettingsCard("☁️", "Connecter un Compte Cloud",
                         "Synchronisez vos favoris, timecodes VOD et abonnements entre TV et Mobile", v -> {
+                            openingSubDialog[0] = true;
                             dialog.dismiss();
-                            showCloudSyncDialog();
+                            showCloudSyncDialog(idxCloudConnect);
                         }));
             }
 
             // 7. Lecteur Vidéo & Performances
+            final int idxPlayerSettings = listContainer.getChildCount();
             listContainer.addView(createSettingsCard("📺", "Lecteur Vidéo & Performances",
                     "Accélération matérielle GPU, moteur Media3 ExoPlayer, taille du tampon", v -> {
+                        openingSubDialog[0] = true;
                         dialog.dismiss();
-                        showPlayerSettingsDialog();
+                        showPlayerSettingsDialog(idxPlayerSettings);
                     }));
 
             // 8. Purge Cache
@@ -5058,10 +5499,12 @@ public class MainActivity extends AppCompatActivity {
                     }));
 
             // 10. Diagnostic Système
+            final int idxDiag = listContainer.getChildCount();
             listContainer.addView(createSettingsCard("📊", "Diagnostic & État du Système",
                     "Statistiques du catalogue, mémoire RAM et base SQLite", v -> {
+                        openingSubDialog[0] = true;
                         dialog.dismiss();
-                        showDiagnosticDialog();
+                        showDiagnosticDialog(idxDiag);
                     }));
 
             // 11. Réinitialisation Usine
@@ -5106,10 +5549,26 @@ public class MainActivity extends AppCompatActivity {
             closeLp.topMargin = dpToPx(10);
             root.addView(btnClose, closeLp);
 
+            dialog.setOnDismissListener(d -> {
+                if (!openingSubDialog[0]) {
+                    FocusSnapshot snap = preSettingsSnapshot;
+                    preSettingsSnapshot = null;
+                    if (snap != null) {
+                        restoreFocusSnapshot(snap);
+                    }
+                }
+            });
+
             dialog.setOnShowListener(d -> {
                 listContainer.post(() -> {
-                    if (listContainer.getChildCount() > 0) {
-                        listContainer.getChildAt(0).requestFocus();
+                    int count = listContainer.getChildCount();
+                    if (count > 0) {
+                        int idx = Math.max(0, Math.min(initialFocusIndex, count - 1));
+                        View target = listContainer.getChildAt(idx);
+                        if (target != null) {
+                            sv.smoothScrollTo(0, Math.max(0, target.getTop() - dpToPx(40)));
+                            target.requestFocus();
+                        }
                     }
                 });
             });
@@ -5117,6 +5576,143 @@ public class MainActivity extends AppCompatActivity {
         } catch (Throwable t) {
             Log.e(TAG, "Failed to show settings dialog", t);
         }
+    }
+
+    private void showFontSizeDialog(final int returnToSettingsIndex) {
+        if (isFinishing() || isDestroyed()) return;
+
+        final SharedPreferences prefs = getSharedPreferences("keotv_prefs", MODE_PRIVATE);
+        final float currentScale = prefs.getFloat("pref_font_scale", 1.0f);
+        final float[] scales = new float[]{0.85f, 1.0f, 1.15f, 1.30f};
+        final String[] titles = new String[]{
+                "Petit (85%)",
+                "Normal (100% — Par défaut)",
+                "Grand (115%)",
+                "Très grand (130%)"
+        };
+        final String[] subtitles = new String[]{
+                "Texte plus compact pour afficher plus d'informations à l'écran",
+                "Taille équilibrée recommandée pour la plupart des téléviseurs",
+                "Texte agrandi pour une lecture plus confortable à distance",
+                "Lisibilité maximale sur grand écran (bouquets, chaînes, EPG et fiches)"
+        };
+
+        final boolean[] applyingScale = new boolean[]{false};
+
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dpToPx(22), dpToPx(18), dpToPx(22), dpToPx(18));
+        root.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+
+        GradientDrawable rootBg = new GradientDrawable();
+        rootBg.setColor(0xFF0F172A);
+        rootBg.setCornerRadius(dpToPx(16));
+        rootBg.setStroke(dpToPx(1), 0xFF334155);
+        root.setBackground(rootBg);
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("🔤 TAILLE DES CARACTÈRES");
+        tvTitle.setTextSize(16.5f);
+        tvTitle.setTypeface(Typeface.DEFAULT_BOLD);
+        tvTitle.setTextColor(Color.WHITE);
+        root.addView(tvTitle);
+
+        TextView tvSub = new TextView(this);
+        tvSub.setText("Choisissez la taille d'affichage des textes dans toute l'application :");
+        tvSub.setTextSize(12f);
+        tvSub.setTextColor(0xFF94A3B8);
+        tvSub.setPadding(0, dpToPx(4), 0, dpToPx(12));
+        root.addView(tvSub);
+
+        final LinearLayout listContainer = new LinearLayout(this);
+        listContainer.setOrientation(LinearLayout.VERTICAL);
+
+        final AlertDialog dialog = builder.setView(root).create();
+        if (dialog.getWindow() != null) {
+            dialog.getWindow().setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
+        }
+
+        int activeIdx = 1;
+        for (int i = 0; i < scales.length; i++) {
+            if (Math.abs(currentScale - scales[i]) < 0.06f) {
+                activeIdx = i;
+                break;
+            }
+        }
+        final int initialIdx = activeIdx;
+
+        for (int i = 0; i < scales.length; i++) {
+            final float targetScale = scales[i];
+            final boolean isSelected = (i == initialIdx);
+            String icon = isSelected ? "✅" : "🔤";
+            View card = createSettingsCard(icon, titles[i], subtitles[i], v -> {
+                if (Math.abs(currentScale - targetScale) < 0.02f) {
+                    dialog.dismiss();
+                    return;
+                }
+                applyingScale[0] = true;
+                prefs.edit().putFloat("pref_font_scale", targetScale).apply();
+                pushAccountsToCloud(false);
+                Toast.makeText(MainActivity.this, "Taille des caractères : " + getFontScaleLabel(targetScale), Toast.LENGTH_SHORT).show();
+                if (preSettingsSnapshot != null) {
+                    restoredCategoryId = preSettingsSnapshot.categoryId;
+                    restoredChannelId = preSettingsSnapshot.channelId;
+                    lastValidFocusZone = preSettingsSnapshot.focusZone;
+                }
+                preSettingsSnapshot = null;
+                dialog.dismiss();
+                recreate();
+            });
+            listContainer.addView(card);
+        }
+
+        root.addView(listContainer);
+
+        TextView btnClose = new TextView(this);
+        btnClose.setText("Retour aux paramètres");
+        btnClose.setTextSize(13f);
+        btnClose.setTypeface(Typeface.DEFAULT_BOLD);
+        btnClose.setTextColor(0xFF94A3B8);
+        btnClose.setGravity(Gravity.CENTER);
+        btnClose.setPadding(dpToPx(16), dpToPx(10), dpToPx(16), dpToPx(10));
+        btnClose.setFocusable(true);
+        GradientDrawable closeBg = new GradientDrawable();
+        closeBg.setColor(0xFF1E293B);
+        closeBg.setCornerRadius(dpToPx(8));
+        btnClose.setBackground(closeBg);
+        btnClose.setOnClickListener(v -> dialog.dismiss());
+        btnClose.setOnFocusChangeListener((v, hasFocus) -> {
+            GradientDrawable d = (GradientDrawable) btnClose.getBackground();
+            if (hasFocus) {
+                d.setColor(0xFF334155);
+                d.setStroke(dpToPx(2), Color.WHITE);
+                btnClose.setTextColor(Color.WHITE);
+            } else {
+                d.setColor(0xFF1E293B);
+                d.setStroke(0, Color.TRANSPARENT);
+                btnClose.setTextColor(0xFF94A3B8);
+            }
+        });
+        LinearLayout.LayoutParams closeLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        closeLp.topMargin = dpToPx(10);
+        root.addView(btnClose, closeLp);
+
+        dialog.setOnDismissListener(d -> {
+            if (!applyingScale[0] && returnToSettingsIndex >= 0) {
+                showSettingsDialog(returnToSettingsIndex);
+            }
+        });
+
+        dialog.setOnShowListener(d -> {
+            listContainer.post(() -> {
+                if (initialIdx >= 0 && initialIdx < listContainer.getChildCount()) {
+                    listContainer.getChildAt(initialIdx).requestFocus();
+                }
+            });
+        });
+
+        dialog.show();
     }
 
     private View createSettingsCard(String icon, String title, String subtitle, View.OnClickListener onClick) {
@@ -5210,8 +5806,13 @@ public class MainActivity extends AppCompatActivity {
     private String activeManagerType = "live";
 
     private void showCategoryManagerDialog() {
+        showCategoryManagerDialog(-1);
+    }
+
+    private void showCategoryManagerDialog(final int returnToSettingsIndex) {
         if (isFinishing() || isDestroyed()) return;
 
+        final FocusSnapshot snap = returnToSettingsIndex < 0 ? captureCurrentFocusSnapshot() : null;
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -5313,7 +5914,14 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        dialog.setOnDismissListener(d -> loadLocalData());
+        dialog.setOnDismissListener(d -> {
+            loadLocalData();
+            if (returnToSettingsIndex >= 0) {
+                showSettingsDialog(returnToSettingsIndex);
+            } else if (snap != null) {
+                restoreFocusSnapshot(snap);
+            }
+        });
 
         // Refresh List logic
         final Runnable refreshList = new Runnable() {
@@ -5669,8 +6277,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showDonationsAndFeedbackDialog() {
+        showDonationsAndFeedbackDialog(-1);
+    }
+
+    private void showDonationsAndFeedbackDialog(final int returnToSettingsIndex) {
         if (isFinishing() || isDestroyed()) return;
 
+        final FocusSnapshot snap = returnToSettingsIndex < 0 ? captureCurrentFocusSnapshot() : null;
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -5829,6 +6442,13 @@ public class MainActivity extends AppCompatActivity {
         closeLp.topMargin = dpToPx(12);
         root.addView(btnClose, closeLp);
 
+        dialog.setOnDismissListener(d -> {
+            if (returnToSettingsIndex >= 0) {
+                showSettingsDialog(returnToSettingsIndex);
+            } else if (snap != null) {
+                restoreFocusSnapshot(snap);
+            }
+        });
         dialog.show();
     }
 
@@ -5872,9 +6492,15 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void showParentalControlDialog() {
+        showParentalControlDialog(-1);
+    }
+
+    private void showParentalControlDialog(final int returnToSettingsIndex) {
         if (isFinishing() || isDestroyed()) return;
+        final FocusSnapshot snap = returnToSettingsIndex < 0 ? captureCurrentFocusSnapshot() : null;
         final String savedPin = db.getSetting("parental_pin", "0000");
         final boolean isLocked = "true".equals(db.getSetting("parental_locked", "false"));
+        final boolean[] openingPinDialog = new boolean[]{false};
 
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
@@ -5892,7 +6518,7 @@ public class MainActivity extends AppCompatActivity {
         etPin.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         layout.addView(etPin);
 
-        new AlertDialog.Builder(this)
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("🛡️ Contrôle Parental")
                 .setView(layout)
                 .setPositiveButton(isLocked ? "Déverrouiller" : "Verrouiller", (d, w) -> {
@@ -5906,12 +6532,28 @@ public class MainActivity extends AppCompatActivity {
                         Toast.makeText(this, "Code PIN incorrect !", Toast.LENGTH_LONG).show();
                     }
                 })
-                .setNeutralButton("Changer le PIN", (d, w) -> showChangePinDialog())
+                .setNeutralButton("Changer le PIN", (d, w) -> {
+                    openingPinDialog[0] = true;
+                    showChangePinDialog(returnToSettingsIndex);
+                })
                 .setNegativeButton("Annuler", null)
-                .show();
+                .create();
+        dialog.setOnDismissListener(d -> {
+            if (openingPinDialog[0]) return;
+            if (returnToSettingsIndex >= 0) {
+                showSettingsDialog(returnToSettingsIndex);
+            } else if (snap != null) {
+                restoreFocusSnapshot(snap);
+            }
+        });
+        dialog.show();
     }
 
     private void showChangePinDialog() {
+        showChangePinDialog(-1);
+    }
+
+    private void showChangePinDialog(final int returnToSettingsIndex) {
         if (isFinishing() || isDestroyed()) return;
         final String savedPin = db.getSetting("parental_pin", "0000");
 
@@ -5929,7 +6571,7 @@ public class MainActivity extends AppCompatActivity {
         etNew.setInputType(InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_VARIATION_PASSWORD);
         layout.addView(etNew);
 
-        new AlertDialog.Builder(this)
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("Modifier le Code PIN Parental")
                 .setView(layout)
                 .setPositiveButton("Enregistrer", (d, w) -> {
@@ -5947,45 +6589,76 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(this, "Code PIN mis à jour avec succès !", Toast.LENGTH_LONG).show();
                 })
                 .setNegativeButton("Annuler", null)
-                .show();
+                .create();
+        dialog.setOnDismissListener(d -> {
+            if (returnToSettingsIndex >= 0) {
+                showParentalControlDialog(returnToSettingsIndex);
+            }
+        });
+        dialog.show();
     }
 
     private void showPlayerSettingsDialog() {
+        showPlayerSettingsDialog(-1);
+    }
+
+    private void showPlayerSettingsDialog(final int returnToSettingsIndex) {
         if (isFinishing() || isDestroyed()) return;
+        final FocusSnapshot snap = returnToSettingsIndex < 0 ? captureCurrentFocusSnapshot() : null;
         final SharedPreferences prefs = getSharedPreferences("keotv_player_prefs", MODE_PRIVATE);
         boolean hwAccel = prefs.getBoolean("hw_accel", true);
         String bufferSize = prefs.getString("buffer_sec", "15");
+        final boolean[] openingBufferDialog = new boolean[]{false};
 
         String[] options = {
                 "Accélération Matérielle : " + (hwAccel ? "✅ Activée" : "❌ Désactivée"),
                 "Tampon de diffusion : " + bufferSize + " secondes (Recommandé: 15s)"
         };
 
-        new AlertDialog.Builder(this)
+        AlertDialog dialog = new AlertDialog.Builder(this)
                 .setTitle("📺 Préférences Lecteur Vidéo (Media3 ExoPlayer)")
                 .setItems(options, (d, which) -> {
                     if (which == 0) {
                         prefs.edit().putBoolean("hw_accel", !hwAccel).apply();
                         Toast.makeText(this, "Accélération matérielle : " + (!hwAccel ? "Activée" : "Désactivée"), Toast.LENGTH_SHORT).show();
                     } else if (which == 1) {
+                        openingBufferDialog[0] = true;
                         String[] buffers = {"5 secondes (Faible latence)", "15 secondes (Standard)", "30 secondes (Connexion lente)"};
-                        new AlertDialog.Builder(this)
+                        AlertDialog bDialog = new AlertDialog.Builder(this)
                                 .setTitle("Taille du Tampon Vidéo")
                                 .setItems(buffers, (bd, bw) -> {
                                     String val = bw == 0 ? "5" : (bw == 1 ? "15" : "30");
                                     prefs.edit().putString("buffer_sec", val).apply();
                                     Toast.makeText(this, "Tampon défini à " + val + " secondes", Toast.LENGTH_SHORT).show();
-                                }).show();
+                                })
+                                .setNegativeButton("Retour", null)
+                                .create();
+                        bDialog.setOnDismissListener(bd -> showPlayerSettingsDialog(returnToSettingsIndex));
+                        bDialog.show();
                     }
                 })
                 .setNegativeButton("Fermer", null)
-                .show();
+                .create();
+        dialog.setOnDismissListener(d -> {
+            if (openingBufferDialog[0]) return;
+            if (returnToSettingsIndex >= 0) {
+                showSettingsDialog(returnToSettingsIndex);
+            } else if (snap != null) {
+                restoreFocusSnapshot(snap);
+            }
+        });
+        dialog.show();
     }
 
     private void showDiagnosticDialog() {
+        showDiagnosticDialog(-1);
+    }
+
+    private void showDiagnosticDialog(final int returnToSettingsIndex) {
         if (isFinishing() || isDestroyed()) return;
 
         try {
+            final FocusSnapshot snap = returnToSettingsIndex < 0 ? captureCurrentFocusSnapshot() : null;
             int liveCount = db.getChannelCount("live");
             int vodCount = db.getChannelCount("vod");
             int seriesCount = db.getChannelCount("series");
@@ -6009,17 +6682,31 @@ public class MainActivity extends AppCompatActivity {
             msg.append("• Dernière synchronisation : ").append(pl != null ? pl.lastSyncAt : "Jamais").append("\n");
             msg.append("• Mémoire RAM : ").append(usedMb).append(" Mo / ").append(maxMb).append(" Mo\n");
 
-            new AlertDialog.Builder(this)
+            final boolean[] suppressRestore = new boolean[]{false};
+            AlertDialog dialog = new AlertDialog.Builder(this)
                     .setTitle("Diagnostic KeoTV")
                     .setMessage(msg.toString())
                     .setPositiveButton("Fermer", null)
-                    .setNeutralButton("Purger Cache TV", (dialog, which) -> {
+                    .setNeutralButton("Purger Cache TV", (d, which) -> {
+                        suppressRestore[0] = true;
                         db.purgeCache(true);
                         loadLocalData();
                         triggerSync();
                     })
-                    .setNegativeButton("Réinitialisation Usine", (dialog, which) -> performFactoryReset())
-                    .show();
+                    .setNegativeButton("Réinitialisation Usine", (d, which) -> {
+                        suppressRestore[0] = true;
+                        performFactoryReset();
+                    })
+                    .create();
+            dialog.setOnDismissListener(d -> {
+                if (suppressRestore[0]) return;
+                if (returnToSettingsIndex >= 0) {
+                    showSettingsDialog(returnToSettingsIndex);
+                } else if (snap != null) {
+                    restoreFocusSnapshot(snap);
+                }
+            });
+            dialog.show();
         } catch (Throwable t) {
             Log.e(TAG, "Failed to show diagnostic dialog", t);
         }
@@ -6061,6 +6748,7 @@ public class MainActivity extends AppCompatActivity {
         if (isFinishing() || isDestroyed()) return;
 
         try {
+            final FocusSnapshot snap = captureCurrentFocusSnapshot();
             KeoDatabase.PlaylistItem pl = db.getActivePlaylist();
             LinearLayout layout = new LinearLayout(this);
             layout.setOrientation(LinearLayout.VERTICAL);
@@ -6082,10 +6770,11 @@ public class MainActivity extends AppCompatActivity {
             etPass.setText(pl != null ? pl.password : "");
             layout.addView(etPass);
 
-            new AlertDialog.Builder(this)
+            final boolean[] suppressRestore = new boolean[]{false};
+            AlertDialog dialog = new AlertDialog.Builder(this)
                     .setTitle("Configuration du Compte IPTV")
                     .setView(layout)
-                    .setPositiveButton("Enregistrer & Synchro", (dialog, which) -> {
+                    .setPositiveButton("Enregistrer & Synchro", (d, which) -> {
                         String url = etUrl.getText().toString().trim();
                         String user = etUser.getText().toString().trim();
                         String pass = etPass.getText().toString().trim();
@@ -6107,9 +6796,18 @@ public class MainActivity extends AppCompatActivity {
                         updateHeaderPlaylistInfo(item);
                         triggerSync();
                     })
-                    .setNeutralButton("☁️ Portail Cloud", (dialog, which) -> showCloudSyncDialog())
+                    .setNeutralButton("☁️ Portail Cloud", (d, which) -> {
+                        suppressRestore[0] = true;
+                        showCloudSyncDialog();
+                    })
                     .setNegativeButton("Annuler", null)
-                    .show();
+                    .create();
+            dialog.setOnDismissListener(d -> {
+                if (!suppressRestore[0] && snap != null) {
+                    restoreFocusSnapshot(snap);
+                }
+            });
+            dialog.show();
         } catch (Throwable t) {
             Log.e(TAG, "Failed to show login dialog", t);
         }
@@ -6203,21 +6901,30 @@ public class MainActivity extends AppCompatActivity {
         public void setSelectedPos(int pos) {
             int old = this.selectedPos;
             this.selectedPos = pos;
-            if (old >= 0 && old < items.size()) notifyItemChanged(old);
-            if (pos >= 0 && pos < items.size() && pos != old) notifyItemChanged(pos);
+            if (recyclerCategories != null) {
+                if (old >= 0 && old != pos) {
+                    RecyclerView.ViewHolder oldVh = recyclerCategories.findViewHolderForAdapterPosition(old);
+                    if (oldVh != null) oldVh.itemView.setSelected(false);
+                }
+                if (pos >= 0) {
+                    RecyclerView.ViewHolder newVh = recyclerCategories.findViewHolderForAdapterPosition(pos);
+                    if (newVh != null) newVh.itemView.setSelected(true);
+                }
+            }
         }
 
         @NonNull
         @Override
         public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_category, parent, false);
+            v.setMinimumHeight(dpToPx(40));
             if (parent instanceof RecyclerView) {
                 RecyclerView.LayoutManager lm = ((RecyclerView) parent).getLayoutManager();
                 if (lm != null && lm.canScrollHorizontally()) {
                     ViewGroup.LayoutParams lp = v.getLayoutParams();
                     if (lp != null) {
                         lp.width = ViewGroup.LayoutParams.WRAP_CONTENT;
-                        lp.height = dpToPx(40);
+                        lp.height = ViewGroup.LayoutParams.WRAP_CONTENT;
                         v.setLayoutParams(lp);
                     }
                 }
@@ -6235,7 +6942,7 @@ public class MainActivity extends AppCompatActivity {
             holder.itemView.setOnClickListener(v -> {
                 int pos = holder.getBindingAdapterPosition();
                 if (pos != RecyclerView.NO_POSITION) {
-                    selectedPos = pos;
+                    setSelectedPos(pos);
                     pendingCategoryToLoad = null;
                     mainHandler.removeCallbacks(categoryDebounceRunnable);
                     wantFocusChannelsOnCategoryLoad = true;
@@ -6247,7 +6954,7 @@ public class MainActivity extends AppCompatActivity {
                 if (hasFocus) {
                     int pos = holder.getBindingAdapterPosition();
                     if (pos != RecyclerView.NO_POSITION) {
-                        selectedPos = pos;
+                        setSelectedPos(pos);
                         selectCategoryDebounced(item);
                     }
                 }
@@ -6377,8 +7084,17 @@ public class MainActivity extends AppCompatActivity {
         public void setSelectedPos(int pos) {
             int old = this.selectedPos;
             this.selectedPos = pos;
-            if (old >= 0 && old < items.size()) notifyItemChanged(old);
-            if (pos >= 0 && pos < items.size() && pos != old) notifyItemChanged(pos);
+            RecyclerView rv = getTargetRecyclerView();
+            if (rv != null) {
+                if (old >= 0 && old != pos) {
+                    RecyclerView.ViewHolder oldVh = rv.findViewHolderForAdapterPosition(old);
+                    if (oldVh != null) oldVh.itemView.setSelected(false);
+                }
+                if (pos >= 0) {
+                    RecyclerView.ViewHolder newVh = rv.findViewHolderForAdapterPosition(pos);
+                    if (newVh != null) newVh.itemView.setSelected(true);
+                }
+            }
         }
 
         public List<KeoDatabase.ChannelItem> getItems() {
@@ -6470,7 +7186,7 @@ public class MainActivity extends AppCompatActivity {
                     if (hasFocus) {
                         int pos = holder.getBindingAdapterPosition();
                         if (pos != RecyclerView.NO_POSITION) {
-                            selectedPos = pos;
+                            setSelectedPos(pos);
                             selectChannel(item);
                             updateVodHeroBanner(item, pos, items.size());
                         }
@@ -6574,8 +7290,10 @@ public class MainActivity extends AppCompatActivity {
 
                     holder.itemView.setOnFocusChangeListener((v, hasFocus) -> {
                         if (hasFocus) {
-                            holder.itemView.setSelected(true);
-                            selectedPos = holder.getBindingAdapterPosition();
+                            int pos = holder.getBindingAdapterPosition();
+                            if (pos != RecyclerView.NO_POSITION) {
+                                setSelectedPos(pos);
+                            }
                             selectChannel(item);
                             if (!holder.isTimelineMode) {
                                 XtreamClient.EpgProgram cur = getCurrentProgram(item);
@@ -6717,8 +7435,10 @@ public class MainActivity extends AppCompatActivity {
                     }
                     holder.itemView.setOnFocusChangeListener((v, hasFocus) -> {
                         if (hasFocus) {
-                            holder.itemView.setSelected(true);
-                            selectedPos = holder.getBindingAdapterPosition();
+                            int pos = holder.getBindingAdapterPosition();
+                            if (pos != RecyclerView.NO_POSITION) {
+                                setSelectedPos(pos);
+                            }
                             selectChannel(item);
                         }
                     });
@@ -7124,8 +7844,17 @@ public class MainActivity extends AppCompatActivity {
                     if (etGlobalSearch != null) etGlobalSearch.requestFocus();
                     return true;
                 }
+                stopContinuousBackspace();
+                if (preSearchSnapshot != null && !"search".equals(preSearchSnapshot.section)) {
+                    FocusSnapshot snap = preSearchSnapshot;
+                    preSearchSnapshot = null;
+                    restoredCategoryId = snap.categoryId;
+                    restoredChannelId = snap.channelId;
+                    pendingPostLoadFocusZone = snap.focusZone;
+                    switchSection(snap.section);
+                    return true;
+                }
                 if (etGlobalSearch != null && etGlobalSearch.hasFocus()) {
-                    stopContinuousBackspace();
                     focusActiveSidebarButton();
                     return true;
                 }
@@ -7161,6 +7890,7 @@ public class MainActivity extends AppCompatActivity {
     protected void onSaveInstanceState(@NonNull Bundle outState) {
         super.onSaveInstanceState(outState);
         outState.putString("saved_current_type", currentType);
+        outState.putString("saved_focus_zone", lastValidFocusZone);
         if (selectedCategory != null) {
             outState.putString("saved_category_id", selectedCategory.id);
         }
