@@ -7290,9 +7290,9 @@ public class MainActivity extends AppCompatActivity {
 
                     holder.itemView.setOnFocusChangeListener((v, hasFocus) -> {
                         if (hasFocus) {
-                            int pos = holder.getBindingAdapterPosition();
-                            if (pos != RecyclerView.NO_POSITION) {
-                                setSelectedPos(pos);
+                            int curPos = holder.getBindingAdapterPosition();
+                            if (curPos != RecyclerView.NO_POSITION) {
+                                setSelectedPos(curPos);
                             }
                             selectChannel(item);
                             if (!holder.isTimelineMode) {
@@ -7435,9 +7435,9 @@ public class MainActivity extends AppCompatActivity {
                     }
                     holder.itemView.setOnFocusChangeListener((v, hasFocus) -> {
                         if (hasFocus) {
-                            int pos = holder.getBindingAdapterPosition();
-                            if (pos != RecyclerView.NO_POSITION) {
-                                setSelectedPos(pos);
+                            int curPos = holder.getBindingAdapterPosition();
+                            if (curPos != RecyclerView.NO_POSITION) {
+                                setSelectedPos(curPos);
                             }
                             selectChannel(item);
                         }
