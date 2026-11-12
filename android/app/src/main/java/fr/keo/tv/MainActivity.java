@@ -1719,7 +1719,7 @@ public class MainActivity extends AppCompatActivity {
                     long now = System.currentTimeMillis();
                     boolean intentional = (now - lastIntentionalSidebarFocusMs < 350L)
                             || "sidebar".equals(oldZone)
-                            || (oldFocus != null && oldFocus.getId() == R.id.btn_header_sync);
+                            || "header".equals(oldZone);
                     if (!intentional && !"sidebar".equals(lastValidFocusZone)) {
                         isRestoringFocusGuard = true;
                         try {
